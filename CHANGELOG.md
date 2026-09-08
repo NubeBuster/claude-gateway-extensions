@@ -27,3 +27,6 @@
   display reuse the same parser and field. A bare number other than `0` is
   rejected rather than guessed at, and disabling a session clears its
   deadline, so re-enabling without one falls back to the max duration.
+- `/cache` deadlines also accept weekday names and abbreviations
+  (`wed`/`wednesday`/`we`, `fri 9AM`, `tu 21:00`), case-insensitive,
+  resolving to the next local occurrence of that weekday.

@@ -4,7 +4,9 @@
 grammar (case-insensitive, whitespace-tolerant): the empty string or
 ``status``; ``bump``; ``off``/``0``; a relative duration (``2h``, ``2d 4h``);
 a bare clock time (``9PM``, ``21:00``, ``noon``); ``today``/``tomorrow``
-plus an optional clock time; or an ISO ``YYYY-MM-DD[ HH:MM[:SS]]`` date.
+plus an optional clock time; a weekday name or abbreviation (``wed``,
+``wednesday``) plus an optional clock time; or an ISO
+``YYYY-MM-DD[ HH:MM[:SS]]`` date.
 Everything that resolves to an absolute deadline comes back as an ``At``
 with a timezone-aware, minute-truncated :class:`datetime.datetime`; the hook
 and the CLI both call this instead of hand-rolling the grammar twice.
@@ -21,13 +23,43 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from datetime import time as dt_time
 
-_HINT = "try 2h, 9PM, tomorrow 10AM, 2026-12-31 08:00, off, bump"
+_HINT = "try 2h, 9PM, tomorrow 10AM, fri 9AM, 2026-12-31 08:00, off, bump"
 
 _DURATION_TOKEN_RE = re.compile(r"(\d+)\s*(day|d|hr|h|min|m)")
 _DURATION_UNIT_SECONDS = {"d": 86400, "day": 86400, "h": 3600, "hr": 3600, "m": 60, "min": 60}
 
 _CLOCK_RE = re.compile(r"^(\d{1,2})(?::(\d{2})(?::\d{2})?)?\s*(am|pm)?$")
 _NAMED_CLOCKS = {"noon": dt_time(12, 0), "midnight": dt_time(0, 0), "teatime": dt_time(16, 0)}
+
+#: ``date.weekday()`` numbering: Monday=0 .. Sunday=6. Three spellings, all
+#: case-insensitive (the caller already lowercases): two-letter, three-letter
+#: (plus the non-truncating ``tues``/``thur``/``thurs``), and full names.
+_WEEKDAY_NAMES = {
+    "mo": 0,
+    "tu": 1,
+    "we": 2,
+    "th": 3,
+    "fr": 4,
+    "sa": 5,
+    "su": 6,
+    "mon": 0,
+    "tue": 1,
+    "wed": 2,
+    "thu": 3,
+    "fri": 4,
+    "sat": 5,
+    "sun": 6,
+    "tues": 1,
+    "thur": 3,
+    "thurs": 3,
+    "monday": 0,
+    "tuesday": 1,
+    "wednesday": 2,
+    "thursday": 3,
+    "friday": 4,
+    "saturday": 5,
+    "sunday": 6,
+}
 
 _ISO_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})(?:[ t](\d{2}:\d{2})(?::\d{2})?)?$")
 _UNSUPPORTED_DATE_RE = re.compile(r"^\d{1,4}[/.]\d{1,2}[/.]\d{1,4}$")
@@ -117,6 +149,16 @@ def _parse_deadline(original: str, lowered: str, now: datetime) -> datetime:
             raise _in_the_past(original)
         return candidate
 
+    weekday_match = _try_parse_weekday(lowered)
+    if weekday_match is not None:
+        weekday, rest = weekday_match
+        clock = None
+        if rest:
+            clock = _try_parse_clock(rest)
+            if clock is None:
+                raise WhenError(f"{rest!r}: {_HINT}")
+        return _resolve_weekday(weekday, clock, now)
+
     iso = _try_parse_iso(lowered, now)
     if iso is not None:
         if iso <= now:
@@ -195,6 +237,35 @@ def _try_parse_duration(lowered: str) -> timedelta | None:
     if not matched_any:
         return None
     return timedelta(seconds=total_seconds)
+
+
+def _try_parse_weekday(lowered: str) -> tuple[int, str] | None:
+    """Parse a leading weekday name/abbreviation and return ``(weekday, rest)``.
+
+    ``weekday`` follows :meth:`datetime.date.weekday` numbering (Monday=0).
+    ``rest`` is whatever followed the weekday token, unparsed and possibly
+    empty; ``None`` if the first token isn't a weekday name at all.
+    """
+    first, _, rest = lowered.partition(" ")
+    weekday = _WEEKDAY_NAMES.get(first)
+    if weekday is None:
+        return None
+    return weekday, rest.strip()
+
+
+def _resolve_weekday(weekday: int, clock: dt_time | None, now: datetime) -> datetime:
+    """Resolve a weekday (plus optional clock) to its next local occurrence.
+
+    Today counts only if ``clock`` (or, lacking one, the current time of
+    day) is still ahead of ``now``; otherwise it rolls to the same weekday
+    next week, matching the bare-clock/``today`` rollover rules above.
+    """
+    days_ahead = (weekday - now.weekday()) % 7
+    target_clock = clock if clock is not None else dt_time(now.hour, now.minute)
+    candidate = _combine(_add_days(now.date(), days_ahead), target_clock, now)
+    if candidate <= now:
+        candidate = _combine(_add_days(now.date(), days_ahead + 7), target_clock, now)
+    return candidate
 
 
 def _try_parse_clock(lowered: str) -> dt_time | None:

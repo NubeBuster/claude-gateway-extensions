@@ -87,6 +87,7 @@ The deadline you provide is validated and you are given back the resolved time i
 | Ambiguous time    | `4:20` - is that 4:20PM or AM?                                  | resolves to soonest                                  |
 | Named time        | `morning`, `noon`, `teatime`, `dinner`, `nighttime`, `midnight` | `09:00`, `12:00`, `16:00`, `18:00`, `22:00`, `00:00` |
 | Relative day      | `tomorrow 10AM`, `today 6PM`                                    | at that time (`tomorrow` alone = 24 hours from now)  |
+| Weekday           | `wed noon`, `fri 9AM`, `mo`, `tues`, `sunday`                   | the weekday's next occurrence, at that time if given |
 | Absolute date     | `2026-12-31 08:00`                                              | local ISO 8601 date and time                         |
 
 A deadline already in the past, or an unsupported date format such as `4/20/2027`,

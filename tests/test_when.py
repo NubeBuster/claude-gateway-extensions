@@ -195,6 +195,113 @@ def test_iso_seconds_are_truncated() -> None:
     assert result == At(_at(2026, 12, 31, 8, 0))
 
 
+# -- weekday names -------------------------------------------------------
+
+
+@pytest.mark.parametrize("text", ["we", "wed", "wednesday", "WE", "Wed", "WEDNESDAY"])
+def test_weekday_spellings_are_equivalent(text: str) -> None:
+    """2026-09-08 is a Tuesday; every spelling of Wednesday resolves the same."""
+    now = _at(2026, 9, 8, 8, 0)
+    result = parse_when(text, now)
+    assert result == At(_at(2026, 9, 9, 8, 0))
+
+
+@pytest.mark.parametrize(
+    ("text", "weekday"),
+    [
+        ("mo", 0), ("tu", 1), ("we", 2), ("th", 3), ("fr", 4), ("sa", 5), ("su", 6),
+        ("mon", 0), ("tue", 1), ("wed", 2), ("thu", 3), ("fri", 4), ("sat", 5), ("sun", 6),
+        ("tues", 1), ("thur", 3), ("thurs", 3),
+        ("monday", 0), ("tuesday", 1), ("wednesday", 2), ("thursday", 3),
+        ("friday", 4), ("saturday", 5), ("sunday", 6),
+    ],
+)  # fmt: skip
+def test_every_weekday_spelling_resolves_to_its_weekday(text: str, weekday: int) -> None:
+    now = _at(2026, 9, 8, 8, 0)  # a Tuesday
+    result = parse_when(text, now)
+    assert isinstance(result, At)
+    assert result.when.weekday() == weekday
+    assert now < result.when <= now + timedelta(days=7)
+
+
+def test_weekday_alone_uses_current_time_of_day() -> None:
+    now = _at(2026, 9, 8, 14, 30)  # Tuesday
+    result = parse_when("friday", now)
+    assert result == At(_at(2026, 9, 11, 14, 30))
+
+
+def test_weekday_with_named_clock() -> None:
+    now = _at(2026, 9, 8, 8, 0)  # Tuesday
+    result = parse_when("wed noon", now)
+    assert result == At(_at(2026, 9, 9, 12, 0))
+
+
+def test_weekday_with_numeric_clock() -> None:
+    now = _at(2026, 9, 8, 8, 0)  # Tuesday
+    result = parse_when("friday 9AM", now)
+    assert result == At(_at(2026, 9, 11, 9, 0))
+
+
+def test_weekday_two_letter_with_24h_clock() -> None:
+    now = _at(2026, 9, 8, 8, 0)  # Tuesday
+    result = parse_when("tu 21:00", now)
+    assert result == At(_at(2026, 9, 8, 21, 0))
+
+
+def test_weekday_today_with_clock_still_ahead_resolves_today() -> None:
+    now = _at(2026, 9, 8, 8, 0)  # Tuesday
+    result = parse_when("tuesday 9PM", now)
+    assert result == At(_at(2026, 9, 8, 21, 0))
+
+
+def test_weekday_today_with_clock_already_passed_rolls_to_next_week() -> None:
+    now = _at(2026, 9, 8, 22, 0)  # Tuesday
+    result = parse_when("tuesday 9PM", now)
+    assert result == At(_at(2026, 9, 15, 21, 0))
+
+
+def test_weekday_today_no_clock_at_exact_now_rolls_to_next_week() -> None:
+    """No clock means 'now', and now is never still ahead of itself."""
+    now = _at(2026, 9, 8, 10, 0)  # Tuesday
+    result = parse_when("tu", now)
+    assert result == At(_at(2026, 9, 15, 10, 0))
+
+
+def test_weekday_other_day_rolls_to_this_week() -> None:
+    now = _at(2026, 9, 8, 8, 0)  # Tuesday
+    result = parse_when("thursday", now)
+    assert result == At(_at(2026, 9, 10, 8, 0))
+
+
+def test_weekday_week_rollover_past_sunday() -> None:
+    now = _at(2026, 9, 12, 8, 0)  # Saturday
+    result = parse_when("mo", now)
+    assert result == At(_at(2026, 9, 14, 8, 0))
+
+
+def test_weekday_across_amsterdam_dst_week() -> None:
+    """2026-03-29 is the Amsterdam spring-forward Sunday; typed the Monday before."""
+    now = _at(2026, 3, 23, 8, 0, tz=_AMS)  # Monday, before the DST week
+    assert now.utcoffset() == timedelta(hours=1)
+    result = parse_when("su 09:00", now)
+    assert isinstance(result, At)
+    assert result.when == _at(2026, 3, 29, 9, 0, tz=_AMS)
+    assert result.when.utcoffset() == timedelta(hours=2)
+
+
+def test_weekday_invalid_clock_gives_a_hint() -> None:
+    now = _at(2026, 9, 8, 8, 0)
+    with pytest.raises(WhenError, match="try 2h, 9PM, tomorrow 10AM"):
+        parse_when("wed dinner", now)
+
+
+@pytest.mark.parametrize("text", ["morning", "dinner", "evening"])
+def test_period_and_meal_words_are_rejected(text: str) -> None:
+    now = _at(2026, 9, 8, 8, 0)
+    with pytest.raises(WhenError, match="try 2h, 9PM, tomorrow 10AM"):
+        parse_when(text, now)
+
+
 # -- DST transitions ---------------------------------------------------------
 
 
