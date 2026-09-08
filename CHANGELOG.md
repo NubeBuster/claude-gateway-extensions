@@ -87,3 +87,16 @@
   `pytest` directly; the daemon's `tzdata` runtime dependency is
   Windows-only (`zoneinfo` needs it there, `aiohttp` is still the only
   dependency everywhere else).
+- Graceful shutdown: `SIGTERM`/`SIGINT` now close the listener immediately
+  and drain in-flight requests (including SSE streams) for up to
+  `CGX_DRAIN_TIMEOUT_S` (default 600) instead of dropping them; no new bump
+  starts once draining begins, and a second shutdown signal forces an
+  immediate exit. `GET /cgx/health` answers `503 {"status": "draining"}`
+  during that window. The listener binds with `SO_REUSEPORT` on Linux/macOS,
+  and `cgx serve --handover` uses it for a zero-gap manual upgrade (binds
+  alongside the running daemon, waits for its own health check, then signals
+  the old one via a new `<state dir>/daemon.pid`). `cgx service install`
+  now writes `TimeoutStopSec`/`KillMode=mixed` into the systemd unit so
+  `systemctl --user restart`/the new `cgx service restart` drain in place
+  instead of killing the daemon mid-request; existing installs see the diff
+  on the next `cgx service install`.

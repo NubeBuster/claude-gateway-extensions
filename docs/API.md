@@ -21,6 +21,18 @@ Response `200`:
 {"ok": true, "version": "0.1.0", "upstream": "https://api.anthropic.com", "sessions": 2}
 ```
 
+Response `503`, once a shutdown signal has put the daemon into its drain
+window (see "Graceful shutdown" below):
+
+```json
+{"status": "draining"}
+```
+
+A brand-new connection is refused outright once draining starts (the
+listener is closed immediately), so this `503` is only ever seen by a client
+that already had a connection open — the request line itself still resolves
+just fine, only the shape of the answer changes.
+
 ## GET /cgx/sessions
 
 Status for every session the daemon currently knows about.
@@ -148,6 +160,19 @@ bump timer. Idempotent; deleting an unknown (but well-formed) id still
 returns `204`.
 
 Status codes: `204` on success, `400` on an invalid id.
+
+## Graceful shutdown
+
+`SIGTERM` or `SIGINT` (what `systemctl --user stop`, `cgx service restart`
+and `Ctrl-C` all send) starts a drain instead of stopping the daemon
+immediately: the listener closes at once (no new connections), every
+in-flight request — including a long SSE stream — is given up to
+`CGX_DRAIN_TIMEOUT_S` (default 600) to finish, no new scheduled bump starts
+during the drain, and the daemon then exits `0`. A second shutdown signal
+received while still draining cuts the wait short. See `docs/DESIGN.md`'s
+"Drain plus `SO_REUSEPORT`..." decision for the full rationale, including
+`cgx serve --handover` and the systemd unit's `TimeoutStopSec`/
+`KillMode=mixed`.
 
 ## Integrating
 

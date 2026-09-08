@@ -8,6 +8,7 @@ import json
 import pytest
 from aiohttp import web
 
+from claude_gateway_extensions.server.keys import DRAIN_STATE_KEY
 from conftest import ServerHarness
 
 #: A deadline far enough ahead that the scheduler never reaches it mid-test
@@ -22,6 +23,13 @@ async def test_health(harness: ServerHarness) -> None:
     assert data["ok"] is True
     assert isinstance(data["version"], str)
     assert data["sessions"] == 0
+
+
+async def test_health_returns_503_while_draining(harness: ServerHarness) -> None:
+    harness.app[DRAIN_STATE_KEY].draining = True
+    resp = await harness.client.get("/cgx/health")
+    assert resp.status == 503
+    assert await resp.json() == {"status": "draining"}
 
 
 async def test_get_unknown_session_404(harness: ServerHarness) -> None:

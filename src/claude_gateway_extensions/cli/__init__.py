@@ -111,7 +111,11 @@ def _cmd_serve(args: argparse.Namespace, config: Config, ctx: _Context) -> int:
     Imported lazily so every other subcommand works without ``aiohttp`` (or
     the server package, which may not exist yet during CLI-only development)
     ever being imported. ``--port``/``--host`` override whatever
-    ``CGX_PORT``/``CGX_HOST`` resolved to from the environment.
+    ``CGX_PORT``/``CGX_HOST`` resolved to from the environment. ``--handover``
+    binds alongside (not instead of) an already-running daemon via
+    ``SO_REUSEPORT`` and asks it to step aside once this process is healthy —
+    a zero-gap manual upgrade path for anyone not using ``cgx service``; see
+    the README's "Running without systemd".
     """
     if args.port is not None or args.host is not None:
         config = replace(
@@ -124,7 +128,7 @@ def _cmd_serve(args: argparse.Namespace, config: Config, ctx: _Context) -> int:
     except ModuleNotFoundError as exc:
         ctx.stderr.write(f"server module not available: {exc}\n")
         return EXIT_FAILED
-    server_module.run(config)
+    server_module.run(config, handover=args.handover)
     return EXIT_OK
 
 
@@ -364,6 +368,23 @@ def _cmd_service_uninstall(args: argparse.Namespace, config: Config, ctx: _Conte
     )
 
 
+def _cmd_service_restart(args: argparse.Namespace, config: Config, ctx: _Context) -> int:
+    """Restart the running systemd user unit via ``systemctl --user restart``.
+
+    Unlike ``install``/``uninstall`` this does not edit the unit file, so it
+    skips the diff-and-confirm flow — it only asks systemd to restart what is
+    already installed. Safe to leave the running daemon serving right up to
+    the restart because ``render_unit`` writes ``TimeoutStopSec``/
+    ``KillMode=mixed``, giving ``systemctl``'s ``SIGTERM`` time to drain in
+    place instead of killing the daemon mid-request.
+    """
+    del args
+    runner = ctx.service_runner if ctx.service_runner is not None else service.DEFAULT_RUNNER
+    service.restart_service(ctx.environ, runner)
+    ctx.stdout.write("service restarted\n")
+    return EXIT_OK
+
+
 def _cmd_service_status(args: argparse.Namespace, config: Config, ctx: _Context) -> int:
     """Print the systemd unit's present/enabled/active state and the daemon health check."""
     del args
@@ -436,6 +457,12 @@ def _build_parser() -> argparse.ArgumentParser:
     serve_parser = subparsers.add_parser("serve", help="run the daemon")
     serve_parser.add_argument("--port", type=int, default=None, help=_PORT_HELP)
     serve_parser.add_argument("--host", default=None, help=_HOST_HELP)
+    serve_parser.add_argument(
+        "--handover",
+        action="store_true",
+        help="bind alongside an already-running daemon (SO_REUSEPORT) and signal it "
+        "to drain and exit once this process is healthy; for upgrading without systemd",
+    )
 
     status_parser = subparsers.add_parser("status", help="show session status")
     status_parser.add_argument("--session", help="session id (default: all sessions)")
@@ -529,6 +556,9 @@ def _build_parser() -> argparse.ArgumentParser:
     service_uninstall_parser.add_argument("--dry-run", action="store_true", dest="dry_run")
     service_uninstall_parser.add_argument("--yes", "-y", action="store_true", help=_YES_HELP)
     service_subparsers.add_parser("status", help="show the unit state and daemon health")
+    service_subparsers.add_parser(
+        "restart", help="restart the daemon via systemd (drains in place, no unit edit)"
+    )
 
     return parser
 
@@ -552,6 +582,7 @@ _SERVICE_HANDLERS: dict[str, Callable[[argparse.Namespace, Config, _Context], in
     "install": _cmd_service_install,
     "uninstall": _cmd_service_uninstall,
     "status": _cmd_service_status,
+    "restart": _cmd_service_restart,
 }
 
 

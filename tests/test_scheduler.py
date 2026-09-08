@@ -93,6 +93,7 @@ def _config(tmp_path: Path, **overrides: object) -> Config:
         "max_streams_per_session": 8,
         "log_level": "INFO",
         "url": "http://127.0.0.1:8787",
+        "drain_timeout_s": 600,
     }
     fields.update(overrides)
     return Config(**fields)  # type: ignore[arg-type]

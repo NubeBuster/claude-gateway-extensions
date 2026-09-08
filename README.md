@@ -24,7 +24,12 @@ a read (see "How it works").
 - Linux or macOS. `cgx service install` (the systemd user unit) is Linux
   only; on macOS run `cgx serve` yourself (a shell, `tmux`, or a `launchd`
   agent you write). Running without systemd: `cgx serve --port 8787` in any
-  process manager or terminal, then `cgx configure --port 8787`.
+  process manager or terminal, then `cgx configure --port 8787`. To upgrade
+  without dropping a connection, start the new binary with `cgx serve --port
+  8787 --handover`: it binds alongside the running daemon and asks it to
+  drain and exit once the new one is healthy (Linux/macOS only, needs
+  `SO_REUSEPORT`; under systemd, `cgx service restart` already drains in
+  place).
 
 ## Installation
 
@@ -328,6 +333,7 @@ edit claude-gateway-extensions.service`.
 | `CGX_ON_CACHE_WRITE`          | `stop`                                                        | `stop` bumping or `continue` when a refresh finds the cache already expired                |
 | `CGX_MAX_STREAMS_PER_SESSION` | `8`                                                           | how many separate conversation branches to remember per session                            |
 | `CGX_LOG_LEVEL`               | `INFO`                                                        | how much detail the daemon logs                                                            |
+| `CGX_DRAIN_TIMEOUT_S`         | `600`                                                         | on shutdown, how long to wait for in-flight requests (incl. SSE streams) before exiting     |
 
 If a table and the code ever disagree, `config.py` is the source of truth.
 

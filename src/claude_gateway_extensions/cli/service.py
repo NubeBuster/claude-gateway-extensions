@@ -26,6 +26,13 @@ from pathlib import Path
 
 from claude_gateway_extensions.cli.confirm import PlannedChange
 from claude_gateway_extensions.cli.install import user_home
+from claude_gateway_extensions.config import DEFAULT_DRAIN_TIMEOUT_S
+
+#: Slack systemd gives the daemon beyond its own drain timeout before
+#: escalating from SIGTERM to SIGKILL (``TimeoutStopSec``), so a drain that
+#: legitimately uses its full ``CGX_DRAIN_TIMEOUT_S`` budget is never killed
+#: mid-flush by systemd racing ahead of the daemon's own bound.
+_STOP_TIMEOUT_SLACK_S = 30
 
 _UNIT_NAME = "claude-gateway-extensions.service"
 
@@ -97,6 +104,14 @@ def render_unit(
     ``CGX_PORT``/``CGX_HOST``, overriding whatever those two happened to
     be in the installing shell — the whole point of ``--port``/``--host`` is
     to pin the unit's port independent of shell state.
+
+    ``TimeoutStopSec`` is set to ``CGX_DRAIN_TIMEOUT_S`` (from ``environ``, or
+    the daemon's own default) plus :data:`_STOP_TIMEOUT_SLACK_S`, and
+    ``KillMode=mixed`` sends ``systemctl --user stop``'s ``SIGTERM`` to only
+    the daemon's own process — giving it the same drain-then-exit path as an
+    interactive ``Ctrl-C`` instead of systemd escalating to ``SIGKILL``
+    before the daemon finishes draining. See the "Drain plus
+    ``SO_REUSEPORT``..." decision in ``docs/DESIGN.md`` "Decisions".
     """
     env_vars = {key: value for key, value in environ.items() if key.startswith("CGX_")}
     if port is not None:
@@ -104,6 +119,10 @@ def render_unit(
     if host is not None:
         env_vars["CGX_HOST"] = host
     env_lines = [f"Environment={key}={value}" for key, value in sorted(env_vars.items())]
+    try:
+        drain_timeout = int(env_vars.get("CGX_DRAIN_TIMEOUT_S", DEFAULT_DRAIN_TIMEOUT_S))
+    except ValueError:
+        drain_timeout = DEFAULT_DRAIN_TIMEOUT_S
     lines = [
         "[Unit]",
         "Description=claude-gateway-extensions",
@@ -113,6 +132,8 @@ def render_unit(
         *env_lines,
         "Restart=on-failure",
         "RestartSec=5",
+        f"TimeoutStopSec={drain_timeout + _STOP_TIMEOUT_SLACK_S}",
+        "KillMode=mixed",
         "",
         "[Install]",
         "WantedBy=default.target",
@@ -150,6 +171,21 @@ def uninstall_service(environ: Mapping[str, str], runner: Runner = _default_runn
     runner(["systemctl", "--user", "disable", "--now", _UNIT_NAME])
     path.unlink()
     runner(["systemctl", "--user", "daemon-reload"])
+
+
+def restart_service(environ: Mapping[str, str], runner: Runner = _default_runner) -> None:
+    """Restart the systemd user unit in place via ``systemctl --user restart``.
+
+    Does not touch the unit file — that is what ``cgx service install`` is
+    for. Relies on ``render_unit``'s ``TimeoutStopSec``/``KillMode=mixed``
+    (written by the last ``install``) for the stop half of the restart to
+    drain in-flight requests rather than killing the daemon mid-request; an
+    old unit installed before those directives existed restarts the same way
+    systemd always restarted it (no drain), until ``cgx service install`` is
+    re-run to pick them up.
+    """
+    del environ  # unused; kept for signature symmetry with install/uninstall
+    runner(["systemctl", "--user", "restart", _UNIT_NAME])
 
 
 def plan_install_service(
@@ -247,6 +283,7 @@ __all__ = [
     "plan_install_service",
     "plan_uninstall_service",
     "render_unit",
+    "restart_service",
     "service_status",
     "uninstall_service",
     "unit_path",

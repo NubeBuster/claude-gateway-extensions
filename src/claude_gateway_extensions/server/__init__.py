@@ -15,15 +15,16 @@ from claude_gateway_extensions.config import Config
 from claude_gateway_extensions.server.app import make_app, serve
 
 
-def run(config: Config) -> None:
+def run(config: Config, *, handover: bool = False) -> None:
     """Serve the proxy until interrupted, then shut down cleanly.
 
     Blocking wrapper around :func:`serve` for the CLI, which has no event
     loop of its own. ``Ctrl-C`` is a normal way to stop the daemon, so a
     ``KeyboardInterrupt`` returns rather than propagating a traceback.
+    ``handover=True`` is ``cgx serve --handover``: see :func:`serve`.
     """
     try:
-        asyncio.run(serve(config))
+        asyncio.run(serve(config, handover=handover))
     except KeyboardInterrupt:
         return
 

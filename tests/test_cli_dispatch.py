@@ -326,6 +326,22 @@ def test_service_install_port_and_host_flags(tmp_path: Path) -> None:
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="cgx service is Linux-only")
+def test_service_restart_uses_injected_runner(tmp_path: Path) -> None:
+    client = _FakeClient("http://x")
+    calls: list[list[str]] = []
+
+    def runner(args: list[str]) -> None:
+        calls.append(list(args))
+
+    code, out, _ = _run(
+        ["service", "restart"], client, environ={"HOME": str(tmp_path)}, service_runner=runner
+    )
+    assert code == EXIT_OK
+    assert calls == [["systemctl", "--user", "restart", "claude-gateway-extensions.service"]]
+    assert "restarted" in out
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="cgx service is Linux-only")
 def test_service_status_reports_installed_unit_port(tmp_path: Path) -> None:
     client = _FakeClient("http://x")
     code, out, _ = _run(
@@ -673,7 +689,7 @@ def test_serve_imports_server_module_lazily(monkeypatch: pytest.MonkeyPatch) -> 
 
     fake_module = types.ModuleType("claude_gateway_extensions.server")
     calls: list[Any] = []
-    fake_module.run = lambda config: calls.append(config)  # type: ignore[attr-defined]
+    fake_module.run = lambda config, **kwargs: calls.append(config)  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "claude_gateway_extensions.server", fake_module)
 
     client = _FakeClient("http://x")
@@ -688,7 +704,7 @@ def test_serve_port_flag_overrides_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
     fake_module = types.ModuleType("claude_gateway_extensions.server")
     calls: list[Any] = []
-    fake_module.run = lambda config: calls.append(config)  # type: ignore[attr-defined]
+    fake_module.run = lambda config, **kwargs: calls.append(config)  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "claude_gateway_extensions.server", fake_module)
 
     client = _FakeClient("http://x")
@@ -707,13 +723,41 @@ def test_serve_without_flags_uses_env_port(monkeypatch: pytest.MonkeyPatch) -> N
 
     fake_module = types.ModuleType("claude_gateway_extensions.server")
     calls: list[Any] = []
-    fake_module.run = lambda config: calls.append(config)  # type: ignore[attr-defined]
+    fake_module.run = lambda config, **kwargs: calls.append(config)  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "claude_gateway_extensions.server", fake_module)
 
     client = _FakeClient("http://x")
     code, _, _ = _run(["serve"], client, environ={"CGX_PORT": "1111"})
     assert code == EXIT_OK
     assert calls[0].port == 1111
+
+
+def test_serve_handover_flag_is_forwarded(monkeypatch: pytest.MonkeyPatch) -> None:
+    import types
+
+    fake_module = types.ModuleType("claude_gateway_extensions.server")
+    calls: list[dict[str, Any]] = []
+    fake_module.run = lambda config, **kwargs: calls.append(kwargs)  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "claude_gateway_extensions.server", fake_module)
+
+    client = _FakeClient("http://x")
+    code, _, _ = _run(["serve", "--handover"], client)
+    assert code == EXIT_OK
+    assert calls == [{"handover": True}]
+
+
+def test_serve_without_handover_flag_defaults_to_false(monkeypatch: pytest.MonkeyPatch) -> None:
+    import types
+
+    fake_module = types.ModuleType("claude_gateway_extensions.server")
+    calls: list[dict[str, Any]] = []
+    fake_module.run = lambda config, **kwargs: calls.append(kwargs)  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "claude_gateway_extensions.server", fake_module)
+
+    client = _FakeClient("http://x")
+    code, _, _ = _run(["serve"], client)
+    assert code == EXIT_OK
+    assert calls == [{"handover": False}]
 
 
 def test_serve_missing_server_module_is_a_clean_failure(monkeypatch: pytest.MonkeyPatch) -> None:

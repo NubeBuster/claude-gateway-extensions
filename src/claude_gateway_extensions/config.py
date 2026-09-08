@@ -22,6 +22,12 @@ OnCacheWrite = Literal["stop", "continue"]
 _TRUE_VALUES = {"true", "1", "yes"}
 _FALSE_VALUES = {"false", "0", "no"}
 
+#: Default ``CGX_DRAIN_TIMEOUT_S``, shared with ``cli/service.py`` so the
+#: systemd unit's ``TimeoutStopSec`` (drain timeout + 30s) agrees with the
+#: daemon's own default even when the installing shell never set the
+#: variable explicitly.
+DEFAULT_DRAIN_TIMEOUT_S = 600
+
 
 class ConfigError(ValueError):
     """Raised when a ``CGX_*`` environment variable has an invalid value."""
@@ -163,6 +169,7 @@ class Config:
     max_streams_per_session: int
     log_level: str
     url: str
+    drain_timeout_s: int
 
     @classmethod
     def from_env(cls, environ: Mapping[str, str] | None = None) -> Config:
@@ -193,6 +200,10 @@ class Config:
         )
         log_level = env.get("CGX_LOG_LEVEL", "INFO")
         url = _resolve_daemon_url(env, host, port)
+        drain_timeout_s = _parse_int(
+            "CGX_DRAIN_TIMEOUT_S",
+            env.get("CGX_DRAIN_TIMEOUT_S", str(DEFAULT_DRAIN_TIMEOUT_S)),
+        )
 
         return cls(
             host=host,
@@ -208,6 +219,7 @@ class Config:
             max_streams_per_session=max_streams_per_session,
             log_level=log_level,
             url=url,
+            drain_timeout_s=drain_timeout_s,
         )
 
     def is_local_host(self) -> bool:

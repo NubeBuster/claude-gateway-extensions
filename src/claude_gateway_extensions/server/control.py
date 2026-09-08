@@ -19,7 +19,12 @@ from claude_gateway_extensions import __version__
 from claude_gateway_extensions.config import Config
 from claude_gateway_extensions.core.scheduler import NoSnapshot, Scheduler
 from claude_gateway_extensions.core.store import SESSION_ID_RE, SnapshotStore
-from claude_gateway_extensions.server.keys import CONFIG_KEY, SCHEDULER_KEY, STORE_KEY
+from claude_gateway_extensions.server.keys import (
+    CONFIG_KEY,
+    DRAIN_STATE_KEY,
+    SCHEDULER_KEY,
+    STORE_KEY,
+)
 
 
 def _invalid_session_id() -> web.Response:
@@ -31,7 +36,18 @@ def _unknown_session() -> web.Response:
 
 
 async def health(request: web.Request) -> web.Response:
-    """``GET /cgx/health``: liveness, version, upstream target and session count."""
+    """``GET /cgx/health``: liveness, version, upstream target and session count.
+
+    Answers ``503 {"status": "draining"}`` instead once a shutdown signal has
+    put the daemon into its drain window (see
+    :data:`~claude_gateway_extensions.server.keys.DRAIN_STATE_KEY`): it is
+    still finishing in-flight requests, but must not be treated as a healthy
+    target for new traffic (e.g. by ``cgx serve --handover``'s own probe of
+    the daemon it is about to replace).
+    """
+    drain_state = request.app[DRAIN_STATE_KEY]
+    if drain_state.draining:
+        return web.json_response({"status": "draining"}, status=503)
     store: SnapshotStore = request.app[STORE_KEY]
     config: Config = request.app[CONFIG_KEY]
     return web.json_response(

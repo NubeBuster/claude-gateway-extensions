@@ -132,6 +132,20 @@ def test_render_unit_explicit_host_overrides_shell_env(tmp_path: Path) -> None:
     assert "Environment=CGX_HOST=0.0.0.0" not in text
 
 
+def test_render_unit_includes_timeout_stop_sec_and_kill_mode_by_default(tmp_path: Path) -> None:
+    environ = {"HOME": str(tmp_path)}
+    text = service.render_unit("/usr/local/bin/cgx", environ)
+    assert "TimeoutStopSec=630" in text  # default drain timeout 600 + 30s slack
+    assert "KillMode=mixed" in text
+
+
+def test_render_unit_timeout_stop_sec_follows_drain_timeout_env(tmp_path: Path) -> None:
+    environ = {"HOME": str(tmp_path), "CGX_DRAIN_TIMEOUT_S": "60"}
+    text = service.render_unit("/usr/local/bin/cgx", environ)
+    assert "TimeoutStopSec=90" in text
+    assert "Environment=CGX_DRAIN_TIMEOUT_S=60" in text
+
+
 def test_render_unit_still_passes_through_other_cgx_vars_with_explicit_port(
     tmp_path: Path,
 ) -> None:
@@ -226,6 +240,17 @@ def test_plan_uninstall_service_after_install_shows_a_removal(
     (change,) = service.plan_uninstall_service(environ, runner)
     assert change.old_content
     assert change.new_content is None
+
+
+def test_restart_service_uses_injected_runner(
+    tmp_path: Path, fake_runner: tuple[list[list[str]], service.Runner]
+) -> None:
+    calls, runner = fake_runner
+    environ = {"HOME": str(tmp_path)}
+
+    service.restart_service(environ, runner)
+
+    assert calls == [["systemctl", "--user", "restart", "claude-gateway-extensions.service"]]
 
 
 def test_plan_uninstall_service_apply_removes_and_disables(

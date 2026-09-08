@@ -95,6 +95,20 @@ deliberately absent from this release, not ruled out for the project.
   had to stop describing only 0.1's scope before more gateway features
   landed. CLI `ccbg` became `cgx`, env prefix `CCBG_` became `CGX_`, and
   the control API prefix `/ccbg/` became `/cgx/`.
+- **Drain plus `SO_REUSEPORT` instead of socket handover.** A restart or
+  upgrade must not drop an in-flight request or refuse connections during
+  the swap. Rather than the legacy project's `SCM_RIGHTS` socket handover
+  (passing the listening fd itself to the new process — still a roadmap
+  line below), `serve` closes its listener immediately on `SIGTERM`/
+  `SIGINT`, waits for in-flight requests (including long SSE streams) up to
+  `CGX_DRAIN_TIMEOUT_S`, then exits; a second shutdown signal cuts the wait
+  short. The listener binds with `SO_REUSEPORT` where the platform supports
+  it (Linux, macOS), so a new daemon can bind the same port and start
+  serving before the old one has finished draining — `cgx serve --handover`
+  drives this for non-systemd users, `TimeoutStopSec`/`KillMode=mixed` in
+  the systemd unit do it for `systemctl --user restart`. State is already
+  flushed synchronously on every write (`FileStore`), so drain needs no
+  separate flush step.
 
 ## Extension points
 
@@ -119,7 +133,10 @@ Candidate features for later releases, in no particular order:
 - Terminal-focus dialogs: prompt the user in the terminal that owns a session.
 - Side-turn classification: tell subagent and sidecar prompts from the main
   conversation rather than inferring from prefix size.
-- Zero-downtime reload: hand the listening socket to a new process on restart.
+- True socket handover: pass the listening fd itself to a new process via
+  `SCM_RIGHTS` on restart, instead of the drain-plus-`SO_REUSEPORT` approach
+  in "Decisions" — would avoid the brief window where both daemons hold
+  independent listening sockets on the same port.
 - Model substitution: route a request to a different model than requested.
 - Audit logging: a durable record of what the daemon forwarded and replayed.
 - PTY input interception: drive the gateway from the terminal instead of the
