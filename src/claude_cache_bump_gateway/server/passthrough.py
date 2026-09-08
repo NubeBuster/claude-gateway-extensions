@@ -11,6 +11,7 @@ through in both directions without inspection.
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import json
 import logging
@@ -149,6 +150,13 @@ async def _forward(
                 if tee_buffer is not None:
                     tee_buffer.extend(chunk)
                 await resp.write(chunk)
+        except asyncio.CancelledError:
+            # A client disconnect cancels the handler task in some deployments
+            # (e.g. handler_cancellation); this is an ordinary disconnect, not
+            # a failure, so it gets one INFO line rather than a full traceback.
+            # Cancellation must never be swallowed: re-raise after logging.
+            logger.info("client disconnected mid-stream, session %s", session_id)
+            raise
         except (ConnectionResetError, ConnectionAbortedError) as exc:
             logger.debug("client disconnected mid-stream: %s", exc)
             return resp

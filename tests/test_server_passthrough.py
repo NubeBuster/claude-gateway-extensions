@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import gzip
 import json
+import logging
 
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
@@ -232,6 +234,68 @@ async def test_bump_now_hits_fake_with_max_tokens_zero(harness: ServerHarness) -
     assert replay.headers["authorization"] == "Bearer initial"
     assert replay.headers["anthropic-beta"] == "prompt-caching-2024-07-31"
     assert "connection" not in replay.headers
+
+
+async def test_client_disconnect_mid_stream_logs_one_line_no_traceback(
+    harness: ServerHarness, caplog
+) -> None:
+    """A client cancelling mid-SSE must log one INFO line, never a traceback.
+
+    ``handler_cancellation`` (enabled by aiohttp's test harness, and possible
+    in some real deployments) delivers ``asyncio.CancelledError`` to the
+    streaming loop when the client disconnects. That must be logged as an
+    ordinary disconnect, not swallowed, and not left to surface as an
+    unhandled exception traceback.
+    """
+    hang = asyncio.Event()
+    chunk_seen = asyncio.Event()
+
+    async def handler(request: web.Request) -> web.StreamResponse:
+        resp = web.StreamResponse(status=200, headers={"Content-Type": "text/event-stream"})
+        await resp.prepare(request)
+        await resp.write(b'data: {"type": "message_start", "message": {"usage": {}}}\n\n')
+        await hang.wait()
+        return resp
+
+    harness.fake.script(handler)
+
+    async def do_request() -> None:
+        async with harness.client.request(
+            "POST",
+            "/v1/messages",
+            headers={"x-claude-code-session-id": "sess-cancel"},
+            data=b'{"model": "claude-x", "max_tokens": 10, "messages": []}',
+        ) as resp:
+            first = await resp.content.readany()
+            assert b"message_start" in first
+            chunk_seen.set()
+            await asyncio.Event().wait()
+
+    caplog.set_level(logging.INFO, logger="claude_cache_bump_gateway.server.passthrough")
+    task = asyncio.ensure_future(do_request())
+    await asyncio.wait_for(chunk_seen.wait(), timeout=2)
+    task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await task
+    # Give the server-side handler task a moment to observe the disconnect.
+    await asyncio.sleep(0.2)
+
+    records = [
+        r for r in caplog.records if r.name == "claude_cache_bump_gateway.server.passthrough"
+    ]
+    assert len(records) == 1
+    assert records[0].levelno == logging.INFO
+    assert "client disconnected mid-stream" in records[0].getMessage()
+    assert "sess-cancel" in records[0].getMessage()
+    assert records[0].exc_info is None
+
+    # The server itself must stay healthy: a fresh request still works.
+    async def ok_handler(request: web.Request) -> web.Response:
+        return web.json_response({"ok": True})
+
+    harness.fake.script(ok_handler)
+    resp2 = await harness.client.get("/v1/models")
+    assert resp2.status == 200
 
 
 async def test_upstream_unreachable_returns_502(tmp_path) -> None:
