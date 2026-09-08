@@ -68,8 +68,9 @@ upstream=, clock=)`. No monkey-patching, no global state.
    and no gateway credential, so its saved claude.ai login is forwarded unchanged
    as the request credential.
 2. Every request is forwarded to `upstream` (default `https://api.anthropic.com`)
-   with method, path and query preserved. Request and response headers are
-   copied verbatim except RFC hop-by-hop headers (`connection`, `keep-alive`,
+   with method, path and query preserved. Header *values* are copied verbatim
+   — names are lower-cased, which HTTP treats as equivalent and HTTP/2
+   requires — except RFC hop-by-hop headers (`connection`, `keep-alive`,
    `proxy-authenticate`, `proxy-authorization`, `te`, `trailers`,
    `transfer-encoding`, `upgrade`, `host`, `content-length`). Bodies are never
    modified. Upstream errors are relayed with status and body intact.
@@ -122,8 +123,13 @@ A bump replays the selected snapshot:
 - Headers: the captured request headers minus hop-by-hop headers, with the
   credential header (`authorization` or `x-api-key`) replaced by the most recent
   value seen for that session. Claude Code rotates OAuth tokens; a frozen token
-  returns 401.
+  returns 401. `accept-encoding` is pinned to `gzip` rather than replayed: the
+  reply has to be *parsed*, and an encoding the daemon cannot decode would make
+  `usage` unreadable and so turn every `cache_write` into an `ok`. Transport
+  encoding is not part of the cached prefix.
 - The response is read to completion and discarded; only `usage` is inspected.
+  It is decompressed first — the proxy's shared client runs with
+  `auto_decompress=False` so the passthrough can forward bytes untouched.
 
 Outcome classification (`BumpResult`):
 
