@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.0 - unreleased
+## 1.0.0 - 2026-09-09
 
 - Transparent HTTP proxy between Claude Code and the Anthropic API with
   byte-transparent forwarding, SSE streaming, and `/v1/messages` snapshot
@@ -100,3 +100,14 @@
   `systemctl --user restart`/the new `cgx service restart` drain in place
   instead of killing the daemon mid-request; existing installs see the diff
   on the next `cgx service install`.
+- Session status (`GET /cgx/sessions[/{id}]`, `cgx status --json`, and the
+  hook's status reply) gains `cache_expires_at` (epoch time the prompt
+  cache is expected to expire, from the real Anthropic TTL rather than the
+  daemon's bump interval) and a `formatted` block of human-readable
+  MM:SS/H:MM:SS countdowns and local HH:MM clock times.
+- `pytest.mark.invariant(decision="...")` marks a test that guards a
+  decision recorded in `docs/DESIGN.md`; a failure explains the decision
+  and forbids weakening the test instead of the code without an
+  amendment and the user's consent.
+- Makefile with `check`/`fix`/`test`/`lint`/`types` targets is the one
+  command for verification and CI.

@@ -409,6 +409,9 @@ make check   # ruff check, ruff format --check, pyright, pytest
 make fix     # ruff format, ruff check --fix
 ```
 
+Day-to-day work lands on `dev`; `main` receives only release merges (tags
+`vX.Y.Z`), so it always points at released, working code.
+
 The `cache` skill lives at `claude/skills/cache/SKILL.md` in the repo root;
 `cgx configure` copies it into the target `skills/` directory. Cloned
 instead of installed and want it without running `cgx configure`? Copy

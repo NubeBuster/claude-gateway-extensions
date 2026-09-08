@@ -18,7 +18,7 @@ Liveness and a quick summary.
 Response `200`:
 
 ```json
-{"ok": true, "version": "0.1.0", "upstream": "https://api.anthropic.com", "sessions": 2}
+{"ok": true, "version": "1.0.0", "upstream": "https://api.anthropic.com", "sessions": 2}
 ```
 
 Response `503`, once a shutdown signal has put the daemon into its drain

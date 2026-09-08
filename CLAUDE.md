@@ -2,9 +2,8 @@
 
 ## Scope
 
-The shipped scope is whatever `docs/DESIGN.md` "Scope of 0.1" says it is.
-Everything under DESIGN.md "Roadmap" is designed into that file before any
-code is written for it.
+The shipped scope is whatever `docs/DESIGN.md` "Scope of 0.1" says it is;
+everything under "Roadmap" is designed into that file before code is written.
 
 ## Invariants
 
@@ -54,6 +53,7 @@ code is written for it.
   push it names. Agents commit freely and ask before every push.
 - Verification is `make check`, run once before a commit; never chain
   `ruff`/`pyright`/`pytest` by hand. Use `make fix` for formatting.
-
+- `dev` takes day-to-day work; `main` only takes release merges (tags
+  `vX.Y.Z`), so it always points at released, working code.
 - Conventional commits: `type(scope): topic: specifics`, subject at most 72
   characters, body bullets wrapped at 72.

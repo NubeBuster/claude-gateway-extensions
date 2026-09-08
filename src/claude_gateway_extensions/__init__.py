@@ -6,4 +6,4 @@ records the last request of each session and periodically replays it with
 user is away. See ``docs/DESIGN.md`` for the design decisions.
 """
 
-__version__ = "0.1.0"
+__version__ = "1.0.0"
