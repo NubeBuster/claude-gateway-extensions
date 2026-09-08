@@ -1,0 +1,148 @@
+"""Daemon configuration, parsed once from ``CCBG_*`` environment variables.
+
+``Config`` is the single source of truth for every tunable described in
+``docs/DESIGN.md`` "Configuration". It is a frozen dataclass built by
+:meth:`Config.from_env`; nothing else in this codebase reads ``os.environ``
+directly.
+"""
+
+from __future__ import annotations
+
+import os
+from collections.abc import Mapping
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Literal
+
+OnCacheWrite = Literal["stop", "continue"]
+
+_TRUE_VALUES = {"true", "1", "yes"}
+_FALSE_VALUES = {"false", "0", "no"}
+
+
+class ConfigError(ValueError):
+    """Raised when a ``CCBG_*`` environment variable has an invalid value."""
+
+
+def _default_state_dir(env: Mapping[str, str]) -> Path:
+    """Return the XDG state directory default for this daemon's persistence root.
+
+    Reads ``XDG_STATE_HOME`` and ``HOME`` from ``env`` (not ``os.environ``
+    directly) so :meth:`Config.from_env` is fully testable via its
+    ``environ`` argument.
+    """
+    xdg_state_home = env.get("XDG_STATE_HOME")
+    if xdg_state_home:
+        base = Path(xdg_state_home)
+    else:
+        home = env.get("HOME")
+        base = (Path(home) if home else Path.home()) / ".local" / "state"
+    return base / "claude-cache-bump-gateway"
+
+
+def _parse_bool(name: str, raw: str) -> bool:
+    """Parse a ``CCBG_*`` boolean value, accepting true/false/1/0/yes/no case-insensitively."""
+    lowered = raw.strip().lower()
+    if lowered in _TRUE_VALUES:
+        return True
+    if lowered in _FALSE_VALUES:
+        return False
+    raise ConfigError(f"{name}: invalid boolean value {raw!r}")
+
+
+def _parse_int(name: str, raw: str) -> int:
+    """Parse a ``CCBG_*`` integer value, raising ``ConfigError`` on failure."""
+    try:
+        return int(raw)
+    except ValueError as exc:
+        raise ConfigError(f"{name}: invalid integer value {raw!r}") from exc
+
+
+def _parse_on_cache_write(raw: str) -> OnCacheWrite:
+    """Parse ``CCBG_ON_CACHE_WRITE``, restricting the value to the two documented literals."""
+    if raw not in ("stop", "continue"):
+        raise ConfigError(f"CCBG_ON_CACHE_WRITE: invalid value {raw!r}, expected stop or continue")
+    return raw
+
+
+@dataclass(frozen=True)
+class Config:
+    """Immutable daemon configuration.
+
+    See ``docs/DESIGN.md`` "Configuration" for the meaning and default of
+    every field, and "Claude Code integration" / "Control API" for how
+    ``url`` and ``host``/``port`` are used.
+    """
+
+    host: str
+    port: int
+    upstream: str
+    state_dir: Path
+    persist: bool
+    default_enabled: bool
+    interval_1h_s: int
+    interval_5m_s: int
+    max_duration_s: int
+    on_cache_write: OnCacheWrite
+    max_streams_per_session: int
+    log_level: str
+    url: str
+    allow_non_loopback: bool
+
+    @classmethod
+    def from_env(cls, environ: Mapping[str, str] | None = None) -> Config:
+        """Build a :class:`Config` from ``CCBG_*`` variables in ``environ``.
+
+        Defaults to ``os.environ`` when ``environ`` is ``None``. Raises
+        :class:`ConfigError` on any malformed value.
+        """
+        env = os.environ if environ is None else environ
+
+        host = env.get("CCBG_HOST", "127.0.0.1")
+        port = _parse_int("CCBG_PORT", env.get("CCBG_PORT", "8787"))
+        upstream = env.get("CCBG_UPSTREAM", "https://api.anthropic.com")
+        state_dir_raw = env.get("CCBG_STATE_DIR")
+        state_dir = Path(state_dir_raw).expanduser() if state_dir_raw else _default_state_dir(env)
+        persist = _parse_bool("CCBG_PERSIST", env.get("CCBG_PERSIST", "true"))
+        default_enabled = _parse_bool(
+            "CCBG_DEFAULT_ENABLED", env.get("CCBG_DEFAULT_ENABLED", "false")
+        )
+        interval_1h_s = _parse_int("CCBG_INTERVAL_1H_S", env.get("CCBG_INTERVAL_1H_S", "3000"))
+        interval_5m_s = _parse_int("CCBG_INTERVAL_5M_S", env.get("CCBG_INTERVAL_5M_S", "240"))
+        max_duration_s = _parse_int("CCBG_MAX_DURATION_S", env.get("CCBG_MAX_DURATION_S", "86400"))
+        on_cache_write = _parse_on_cache_write(env.get("CCBG_ON_CACHE_WRITE", "stop"))
+        max_streams_per_session = _parse_int(
+            "CCBG_MAX_STREAMS_PER_SESSION", env.get("CCBG_MAX_STREAMS_PER_SESSION", "8")
+        )
+        log_level = env.get("CCBG_LOG_LEVEL", "INFO")
+        url = env.get("CCBG_URL", "http://127.0.0.1:8787")
+        allow_non_loopback = _parse_bool(
+            "CCBG_ALLOW_NON_LOOPBACK", env.get("CCBG_ALLOW_NON_LOOPBACK", "false")
+        )
+
+        config = cls(
+            host=host,
+            port=port,
+            upstream=upstream,
+            state_dir=state_dir,
+            persist=persist,
+            default_enabled=default_enabled,
+            interval_1h_s=interval_1h_s,
+            interval_5m_s=interval_5m_s,
+            max_duration_s=max_duration_s,
+            on_cache_write=on_cache_write,
+            max_streams_per_session=max_streams_per_session,
+            log_level=log_level,
+            url=url,
+            allow_non_loopback=allow_non_loopback,
+        )
+        config.validate()
+        return config
+
+    def validate(self) -> None:
+        """Refuse a non-loopback listen host unless ``allow_non_loopback`` is set."""
+        if not self.allow_non_loopback and self.host not in ("127.0.0.1", "::1", "localhost"):
+            raise ConfigError(
+                f"CCBG_HOST={self.host!r} is not loopback; "
+                "set CCBG_ALLOW_NON_LOOPBACK=true to override"
+            )
