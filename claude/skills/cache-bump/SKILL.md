@@ -1,0 +1,1 @@
+../../../src/claude_cache_bump_gateway/data/skills/cache-bump/SKILL.md
