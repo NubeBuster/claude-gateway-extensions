@@ -22,6 +22,14 @@ def test_defaults() -> None:
     assert config.max_streams_per_session == 8
     assert config.log_level == "INFO"
     assert config.url == "http://127.0.0.1:8787"
+    assert config.fork_max_tokens == 512
+    assert config.fork_max_per_min == 6
+
+
+def test_fork_settings_from_env() -> None:
+    config = Config.from_env({"CGX_FORK_MAX_TOKENS": "256", "CGX_FORK_MAX_PER_MIN": "3"})
+    assert config.fork_max_tokens == 256
+    assert config.fork_max_per_min == 3
 
 
 def test_default_state_dir_uses_xdg_state_home() -> None:

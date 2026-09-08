@@ -170,6 +170,8 @@ class Config:
     log_level: str
     url: str
     drain_timeout_s: int
+    fork_max_tokens: int
+    fork_max_per_min: int
 
     @classmethod
     def from_env(cls, environ: Mapping[str, str] | None = None) -> Config:
@@ -204,6 +206,8 @@ class Config:
             "CGX_DRAIN_TIMEOUT_S",
             env.get("CGX_DRAIN_TIMEOUT_S", str(DEFAULT_DRAIN_TIMEOUT_S)),
         )
+        fork_max_tokens = _parse_int("CGX_FORK_MAX_TOKENS", env.get("CGX_FORK_MAX_TOKENS", "512"))
+        fork_max_per_min = _parse_int("CGX_FORK_MAX_PER_MIN", env.get("CGX_FORK_MAX_PER_MIN", "6"))
 
         return cls(
             host=host,
@@ -220,6 +224,8 @@ class Config:
             log_level=log_level,
             url=url,
             drain_timeout_s=drain_timeout_s,
+            fork_max_tokens=fork_max_tokens,
+            fork_max_per_min=fork_max_per_min,
         )
 
     def is_local_host(self) -> bool:

@@ -20,6 +20,7 @@ import dataclasses
 from claude_gateway_extensions.config import Config
 from claude_gateway_extensions.core.bump import BumpResult, bump_once
 from claude_gateway_extensions.core.clock import Clock
+from claude_gateway_extensions.core.fork import ForkVerdict, fork_once
 from claude_gateway_extensions.core.selector import TargetSelector
 from claude_gateway_extensions.core.snapshot import (
     CACHE_TTL_1H_S,
@@ -76,6 +77,7 @@ class Scheduler:
         self._last_result: dict[str, BumpResult | None] = {}
         self._wakeups: dict[str, asyncio.Event] = {}
         self._enabled_since: dict[str, float] = {}
+        self._fork_times: dict[str, list[float]] = {}
 
     async def start(self) -> None:
         """Prune stale snapshots and resume timers for every enabled session in the store."""
@@ -183,6 +185,49 @@ class Scheduler:
             self._cancel_task(session_id)
         return result
 
+    async def fork_now(
+        self,
+        session_id: str,
+        prompt: str,
+        payload: object,
+        max_tokens: int | None = None,
+    ) -> ForkVerdict:
+        """Replay the session's selected snapshot once as a shadow review fork.
+
+        Never raises and never touches bump bookkeeping: it does not set
+        ``last_bump_at``, does not increment ``bump_count``, does not stop
+        the session on a paid write, and does not reset any timer. A fork
+        is a side channel, not a cache-warming replay, so none of the bump
+        effects apply to it.
+        """
+        state = self._store.get_state(session_id)
+        snapshot = self._selector.select(self._store.get_snapshots(session_id))
+        if snapshot is None:
+            return ForkVerdict(
+                verdict="ok", reason="no_snapshot", mutation=None, usage=None, paid_write=False
+            )
+        if self._fork_rate_limited(session_id):
+            return ForkVerdict(
+                verdict="ok", reason="rate_limited", mutation=None, usage=None, paid_write=False
+            )
+        self._record_fork(session_id)
+        credential = state.last_credential if state is not None else None
+        cap = max_tokens if max_tokens is not None else self._config.fork_max_tokens
+        return await fork_once(
+            self._upstream, self._config.upstream, snapshot, credential, prompt, payload, cap
+        )
+
+    def _fork_rate_limited(self, session_id: str) -> bool:
+        """Return whether ``session_id`` has already made the max forks in the trailing 60s."""
+        window_start = self._clock.now() - 60.0
+        times = [t for t in self._fork_times.get(session_id, []) if t >= window_start]
+        self._fork_times[session_id] = times
+        return len(times) >= self._config.fork_max_per_min
+
+    def _record_fork(self, session_id: str) -> None:
+        """Record a fork attempt for ``session_id`` at the current time."""
+        self._fork_times.setdefault(session_id, []).append(self._clock.now())
+
     def forget(self, session_id: str) -> None:
         """Stop and discard everything the scheduler and store hold for ``session_id``."""
         self._cancel_task(session_id)
@@ -191,6 +236,7 @@ class Scheduler:
         self._in_flight.pop(session_id, None)
         self._wakeups.pop(session_id, None)
         self._enabled_since.pop(session_id, None)
+        self._fork_times.pop(session_id, None)
 
     def begin_request(self, session_id: str) -> None:
         """Mark a real request for ``session_id`` as in flight, deferring any pending bump."""

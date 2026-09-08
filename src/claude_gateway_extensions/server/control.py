@@ -119,6 +119,44 @@ async def bump_session(request: web.Request) -> web.Response:
     return web.json_response(dataclasses.asdict(result), status=status_code)
 
 
+async def fork_session(request: web.Request) -> web.Response:
+    """``POST /cgx/sessions/{id}/fork``: run one shadow review fork now.
+
+    Always answers ``200`` with the verdict shape, including for the
+    fail-open degradations (``no_snapshot``, ``rate_limited``,
+    ``unparseable_verdict``, ``fork_failed``): a non-200 there would push
+    fail-open logic into every client. ``hook_event`` is accepted and
+    carried through for logging/templating context only; it does not
+    change engine behaviour.
+    """
+    session_id = request.match_info["id"]
+    if not SESSION_ID_RE.match(session_id):
+        return _invalid_session_id()
+
+    body = await _read_json_object(request)
+    if body is None:
+        return web.json_response({"error": "invalid_body"}, status=400)
+    prompt = body.get("prompt")
+    if not isinstance(prompt, str):
+        return web.json_response({"error": "invalid_body"}, status=400)
+    max_tokens = body.get("max_tokens")
+    if not _is_optional_positive_int(max_tokens):
+        return web.json_response({"error": "invalid_body"}, status=400)
+    payload = body.get("payload")
+
+    scheduler: Scheduler = request.app[SCHEDULER_KEY]
+    verdict = await scheduler.fork_now(session_id, prompt, payload, max_tokens)
+    return web.json_response(
+        {
+            "verdict": verdict.verdict,
+            "reason": verdict.reason,
+            "mutation": verdict.mutation,
+            "usage": dataclasses.asdict(verdict.usage) if verdict.usage is not None else None,
+            "paid_write": verdict.paid_write,
+        }
+    )
+
+
 async def delete_session(request: web.Request) -> web.Response:
     """``DELETE /cgx/sessions/{id}``: forget the session's state and snapshots."""
     session_id = request.match_info["id"]
@@ -175,4 +213,5 @@ def register(app: web.Application) -> None:
     app.router.add_get("/cgx/sessions/{id}", get_session)
     app.router.add_put("/cgx/sessions/{id}", put_session)
     app.router.add_post("/cgx/sessions/{id}/bump", bump_session)
+    app.router.add_post("/cgx/sessions/{id}/fork", fork_session)
     app.router.add_delete("/cgx/sessions/{id}", delete_session)

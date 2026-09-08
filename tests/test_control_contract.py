@@ -11,6 +11,7 @@ between the client's assumptions and ``docs/API.md`` fails here.
 from __future__ import annotations
 
 import asyncio
+import json
 from collections.abc import Callable
 from typing import Any, TypeVar
 
@@ -124,3 +125,94 @@ async def test_forget_removes_the_session(harness: ServerHarness) -> None:
     await _off_loop(lambda: client.set_session("sess-c", True))
     await _off_loop(lambda: client.forget("sess-c"))
     assert await _off_loop(client.list_sessions) == []
+
+
+#: The response keys ``docs/API.md`` documents for POST /cgx/sessions/{id}/fork.
+FORK_KEYS = {"verdict", "reason", "mutation", "usage", "paid_write"}
+
+
+async def test_fork_invalid_session_id_rejected(harness: ServerHarness) -> None:
+    resp = await harness.client.post(
+        "/cgx/sessions/bad*id/fork", json={"prompt": "review", "hook_event": "x", "payload": {}}
+    )
+    assert resp.status == 400
+    assert (await resp.json())["error"] == "invalid_session_id"
+
+
+async def test_fork_missing_prompt_rejected(harness: ServerHarness) -> None:
+    resp = await harness.client.post(
+        "/cgx/sessions/sess-f/fork", json={"hook_event": "x", "payload": {}}
+    )
+    assert resp.status == 400
+    assert (await resp.json())["error"] == "invalid_body"
+
+
+async def test_fork_non_str_prompt_rejected(harness: ServerHarness) -> None:
+    resp = await harness.client.post(
+        "/cgx/sessions/sess-f/fork", json={"prompt": 5, "hook_event": "x", "payload": {}}
+    )
+    assert resp.status == 400
+    assert (await resp.json())["error"] == "invalid_body"
+
+
+async def test_fork_non_positive_max_tokens_rejected(harness: ServerHarness) -> None:
+    resp = await harness.client.post(
+        "/cgx/sessions/sess-f/fork",
+        json={"prompt": "review", "hook_event": "x", "payload": {}, "max_tokens": 0},
+    )
+    assert resp.status == 400
+    assert (await resp.json())["error"] == "invalid_body"
+
+
+async def test_fork_without_snapshot_is_200_ok_no_snapshot(harness: ServerHarness) -> None:
+    resp = await harness.client.post(
+        "/cgx/sessions/sess-empty2/fork",
+        json={"prompt": "review", "hook_event": "x", "payload": {}},
+    )
+    assert resp.status == 200
+    body = await resp.json()
+    assert set(body) == FORK_KEYS
+    assert body == {
+        "verdict": "ok",
+        "reason": "no_snapshot",
+        "mutation": None,
+        "usage": None,
+        "paid_write": False,
+    }
+
+
+async def test_fork_returns_the_verdict_shape(harness: ServerHarness) -> None:
+    async def messages_handler(request: web.Request) -> web.Response:
+        return web.json_response({"usage": {"input_tokens": 5}})
+
+    harness.fake.script(messages_handler)
+    resp = await harness.client.post(
+        "/v1/messages",
+        data=b'{"model": "claude-x", "max_tokens": 10, "messages": []}',
+        headers={"x-claude-code-session-id": "sess-fork", "authorization": "Bearer a"},
+    )
+    assert resp.status == 200
+
+    async def fork_handler(request: web.Request) -> web.Response:
+        return web.json_response(
+            {
+                "content": [
+                    {"type": "text", "text": json.dumps({"verdict": "ok", "reason": "fine"})}
+                ],
+                "usage": {"input_tokens": 3, "cache_read_input_tokens": 4096},
+            }
+        )
+
+    harness.fake.script(fork_handler)
+    resp = await harness.client.post(
+        "/cgx/sessions/sess-fork/fork",
+        json={"prompt": "review this", "hook_event": "PreToolUse", "payload": {"tool": "Bash"}},
+    )
+    assert resp.status == 200
+    body = await resp.json()
+    assert set(body) == FORK_KEYS
+    assert body["verdict"] == "ok"
+    assert body["reason"] == "fine"
+    assert body["mutation"] is None
+    assert body["paid_write"] is False
+    assert body["usage"]["cache_read_input_tokens"] == 4096
