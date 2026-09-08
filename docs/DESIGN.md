@@ -29,6 +29,8 @@ ruled out for the project.
 
 Candidate features for later releases, in no particular order:
 
+- SessionStart hook that registers a session with its project's policy, so
+  default-enabled becomes per-project.
 - Cache-miss gate: hold or refuse a request whose prefix is no longer cached.
 - Fork review: inspect a session's captured request before acting on it.
 - Named checkpoints: label a captured snapshot and return to it later.
@@ -199,7 +201,22 @@ in memory only, at the cost of losing bump state across daemon restarts.
 ## Configuration
 
 Configuration is environment variables only, prefix `CCBG_`, parsed once into a
-frozen `Config` dataclass:
+frozen `Config` dataclass. Not every variable is read by the same process,
+so it splits into two tables: session settings, read by the hook, the CLI
+and the statusline (all processes Claude Code spawns, so a scoped
+`settings.json` `env` block reaches them); and daemon settings, read only by
+`ccbg serve` itself, which never reads `settings.json`.
+
+### Session settings
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `CCBG_INTERVAL_1H_S` | `3000` | interval override when the prompt requests 1 h TTL; forwarded by the hook as `interval_s` |
+| `CCBG_INTERVAL_5M_S` | `240` | interval override otherwise; forwarded by the hook as `interval_s` |
+| `CCBG_MAX_DURATION_S` | `86400` | max-duration override; forwarded by the hook as `max_duration_s`, unless `/cache on <duration>` gave one explicitly |
+| `CCBG_URL` | `http://127.0.0.1:8787` | where the hook, the CLI and the statusline find the daemon |
+
+### Daemon settings
 
 | Variable | Default | Meaning |
 |---|---|---|
@@ -209,23 +226,21 @@ frozen `Config` dataclass:
 | `CCBG_STATE_DIR` | XDG state path above | persistence root |
 | `CCBG_PERSIST` | `true` | write snapshots and state to disk |
 | `CCBG_DEFAULT_ENABLED` | `false` | bump new sessions without being asked |
-| `CCBG_INTERVAL_1H_S` | `3000` | interval when the prompt requests 1 h TTL |
-| `CCBG_INTERVAL_5M_S` | `240` | interval otherwise |
-| `CCBG_MAX_DURATION_S` | `86400` | stop bumping this long after the last real request |
 | `CCBG_ON_CACHE_WRITE` | `stop` | `stop` or `continue` when a bump paid a cache write |
 | `CCBG_MAX_STREAMS_PER_SESSION` | `8` | snapshots retained per session |
 | `CCBG_LOG_LEVEL` | `INFO` | Python logging level |
-| `CCBG_URL` | `http://127.0.0.1:8787` | where CLI subcommands find the daemon |
 
 Why no configuration file: Claude Code already has a scoped configuration
 ladder (managed, user, project, local) whose `env` block is inherited by the
-Claude Code process, by hooks, and by anything they spawn. Putting `CCBG_*`
-variables in the `env` block of the appropriate `settings.json` gives per-user
-and per-project scoping for free, and `ANTHROPIC_BASE_URL` has to live there
-anyway. `settings.json` rejects unknown top-level keys, so a `ccbg` section
-inside it is not an option, and a parallel file ladder would duplicate Claude
-Code's. Daemon-side settings that must exist before Claude Code starts (host,
-port, state dir) go in the systemd unit or the shell environment.
+Claude Code process, by hooks, and by anything they spawn. Putting the
+session settings above in the `env` block of the appropriate `settings.json`
+gives per-user and per-project scoping for free, and `ANTHROPIC_BASE_URL` has
+to live there anyway. `settings.json` rejects unknown top-level keys, so a
+`ccbg` section inside it is not an option, and a parallel file ladder would
+duplicate Claude Code's. Daemon settings do not benefit from that ladder at
+all: the daemon never reads `settings.json`, so `ccbg install --service`
+copies whichever of them are set in the installing shell into the systemd
+unit, and otherwise they are exported before `ccbg serve` starts.
 
 ## Control API
 

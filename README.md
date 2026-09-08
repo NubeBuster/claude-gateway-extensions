@@ -187,9 +187,31 @@ or let `ccbg install` do it:
 }
 ```
 
-Anything below goes in that same `env` object, next to `ANTHROPIC_BASE_URL`;
-Claude Code applies it per scope (user, project, or local), same as any
-other setting.
+Anything below goes in that same `env` object, next to `ANTHROPIC_BASE_URL`.
+Where a variable takes effect depends on who reads it, so it splits into two
+tables below.
+
+### Session settings (put these in settings.json)
+
+Claude Code applies these per user, project, or local scope, and the hook
+forwards the interval and duration ones to the daemon as this session's
+overrides when you run `/cache on` (`CCBG_URL` just tells the hook, the CLI
+and the statusline where to find the daemon).
+
+| Variable              | Default                 | What it does                                                             |
+| ---------------------- | -------------------------- | ------------------------------------------------------------------------- |
+| `CCBG_INTERVAL_1H_S`  | `3000`                   | how often to refresh the cache when the model gives it a longer lifetime |
+| `CCBG_INTERVAL_5M_S`  | `240`                    | how often to refresh the cache otherwise                                |
+| `CCBG_MAX_DURATION_S` | `86400`                  | stop refreshing this long after you last sent a real message            |
+| `CCBG_URL`            | `http://127.0.0.1:8787`  | where the hook, the CLI and the statusline find the daemon              |
+
+### Daemon settings (set where the daemon runs)
+
+The daemon does not read `settings.json`. `ccbg install --service` copies
+any of these that are set in your shell at install time into the systemd
+unit file, and otherwise you export them yourself before running `ccbg
+serve`. To change one later without reinstalling, run `systemctl --user
+edit claude-cache-bump-gateway.service`.
 
 | Variable                       | Default                                                       | What it does                                                     |
 | ------------------------------- | --------------------------------------------------------------- | -------------------------------------------------------------------- |
@@ -199,16 +221,12 @@ other setting.
 | `CCBG_STATE_DIR`               | `${XDG_STATE_HOME:-~/.local/state}/claude-cache-bump-gateway` | where session state and captured requests are saved               |
 | `CCBG_PERSIST`                 | `true`                                                        | save state to disk so it survives a daemon restart                |
 | `CCBG_DEFAULT_ENABLED`         | `false`                                                       | turn bumping on automatically for every new session               |
-| `CCBG_INTERVAL_1H_S`           | `3000`                                                        | how often to refresh the cache when the model gives it a longer lifetime |
-| `CCBG_INTERVAL_5M_S`           | `240`                                                         | how often to refresh the cache otherwise                          |
-| `CCBG_MAX_DURATION_S`          | `86400`                                                       | stop refreshing this long after you last sent a real message      |
 | `CCBG_ON_CACHE_WRITE`          | `stop`                                                        | `stop` bumping or `continue` when a refresh finds the cache already expired |
 | `CCBG_MAX_STREAMS_PER_SESSION` | `8`                                                           | how many separate conversation branches to remember per session   |
 | `CCBG_LOG_LEVEL`               | `INFO`                                                        | how much detail the daemon logs                                   |
-| `CCBG_URL`                     | `http://127.0.0.1:8787`                                       | where the `ccbg` command finds the daemon                         |
 
-This table is kept in sync with `docs/DESIGN.md` "Configuration"; if they
-ever disagree, `config.py` is the source of truth.
+These two tables are kept in sync with `docs/DESIGN.md` "Configuration"; if
+they ever disagree, `config.py` is the source of truth.
 
 ## Integrating
 
