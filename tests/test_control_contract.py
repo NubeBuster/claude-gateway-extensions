@@ -34,8 +34,10 @@ STATUS_KEYS = {
     "bump_count",
     "stopped_reason",
     "next_bump_at",
+    "cache_expires_at",
     "streams",
     "last_result",
+    "formatted",
 }
 
 

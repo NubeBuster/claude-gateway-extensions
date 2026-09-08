@@ -31,7 +31,10 @@ Response `200`:
 {"sessions": [{"session_id": "abc123", "enabled": true, "interval_s": null,
   "max_duration_s": null, "until": null, "last_request_at": 1700000000.0,
   "last_bump_at": 1700003000.0, "bump_count": 3, "stopped_reason": null,
-  "next_bump_at": 1700006000.0, "streams": 2, "last_result": null}]}
+  "next_bump_at": 1700006000.0, "cache_expires_at": 1700003300.0,
+  "streams": 2, "last_result": null,
+  "formatted": {"ttl_countdown": "04:37", "expires_at": "20:18",
+  "next_bump_countdown": "49:37", "next_bump_at": "21:06"}}]}
 ```
 
 ## GET /ccbg/sessions/{id}
@@ -40,6 +43,23 @@ One session's status dict (same shape as an entry above).
 
 Status codes: `200` on success, `400` on an invalid id, `404` with
 `{"error": "unknown_session"}` if the id is well-formed but unknown.
+
+`cache_expires_at` is the epoch time the prompt cache is expected to
+expire: the later of `last_request_at`/`last_bump_at`, plus the TTL
+Anthropic actually applies to the session's selected snapshot (1 hour or
+5 minutes, from the same `cache_control.ttl` check the scheduler uses to
+pick its bump interval — not the smaller, configurable bump interval
+itself). It is `null` only when the session has no snapshot yet, and is
+present whether or not bumping is enabled.
+
+`formatted` holds human-readable strings computed at request time in the
+daemon's local timezone: countdowns (`ttl_countdown`, `next_bump_countdown`)
+render as `MM:SS`, switching to `H:MM:SS` at one hour or more and clamping
+to `00:00` once elapsed; clock values (`expires_at`, `next_bump_at`) render
+as local `HH:MM`. `ttl_countdown`/`expires_at` are present whenever
+`cache_expires_at` is known, even when the session is disabled, so a
+statusline can always show the cache's time to live; `next_bump_countdown`/
+`next_bump_at` are `null` when no bump is scheduled.
 
 ## PUT /ccbg/sessions/{id}
 

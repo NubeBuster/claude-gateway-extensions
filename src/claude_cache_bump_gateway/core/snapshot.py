@@ -18,6 +18,17 @@ class SnapshotError(ValueError):
     """Raised when a captured request body cannot be parsed as JSON."""
 
 
+#: Anthropic's actual prompt-cache TTL, in seconds, for a snapshot whose
+#: ``cache_control.ttl`` is ``"1h"``. Distinct from the daemon's configured
+#: bump interval (``CCBG_INTERVAL_1H_S``), which is a smaller safety margin
+#: under this TTL, not the TTL itself.
+CACHE_TTL_1H_S = 3600
+
+#: Anthropic's actual prompt-cache TTL, in seconds, for a snapshot that does
+#: not request ``"1h"`` (the default 5-minute ephemeral cache).
+CACHE_TTL_5M_S = 300
+
+
 @dataclass
 class Usage:
     """Token usage reported in a ``/v1/messages`` response ``usage`` block."""

@@ -105,7 +105,27 @@ ccbg now --session "$CLAUDE_SESSION_ID"
 ```
 
 `ccbg status --session "$CLAUDE_SESSION_ID" --json` and `GET
-/ccbg/sessions/{id}` both return the same session status object:
+/ccbg/sessions/{id}` both return the same session status object. It always
+carries a short `formatted` block of human-readable strings for display:
+
+```json
+{
+  "formatted": {
+    "ttl_countdown": "55:19",
+    "expires_at": "20:18",
+    "next_bump_countdown": "50:19",
+    "next_bump_at": "20:13"
+  }
+}
+```
+
+`ttl_countdown` and `expires_at` are provided for every session that has a
+captured snapshot, whether or not bumping is configured, so you can always
+display the prompt cache's remaining time to live; `next_bump_countdown` and
+`next_bump_at` are `null` when no bump is scheduled.
+
+<details>
+<summary>Full status object and field reference</summary>
 
 ```json
 {
@@ -119,6 +139,7 @@ ccbg now --session "$CLAUDE_SESSION_ID"
   "bump_count": 3,
   "stopped_reason": null,
   "next_bump_at": 1700006000.0,
+  "cache_expires_at": 1700003300.0,
   "streams": 2,
   "last_result": {
     "outcome": "ok",
@@ -132,6 +153,12 @@ ccbg now --session "$CLAUDE_SESSION_ID"
     "detail": "",
     "stream_key": "ab12...",
     "model": "claude-opus-4"
+  },
+  "formatted": {
+    "ttl_countdown": "55:19",
+    "expires_at": "20:18",
+    "next_bump_countdown": "50:19",
+    "next_bump_at": "20:13"
   }
 }
 ```
@@ -148,6 +175,7 @@ ccbg now --session "$CLAUDE_SESSION_ID"
 | `bump_count`                                    | int                     | number of successful bumps for this session                               |
 | `stopped_reason`                                | string or null          | why bumping was turned off automatically (e.g. `cache_write`), if it was  |
 | `next_bump_at`                                  | float (epoch s) or null | when the next scheduled bump will fire; `null` if disabled or no snapshot |
+| `cache_expires_at`                              | float (epoch s) or null | when the prompt cache is expected to expire; `null` if no snapshot yet    |
 | `streams`                                       | int                     | number of distinct request streams captured for this session              |
 | `last_result`                                   | object or null          | the most recent `BumpResult` (below), or `null` if never bumped           |
 | `last_result.outcome`                           | string                  | `ok`, `cache_write`, `unauthorized`, `rejected`, or `transient`           |
@@ -160,8 +188,14 @@ ccbg now --session "$CLAUDE_SESSION_ID"
 | `last_result.detail`                            | string                  | short human-readable detail, empty on `ok`                                |
 | `last_result.stream_key`                        | string or null          | which captured stream was replayed                                        |
 | `last_result.model`                             | string or null          | the model of the replayed stream                                          |
+| `formatted.ttl_countdown`                       | string or null          | cache time-to-live countdown, `MM:SS`/`H:MM:SS`, present whenever `cache_expires_at` is known |
+| `formatted.expires_at`                          | string or null          | local `HH:MM` clock time the cache expires, present whenever `cache_expires_at` is known |
+| `formatted.next_bump_countdown`                 | string or null          | countdown to the next scheduled bump, `null` if none is scheduled        |
+| `formatted.next_bump_at`                        | string or null          | local `HH:MM` clock time of the next scheduled bump, `null` if none      |
 
 Full contract, including every other route: `docs/API.md`.
+
+</details>
 
 To show cache status in your own statusline, append `ccbg statusline`
 to your existing `statusLine` command, e.g. `existing-command; ccbg

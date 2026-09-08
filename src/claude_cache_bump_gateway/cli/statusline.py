@@ -17,6 +17,7 @@ from typing import TextIO
 
 from claude_cache_bump_gateway.cli.client import ApiError, ControlClient, DaemonUnreachable
 from claude_cache_bump_gateway.config import Config
+from claude_cache_bump_gateway.core.status_format import format_clock
 
 _TIMEOUT_S = 0.5
 
@@ -26,7 +27,7 @@ def _format_deadline(until_epoch: float, now: float) -> str:
     deadline = datetime.fromtimestamp(until_epoch, tz=UTC).astimezone()
     today = datetime.fromtimestamp(now, tz=UTC).astimezone()
     if deadline.date() == today.date():
-        return deadline.strftime("%H:%M")
+        return format_clock(until_epoch)
     return deadline.strftime("%m-%d %H:%M")
 
 

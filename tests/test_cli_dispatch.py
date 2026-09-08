@@ -9,6 +9,7 @@ global to monkeypatch).
 from __future__ import annotations
 
 import io
+import json
 import sys
 from pathlib import Path
 from typing import Any
@@ -135,6 +136,31 @@ def test_status_json() -> None:
     code, out, _ = _run(["status", "--json"], client)
     assert code == EXIT_OK
     assert '"session_id": "s1"' in out
+
+
+def test_status_json_passes_through_cache_expires_at_and_formatted() -> None:
+    formatted = {
+        "ttl_countdown": "55:19",
+        "expires_at": "20:18",
+        "next_bump_countdown": None,
+        "next_bump_at": None,
+    }
+    client = _FakeClient(
+        "http://x",
+        sessions={
+            "s1": {
+                "session_id": "s1",
+                "enabled": False,
+                "cache_expires_at": 1700003319.0,
+                "formatted": formatted,
+            }
+        },
+    )
+    code, out, _ = _run(["status", "--json"], client)
+    assert code == EXIT_OK
+    payload = json.loads(out)
+    assert payload[0]["cache_expires_at"] == 1700003319.0
+    assert payload[0]["formatted"] == formatted
 
 
 def test_status_unknown_session_is_failure() -> None:

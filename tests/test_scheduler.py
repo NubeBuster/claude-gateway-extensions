@@ -11,7 +11,7 @@ from claude_cache_bump_gateway.config import Config
 from claude_cache_bump_gateway.core.clock import FakeClock
 from claude_cache_bump_gateway.core.scheduler import NoSnapshot, Scheduler
 from claude_cache_bump_gateway.core.selector import LargestPrefixSelector
-from claude_cache_bump_gateway.core.snapshot import Snapshot, Usage
+from claude_cache_bump_gateway.core.snapshot import SessionState, Snapshot, Usage
 from claude_cache_bump_gateway.core.store import MemoryStore
 from claude_cache_bump_gateway.core.upstream import UpstreamResponse
 
@@ -53,6 +53,28 @@ def _snapshot(session_id: str = "sess-1", total_input: int = 100) -> Snapshot:
         body=b'{"model": "claude-x", "max_tokens": 4096, "messages": []}',
         captured_at=1000.0,
         usage=Usage(input_tokens=total_input),
+    )
+
+
+def _formatted(status: Mapping[str, object]) -> Mapping[str, object]:
+    formatted = status["formatted"]
+    assert isinstance(formatted, dict)
+    return formatted
+
+
+def _snapshot_1h(session_id: str = "sess-1") -> Snapshot:
+    return Snapshot(
+        session_id=session_id,
+        stream_key="stream-a",
+        model="claude-x",
+        headers={"authorization": "Bearer old", "content-type": "application/json"},
+        body=(
+            b'{"model": "claude-x", "max_tokens": 4096, "system": [{"type": "text", '
+            b'"text": "s", "cache_control": {"type": "ephemeral", "ttl": "1h"}}], '
+            b'"messages": []}'
+        ),
+        captured_at=1000.0,
+        usage=Usage(input_tokens=100),
     )
 
 
@@ -514,3 +536,84 @@ async def test_forget_removes_session(tmp_path: Path, clock: FakeClock, store: M
     assert store.get_state("sess-1") is None
     assert store.get_snapshots("sess-1") == []
     assert scheduler.status_all() == []
+
+
+async def test_status_reports_cache_expires_at_5m_ttl(
+    tmp_path: Path, clock: FakeClock, store: MemoryStore
+) -> None:
+    upstream = ScriptedUpstream([])
+    scheduler = Scheduler(_config(tmp_path), store, LargestPrefixSelector(), upstream, clock)
+
+    scheduler.note_request("sess-1", _snapshot(), ("authorization", "Bearer a"))
+
+    status = scheduler.status("sess-1")
+    assert status["cache_expires_at"] == pytest.approx(1000.0 + 300.0)
+    assert _formatted(status)["ttl_countdown"] == "05:00"
+
+
+async def test_status_reports_cache_expires_at_1h_ttl(
+    tmp_path: Path, clock: FakeClock, store: MemoryStore
+) -> None:
+    upstream = ScriptedUpstream([])
+    scheduler = Scheduler(_config(tmp_path), store, LargestPrefixSelector(), upstream, clock)
+
+    scheduler.note_request("sess-1", _snapshot_1h(), ("authorization", "Bearer a"))
+
+    status = scheduler.status("sess-1")
+    assert status["cache_expires_at"] == pytest.approx(1000.0 + 3600.0)
+    assert _formatted(status)["ttl_countdown"] == "1:00:00"
+
+
+async def test_status_cache_expires_at_present_when_disabled(
+    tmp_path: Path, clock: FakeClock, store: MemoryStore
+) -> None:
+    """TTL fields must show even when the session was never enabled for bumping."""
+    upstream = ScriptedUpstream([])
+    scheduler = Scheduler(_config(tmp_path), store, LargestPrefixSelector(), upstream, clock)
+
+    scheduler.note_request("sess-1", _snapshot(), ("authorization", "Bearer a"))
+
+    status = scheduler.status("sess-1")
+    assert status["enabled"] is False
+    assert status["next_bump_at"] is None
+    assert status["cache_expires_at"] == pytest.approx(1000.0 + 300.0)
+    formatted = _formatted(status)
+    assert formatted["ttl_countdown"] is not None
+    assert formatted["expires_at"] is not None
+    assert formatted["next_bump_countdown"] is None
+    assert formatted["next_bump_at"] is None
+
+
+async def test_status_cache_expires_at_none_without_snapshot(
+    tmp_path: Path, clock: FakeClock, store: MemoryStore
+) -> None:
+    upstream = ScriptedUpstream([])
+    scheduler = Scheduler(_config(tmp_path), store, LargestPrefixSelector(), upstream, clock)
+    store.put_state(SessionState(session_id="sess-1"))
+
+    status = scheduler.status("sess-1")
+    assert status["cache_expires_at"] is None
+    assert status["formatted"] == {
+        "ttl_countdown": None,
+        "expires_at": None,
+        "next_bump_countdown": None,
+        "next_bump_at": None,
+    }
+
+
+async def test_status_cache_expires_at_anchors_on_last_bump(
+    tmp_path: Path, clock: FakeClock, store: MemoryStore
+) -> None:
+    upstream = ScriptedUpstream([_ok_response()])
+    scheduler = Scheduler(_config(tmp_path), store, LargestPrefixSelector(), upstream, clock)
+
+    scheduler.note_request("sess-1", _snapshot(), ("authorization", "Bearer a"))
+    scheduler.set_enabled("sess-1", True, interval_s=5)
+
+    await _pump_until(lambda: store.get_state("sess-1").bump_count == 1)  # type: ignore[union-attr]
+
+    status = scheduler.status("sess-1")
+    assert status["last_bump_at"] == pytest.approx(1005.0)
+    assert status["cache_expires_at"] == pytest.approx(1005.0 + 300.0)
+
+    await scheduler.stop()

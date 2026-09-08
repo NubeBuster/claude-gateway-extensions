@@ -20,11 +20,14 @@ from claude_cache_bump_gateway.core.bump import BumpResult, bump_once
 from claude_cache_bump_gateway.core.clock import Clock
 from claude_cache_bump_gateway.core.selector import TargetSelector
 from claude_cache_bump_gateway.core.snapshot import (
+    CACHE_TTL_1H_S,
+    CACHE_TTL_5M_S,
     SessionState,
     Snapshot,
     SnapshotError,
     wants_1h_ttl,
 )
+from claude_cache_bump_gateway.core.status_format import format_status_times
 from claude_cache_bump_gateway.core.store import SnapshotStore
 from claude_cache_bump_gateway.core.upstream import Upstream
 
@@ -210,7 +213,9 @@ class Scheduler:
         snapshots = self._store.get_snapshots(session_id)
         snapshot = self._selector.select(snapshots)
         next_bump_at = self._next_bump_at(state, snapshot) if state.enabled else None
+        cache_expires_at = self._cache_expires_at(state, snapshot)
         last_result = self._last_result.get(session_id)
+        now = self._clock.now()
         return {
             "session_id": state.session_id,
             "enabled": state.enabled,
@@ -222,8 +227,12 @@ class Scheduler:
             "bump_count": state.bump_count,
             "stopped_reason": state.stopped_reason,
             "next_bump_at": next_bump_at,
+            "cache_expires_at": cache_expires_at,
             "streams": len(snapshots),
             "last_result": dataclasses.asdict(last_result) if last_result is not None else None,
+            "formatted": format_status_times(
+                cache_expires_at=cache_expires_at, next_bump_at=next_bump_at, now=now
+            ),
         }
 
     def status_all(self) -> list[dict[str, object]]:
@@ -323,6 +332,31 @@ class Scheduler:
         event = self._wakeups.setdefault(session_id, asyncio.Event())
         event.clear()
         await self._clock.wait_for_event(event, remaining)
+
+    def _cache_ttl_s(self, snapshot: Snapshot) -> int:
+        """Return the actual prompt-cache TTL for ``snapshot`` (1 h or 5 min).
+
+        Uses the same 1h-vs-5m derivation as :meth:`_effective_interval`
+        (``wants_1h_ttl``), but the real Anthropic TTL rather than the
+        daemon's smaller, configurable bump-interval safety margin.
+        """
+        try:
+            wants_1h = wants_1h_ttl(snapshot.body)
+        except SnapshotError:
+            wants_1h = False
+        return CACHE_TTL_1H_S if wants_1h else CACHE_TTL_5M_S
+
+    def _cache_expires_at(self, state: SessionState, snapshot: Snapshot | None) -> float | None:
+        """Return when the prompt cache is expected to expire, or ``None`` without a snapshot.
+
+        The start point is the later of the last real request or the last
+        successful bump; present regardless of whether bumping is enabled,
+        so a statusline can always show the cache's remaining time to live.
+        """
+        if snapshot is None:
+            return None
+        anchor = max(state.last_request_at or 0.0, state.last_bump_at or 0.0)
+        return anchor + self._cache_ttl_s(snapshot)
 
     def _apply_result(self, session_id: str, result: BumpResult) -> str | None:
         """Record ``result`` and apply its bookkeeping effect; return a stop reason if any."""

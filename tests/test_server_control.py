@@ -221,6 +221,45 @@ async def test_put_accepts_a_past_until_unlike_max_duration(harness: ServerHarne
     assert data["until"] == 1.0
 
 
+async def test_status_has_no_cache_expires_at_without_a_snapshot(
+    harness: ServerHarness,
+) -> None:
+    resp = await harness.client.put("/ccbg/sessions/sess-empty2", json={"enabled": True})
+    data = await resp.json()
+    assert data["cache_expires_at"] is None
+    assert data["formatted"] == {
+        "ttl_countdown": None,
+        "expires_at": None,
+        "next_bump_countdown": None,
+        "next_bump_at": None,
+    }
+
+
+async def test_status_cache_expires_at_present_after_a_real_request(
+    harness: ServerHarness,
+) -> None:
+    async def messages_handler(request: web.Request) -> web.Response:
+        return web.json_response({"usage": {"input_tokens": 5}})
+
+    harness.fake.script(messages_handler)
+    body = b'{"model": "claude-x", "max_tokens": 10, "messages": []}'
+    resp = await harness.client.post(
+        "/v1/messages",
+        data=body,
+        headers={"x-claude-code-session-id": "sess-ttl", "authorization": "Bearer a"},
+    )
+    assert resp.status == 200
+
+    status_resp = await harness.client.get("/ccbg/sessions/sess-ttl")
+    data = await status_resp.json()
+    assert data["enabled"] is False
+    assert isinstance(data["cache_expires_at"], int | float)
+    assert data["formatted"]["ttl_countdown"] is not None
+    assert data["formatted"]["expires_at"] is not None
+    assert data["formatted"]["next_bump_countdown"] is None
+    assert data["formatted"]["next_bump_at"] is None
+
+
 async def test_put_disabling_clears_until(harness: ServerHarness) -> None:
     """Disabling drops the deadline; re-enabling without one does not resurrect it."""
     session = "/ccbg/sessions/sess-until-cleared"
