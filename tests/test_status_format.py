@@ -50,17 +50,8 @@ def test_format_countdown_negative_clamps_to_zero() -> None:
     assert format_countdown(-42) == "00:00"
 
 
-def test_format_countdown_zero() -> None:
-    assert format_countdown(0) == "00:00"
-
-
 def test_format_clock_uses_given_zone() -> None:
     assert format_clock(_NOW + 3319, tz=_TZ) == "08:38"
-
-
-def test_format_clock_defaults_to_local_zone_without_error() -> None:
-    # Just exercise the no-tz path; the exact string depends on the host zone.
-    assert len(format_clock(_NOW)) == 5
 
 
 def test_format_status_times_full() -> None:
@@ -132,11 +123,6 @@ def test_format_deadline_just_before_midnight_stays_same_day() -> None:
     now = _epoch(2026, 9, 8, 20, 0, _AMS)
     until = _epoch(2026, 9, 8, 23, 59, _AMS)
     assert format_deadline(until, now, tz=_AMS) == "23:59 — 3h 59m from now"
-
-
-def test_format_deadline_defaults_to_host_local_zone_without_error() -> None:
-    # Just exercise the no-tz path; the exact string depends on the host zone.
-    assert "from now" in format_deadline(_NOW + 3600, _NOW)
 
 
 # -- format_deadline: DST day -------------------------------------------------

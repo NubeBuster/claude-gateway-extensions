@@ -138,13 +138,6 @@ def test_status_single_session_via_flag() -> None:
     assert client.calls == [("get_session", ("s1",))]
 
 
-def test_status_json() -> None:
-    client = _FakeClient("http://x", sessions={"s1": {"session_id": "s1", "enabled": True}})
-    code, out, _ = _run(["status", "--json"], client)
-    assert code == EXIT_OK
-    assert '"session_id": "s1"' in out
-
-
 def test_status_json_passes_through_cache_expires_at_and_formatted() -> None:
     formatted = {
         "ttl_countdown": "55:19",

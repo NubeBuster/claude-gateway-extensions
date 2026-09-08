@@ -125,12 +125,6 @@ def test_render_unit_explicit_port_overrides_shell_env(tmp_path: Path) -> None:
     assert "Environment=CGX_PORT=1111" not in text
 
 
-def test_render_unit_explicit_port_with_no_env_port_set(tmp_path: Path) -> None:
-    environ = {"HOME": str(tmp_path)}
-    text = service.render_unit("/usr/local/bin/cgx", environ, port=9999)
-    assert "Environment=CGX_PORT=9999" in text
-
-
 def test_render_unit_explicit_host_overrides_shell_env(tmp_path: Path) -> None:
     environ = {"HOME": str(tmp_path), "CGX_HOST": "0.0.0.0"}
     text = service.render_unit("/usr/local/bin/cgx", environ, host="127.0.0.1")

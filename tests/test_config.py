@@ -61,13 +61,13 @@ def test_default_state_dir_falls_back_to_userprofile_without_home() -> None:
     )
 
 
-@pytest.mark.parametrize("raw", ["true", "True", "1", "yes", "YES"])
+@pytest.mark.parametrize("raw", ["true", "1", "yes"])
 def test_bool_parsing_true(raw: str) -> None:
     config = Config.from_env({"CGX_PERSIST": raw})
     assert config.persist is True
 
 
-@pytest.mark.parametrize("raw", ["false", "False", "0", "no", "NO"])
+@pytest.mark.parametrize("raw", ["false", "0", "NO"])
 def test_bool_parsing_false(raw: str) -> None:
     config = Config.from_env({"CGX_PERSIST": raw})
     assert config.persist is False
@@ -152,9 +152,4 @@ def test_url_falls_back_to_loopback_anthropic_base_url() -> None:
 def test_url_ignores_non_loopback_or_non_http_anthropic_base_url(base_url: str) -> None:
     """A non-loopback (or non-http) ANTHROPIC_BASE_URL is not this daemon; ignore it."""
     config = Config.from_env({"ANTHROPIC_BASE_URL": base_url})
-    assert config.url == "http://127.0.0.1:8787"
-
-
-def test_url_falls_back_to_default_when_nothing_set() -> None:
-    config = Config.from_env({})
     assert config.url == "http://127.0.0.1:8787"

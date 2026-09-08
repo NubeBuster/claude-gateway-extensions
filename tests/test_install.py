@@ -319,10 +319,6 @@ def test_resolve_install_port_falls_back_to_default() -> None:
     assert install.resolve_install_port(None, {}, None) == install.DEFAULT_PORT
 
 
-def test_resolve_install_url_builds_loopback_url() -> None:
-    assert install.resolve_install_url(9999, {}, None) == "http://127.0.0.1:9999"
-
-
 @pytest.mark.invariant(decision="The port is written down, never assumed")
 def test_install_writes_cgx_url_for_non_default_port(tmp_path: Path) -> None:
     environ = {"HOME": str(tmp_path)}

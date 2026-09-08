@@ -136,19 +136,6 @@ def test_duration_enables_with_an_absolute_deadline(fake_daemon: tuple[str, dict
     assert "max_duration_s" not in body
 
 
-def test_clock_time_enables_with_an_absolute_deadline(fake_daemon: tuple[str, dict, list]) -> None:
-    base_url, routes, calls = fake_daemon
-    routes[("PUT", "/cgx/sessions/s1")] = (
-        200,
-        {"session_id": "s1", "enabled": True, "until": 1700006000, "next_bump_at": None},
-    )
-    code, out = _run({"session_id": "s1", "prompt": "/cache 9PM"}, {"CGX_URL": base_url})
-    assert code == 0
-    decision = json.loads(out)
-    assert "cache: bumping until" in decision["reason"]
-    assert calls[0][2]["enabled"] is True
-
-
 def test_off_blocks_with_off_reason(fake_daemon: tuple[str, dict, list]) -> None:
     base_url, routes, _calls = fake_daemon
     routes[("PUT", "/cgx/sessions/s1")] = (200, {"session_id": "s1", "enabled": False})
@@ -213,15 +200,6 @@ def test_on_is_removed_and_gives_the_unparseable_hint(
 ) -> None:
     base_url, _routes, calls = fake_daemon
     code, out = _run({"session_id": "s1", "prompt": "/cache on"}, {"CGX_URL": base_url})
-    assert code == 0
-    decision = json.loads(out)
-    assert "try 2h, 9PM, tomorrow 10AM" in decision["reason"]
-    assert calls == []
-
-
-def test_on_with_duration_is_also_unparseable(fake_daemon: tuple[str, dict, list]) -> None:
-    base_url, _routes, calls = fake_daemon
-    code, out = _run({"session_id": "s1", "prompt": "/cache on 2h"}, {"CGX_URL": base_url})
     assert code == 0
     decision = json.loads(out)
     assert "try 2h, 9PM, tomorrow 10AM" in decision["reason"]

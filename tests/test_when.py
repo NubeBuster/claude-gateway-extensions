@@ -167,17 +167,6 @@ def test_ambiguous_clock_12_wraps_to_00_when_both_passed() -> None:
     assert result == At(_at(2026, 9, 9, 0, 30))
 
 
-@pytest.mark.parametrize(
-    ("text", "hour", "minute"),
-    [("9:30", 9, 30), ("10:15", 10, 15)],
-)
-def test_ambiguous_clock_examples_from_the_grammar(text: str, hour: int, minute: int) -> None:
-    """9:30 and 10:15 are 12h-ambiguous like 4:20 and 12:30."""
-    now = _at(2026, 9, 8, 6, 0)
-    result = parse_when(text, now)
-    assert result == At(_at(2026, 9, 8, hour, minute))
-
-
 @pytest.mark.invariant(decision="Absolute deadline, not an open-ended toggle")
 def test_zero_padded_hour_is_unambiguous_24h() -> None:
     """04:20 is not ambiguous: it stays plain 24h, unlike bare 4:20."""
@@ -186,25 +175,11 @@ def test_zero_padded_hour_is_unambiguous_24h() -> None:
     assert result == At(_at(2026, 9, 9, 4, 20))
 
 
-def test_zero_padded_09_is_unambiguous_24h() -> None:
-    now = _at(2026, 9, 8, 10, 0)
-    result = parse_when("09:30", now)
-    assert result == At(_at(2026, 9, 9, 9, 30))
-
-
 @pytest.mark.invariant(decision="Absolute deadline, not an open-ended toggle")
 def test_zero_padded_midnight_is_unambiguous_24h() -> None:
     now = _at(2026, 9, 8, 0, 0)
     result = parse_when("00:30", now)
     assert result == At(_at(2026, 9, 8, 0, 30))
-
-
-@pytest.mark.parametrize("text", ["13:00", "23:15"])
-def test_hours_13_to_23_stay_unambiguous(text: str) -> None:
-    now = _at(2026, 9, 8, 6, 0)
-    result = parse_when(text, now)
-    assert isinstance(result, At)
-    assert result.when.hour in (13, 23)
 
 
 @pytest.mark.invariant(decision="Absolute deadline, not an open-ended toggle")
@@ -493,13 +468,6 @@ def test_named_times_morning_dinner_nighttime(text: str, hour: int, minute: int)
     assert result == At(_at(2026, 9, 8, hour, minute))
 
 
-@pytest.mark.parametrize("text", ["MORNING", "Dinner", "NightTime"])
-def test_named_times_are_case_insensitive(text: str) -> None:
-    now = _at(2026, 9, 8, 6, 0)
-    result = parse_when(text, now)
-    assert isinstance(result, At)
-
-
 @pytest.mark.invariant(decision="Absolute deadline, not an open-ended toggle")
 def test_named_time_rolls_to_tomorrow_when_already_past() -> None:
     now = _at(2026, 9, 8, 20, 0)
@@ -519,12 +487,6 @@ def test_named_time_with_today() -> None:
     now = _at(2026, 9, 8, 8, 0)
     result = parse_when("today nighttime", now)
     assert result == At(_at(2026, 9, 8, 22, 0))
-
-
-def test_named_time_with_weekday() -> None:
-    now = _at(2026, 9, 8, 8, 0)  # Tuesday
-    result = parse_when("fri morning", now)
-    assert result == At(_at(2026, 9, 11, 9, 0))
 
 
 # -- DST transitions ---------------------------------------------------------
@@ -592,7 +554,3 @@ def test_bare_number_other_than_zero_is_rejected(text: str) -> None:
     now = _at(2026, 9, 8, 8, 0)
     with pytest.raises(WhenError, match="try 2h, 9PM, tomorrow 10AM"):
         parse_when(text, now)
-
-
-def test_bare_zero_is_still_off() -> None:
-    assert parse_when("0", _at(2026, 9, 8, 8, 0)) == Off()

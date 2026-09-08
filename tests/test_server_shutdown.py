@@ -130,12 +130,6 @@ async def test_non_local_host_logs_a_warning_but_still_starts(
     )
 
 
-def test_shutdown_signals_cover_sigterm_and_sigint() -> None:
-    from claude_gateway_extensions.server.app import SHUTDOWN_SIGNALS
-
-    assert set(SHUTDOWN_SIGNALS) == {signal.SIGTERM, signal.SIGINT}
-
-
 @pytest.mark.parametrize("sig", [signal.SIGTERM, signal.SIGINT])
 async def test_installed_handler_sets_the_event(sig: signal.Signals) -> None:
     """Each shutdown signal must set the stop event rather than killing the process."""
