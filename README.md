@@ -19,7 +19,8 @@ a read (see "How it works").
 ## Requirements
 
 - Python 3.11+
-- Claude Code, with a claude.ai subscription or an `ANTHROPIC_API_KEY`
+- Claude Code
+- [Both claude.ai substriptions and API billing are supported](https://code.claude.com/docs/en/gateways#subscriptions-and-gateways)
 - Linux or macOS. `ccbg service install` (the systemd user unit) is Linux
   only; on macOS run `ccbg serve` yourself (a shell, `tmux`, or a `launchd`
   agent you write).
