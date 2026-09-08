@@ -30,3 +30,9 @@
 - `/cache` deadlines also accept weekday names and abbreviations
   (`wed`/`wednesday`/`we`, `fri 9AM`, `tu 21:00`), case-insensitive,
   resolving to the next local occurrence of that weekday.
+- A clock time with minutes but no am/pm and a non-zero-padded 1..12 hour
+  (`4:20`, `12:30`) is 12h-ambiguous: it now resolves to whichever of the
+  two 12-hour candidates is the nearest upcoming one, instead of always
+  reading as 24h. Zero-padded hours (`04:20`) and hours 13..23 are
+  unaffected. With an explicit day (`today`/`tomorrow`/a weekday), the
+  earliest candidate still ahead on that day wins.

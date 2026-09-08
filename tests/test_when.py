@@ -123,6 +123,129 @@ def test_clock_at_or_before_now_rolls_forward_not_errors() -> None:
     assert result == At(_at(2026, 9, 9, 21, 0))
 
 
+# -- 12h-ambiguous clock times -----------------------------------------------
+
+
+def test_ambiguous_clock_picks_afternoon_when_morning_already_passed() -> None:
+    now = _at(2026, 9, 8, 15, 0)
+    result = parse_when("4:20", now)
+    assert result == At(_at(2026, 9, 8, 16, 20))
+
+
+def test_ambiguous_clock_rolls_to_tomorrow_when_both_candidates_passed() -> None:
+    now = _at(2026, 9, 8, 17, 0)
+    result = parse_when("4:20", now)
+    assert result == At(_at(2026, 9, 9, 4, 20))
+
+
+def test_ambiguous_clock_picks_morning_when_still_ahead() -> None:
+    now = _at(2026, 9, 8, 11, 0)
+    result = parse_when("12:30", now)
+    assert result == At(_at(2026, 9, 8, 12, 30))
+
+
+def test_ambiguous_clock_12_wraps_to_00_when_both_passed() -> None:
+    now = _at(2026, 9, 8, 13, 0)
+    result = parse_when("12:30", now)
+    assert result == At(_at(2026, 9, 9, 0, 30))
+
+
+@pytest.mark.parametrize(
+    ("text", "hour", "minute"),
+    [("9:30", 9, 30), ("10:15", 10, 15)],
+)
+def test_ambiguous_clock_examples_from_the_grammar(text: str, hour: int, minute: int) -> None:
+    """9:30 and 10:15 are 12h-ambiguous like 4:20 and 12:30."""
+    now = _at(2026, 9, 8, 6, 0)
+    result = parse_when(text, now)
+    assert result == At(_at(2026, 9, 8, hour, minute))
+
+
+def test_zero_padded_hour_is_unambiguous_24h() -> None:
+    """04:20 is not ambiguous: it stays plain 24h, unlike bare 4:20."""
+    now = _at(2026, 9, 8, 15, 0)
+    result = parse_when("04:20", now)
+    assert result == At(_at(2026, 9, 9, 4, 20))
+
+
+def test_zero_padded_09_is_unambiguous_24h() -> None:
+    now = _at(2026, 9, 8, 10, 0)
+    result = parse_when("09:30", now)
+    assert result == At(_at(2026, 9, 9, 9, 30))
+
+
+def test_zero_padded_midnight_is_unambiguous_24h() -> None:
+    now = _at(2026, 9, 8, 0, 0)
+    result = parse_when("00:30", now)
+    assert result == At(_at(2026, 9, 8, 0, 30))
+
+
+@pytest.mark.parametrize("text", ["13:00", "23:15"])
+def test_hours_13_to_23_stay_unambiguous(text: str) -> None:
+    now = _at(2026, 9, 8, 6, 0)
+    result = parse_when(text, now)
+    assert isinstance(result, At)
+    assert result.when.hour in (13, 23)
+
+
+def test_ampm_always_wins_even_though_hour_and_minutes_look_ambiguous() -> None:
+    now = _at(2026, 9, 8, 15, 0)
+    result = parse_when("4:20am", now)
+    assert result == At(_at(2026, 9, 9, 4, 20))
+
+
+def test_bare_hour_without_minutes_still_rejected() -> None:
+    now = _at(2026, 9, 8, 8, 0)
+    with pytest.raises(WhenError, match="try 2h, 9PM, tomorrow 10AM"):
+        parse_when("4", now)
+
+
+def test_ambiguous_clock_explicit_today_picks_earliest_future_candidate() -> None:
+    now = _at(2026, 9, 8, 11, 0)
+    result = parse_when("today 12:30", now)
+    assert result == At(_at(2026, 9, 8, 12, 30))
+
+
+def test_ambiguous_clock_explicit_today_errors_when_neither_candidate_ahead() -> None:
+    now = _at(2026, 9, 8, 13, 0)
+    with pytest.raises(WhenError, match="in the past"):
+        parse_when("today 12:30", now)
+
+
+def test_ambiguous_clock_explicit_tomorrow_picks_earliest_candidate() -> None:
+    now = _at(2026, 9, 8, 13, 0)
+    result = parse_when("tomorrow 12:30", now)
+    assert result == At(_at(2026, 9, 9, 0, 30))
+
+
+def test_ambiguous_clock_explicit_weekday_picks_earliest_future_candidate() -> None:
+    now = _at(2026, 9, 8, 11, 0)  # Tuesday
+    result = parse_when("tu 12:30", now)
+    assert result == At(_at(2026, 9, 8, 12, 30))
+
+
+def test_ambiguous_clock_explicit_weekday_rolls_to_next_week_when_both_passed() -> None:
+    now = _at(2026, 9, 8, 13, 0)  # Tuesday
+    result = parse_when("tu 12:30", now)
+    assert result == At(_at(2026, 9, 15, 0, 30))
+
+
+def test_ambiguous_clock_future_weekday_picks_earliest_candidate() -> None:
+    now = _at(2026, 9, 8, 8, 0)  # Tuesday
+    result = parse_when("fri 4:20", now)
+    assert result == At(_at(2026, 9, 11, 4, 20))
+
+
+def test_ambiguous_clock_across_new_york_dst_fall_back() -> None:
+    """New York falls back 02:00->01:00 on 2026-11-01; 4:20 typed just after midnight, still EDT."""
+    now = _at(2026, 11, 1, 0, 30, tz=_NY)
+    assert now.utcoffset() == timedelta(hours=-4)
+    result = parse_when("4:20", now)
+    assert result == At(_at(2026, 11, 1, 4, 20, tz=_NY))
+    assert isinstance(result, At)
+    assert result.when.utcoffset() == timedelta(hours=-5)
+
+
 # -- today / tomorrow -------------------------------------------------------
 
 

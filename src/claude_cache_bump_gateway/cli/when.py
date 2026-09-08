@@ -71,6 +71,22 @@ class WhenError(ValueError):
 
 
 @dataclass(frozen=True)
+class _ParsedClock:
+    """A parsed clock token: its time, plus a 12h-ambiguous alternate if any.
+
+    ``alt`` is set only for a token with minutes but no am/pm whose hour is
+    written without a leading zero and falls in 1..12 (``4:20``, ``12:30``):
+    such a token could mean either ``time`` or ``time`` shifted by 12 hours,
+    and callers resolve the ambiguity by picking whichever candidate is the
+    nearest upcoming one. Zero-padded hours (``04:20``), hours 13..23, and
+    any am/pm-qualified token are unambiguous and leave ``alt`` unset.
+    """
+
+    time: dt_time
+    alt: dt_time | None = None
+
+
+@dataclass(frozen=True)
 class Status:
     """``/cache`` or ``/cache status``: report the current state."""
 
@@ -139,15 +155,12 @@ def _parse_deadline(original: str, lowered: str, now: datetime) -> datetime:
     if lowered.startswith("tomorrow"):
         rest = lowered[len("tomorrow") :].strip()
         clock = _require_clock(rest)
-        return _combine(_add_days(now.date(), 1), clock, now)
+        return _resolve_on_day(_add_days(now.date(), 1), clock, now, original)
 
     if lowered.startswith("today"):
         rest = lowered[len("today") :].strip()
         clock = _require_clock(rest)
-        candidate = _combine(now.date(), clock, now)
-        if candidate <= now:
-            raise _in_the_past(original)
-        return candidate
+        return _resolve_on_day(now.date(), clock, now, original)
 
     weekday_match = _try_parse_weekday(lowered)
     if weekday_match is not None:
@@ -180,10 +193,7 @@ def _parse_deadline(original: str, lowered: str, now: datetime) -> datetime:
 
     clock = _try_parse_clock(lowered)
     if clock is not None:
-        candidate = _combine(now.date(), clock, now)
-        if candidate <= now:
-            candidate = _combine(_add_days(now.date(), 1), clock, now)
-        return candidate
+        return _resolve_nearest_upcoming(clock, now)
 
     raise WhenError(f"{original!r}: {_HINT}")
 
@@ -203,7 +213,7 @@ def _combine(day: date, clock: dt_time, now: datetime) -> datetime:
     return datetime(day.year, day.month, day.day, clock.hour, clock.minute, tzinfo=now.tzinfo)
 
 
-def _require_clock(rest: str) -> dt_time:
+def _require_clock(rest: str) -> _ParsedClock:
     """Parse a clock time that must be present (``today``/``tomorrow <clock>``)."""
     if not rest:
         raise WhenError(f"today requires a time, e.g. 'today 9pm' ({_HINT})")
@@ -211,6 +221,43 @@ def _require_clock(rest: str) -> dt_time:
     if clock is None:
         raise WhenError(f"{rest!r}: {_HINT}")
     return clock
+
+
+def _candidate_times(clock: _ParsedClock) -> list[dt_time]:
+    """The one or two wall-clock times a parsed clock token could mean."""
+    return [clock.time] if clock.alt is None else [clock.time, clock.alt]
+
+
+def _resolve_nearest_upcoming(clock: _ParsedClock, now: datetime) -> datetime:
+    """Resolve a bare clock token (no explicit day) to the nearest upcoming candidate.
+
+    Each candidate time is independently rolled to tomorrow if today's
+    occurrence has already passed (the pre-existing single-candidate rule),
+    then the earliest of the resulting datetimes wins. With a single
+    (unambiguous) candidate this reduces to the original behaviour.
+    """
+    resolved = []
+    for candidate_time in _candidate_times(clock):
+        candidate = _combine(now.date(), candidate_time, now)
+        if candidate <= now:
+            candidate = _combine(_add_days(now.date(), 1), candidate_time, now)
+        resolved.append(candidate)
+    return min(resolved)
+
+
+def _resolve_on_day(day: date, clock: _ParsedClock, now: datetime, original: str) -> datetime:
+    """Pick the earliest of a clock token's candidate(s) on ``day`` that is still ahead of ``now``.
+
+    Used for the explicit-day forms (``today``/``tomorrow <clock>``): the day
+    is fixed, so (unlike :func:`_resolve_nearest_upcoming`) there is no
+    rolling forward — if none of the candidates on ``day`` are still ahead of
+    ``now``, that is an error.
+    """
+    candidates = [_combine(day, candidate_time, now) for candidate_time in _candidate_times(clock)]
+    future = [candidate for candidate in candidates if candidate > now]
+    if not future:
+        raise _in_the_past(original)
+    return min(future)
 
 
 def _try_parse_duration(lowered: str) -> timedelta | None:
@@ -253,33 +300,53 @@ def _try_parse_weekday(lowered: str) -> tuple[int, str] | None:
     return weekday, rest.strip()
 
 
-def _resolve_weekday(weekday: int, clock: dt_time | None, now: datetime) -> datetime:
+def _resolve_weekday(weekday: int, clock: _ParsedClock | None, now: datetime) -> datetime:
     """Resolve a weekday (plus optional clock) to its next local occurrence.
 
     Today counts only if ``clock`` (or, lacking one, the current time of
     day) is still ahead of ``now``; otherwise it rolls to the same weekday
-    next week, matching the bare-clock/``today`` rollover rules above.
+    next week, matching the bare-clock/``today`` rollover rules above. When
+    ``clock`` is 12h-ambiguous, both candidates are tried on each day and the
+    earliest one still ahead of ``now`` wins (the "explicit day" rule), with
+    the whole day rolling forward a week, not erroring, if neither is.
     """
     days_ahead = (weekday - now.weekday()) % 7
-    target_clock = clock if clock is not None else dt_time(now.hour, now.minute)
-    candidate = _combine(_add_days(now.date(), days_ahead), target_clock, now)
-    if candidate <= now:
-        candidate = _combine(_add_days(now.date(), days_ahead + 7), target_clock, now)
-    return candidate
+    if clock is None:
+        target_clock = dt_time(now.hour, now.minute)
+        candidate = _combine(_add_days(now.date(), days_ahead), target_clock, now)
+        if candidate <= now:
+            candidate = _combine(_add_days(now.date(), days_ahead + 7), target_clock, now)
+        return candidate
+    candidate_times = _candidate_times(clock)
+    day = _add_days(now.date(), days_ahead)
+    candidates = [_combine(day, candidate_time, now) for candidate_time in candidate_times]
+    future = [candidate for candidate in candidates if candidate > now]
+    if future:
+        return min(future)
+    day = _add_days(now.date(), days_ahead + 7)
+    return min(_combine(day, candidate_time, now) for candidate_time in candidate_times)
 
 
-def _try_parse_clock(lowered: str) -> dt_time | None:
-    """Parse a bare clock time (named or numeric); ``None`` if it doesn't look like one."""
+def _try_parse_clock(lowered: str) -> _ParsedClock | None:
+    """Parse a bare clock time (named or numeric); ``None`` if it doesn't look like one.
+
+    A numeric token with minutes but no am/pm, whose hour is written without
+    a leading zero and falls in 1..12, is 12h-ambiguous: the returned
+    :class:`_ParsedClock` carries both the literal hour and the hour+12
+    (wrapping 12 to 0) as ``alt``, leaving resolution to the caller.
+    """
     stripped = lowered.strip()
     named = _NAMED_CLOCKS.get(stripped)
     if named is not None:
-        return named
+        return _ParsedClock(named)
     match = _CLOCK_RE.match(stripped)
     if match is None:
         return None
     hour_str, minute_str, ampm = match.groups()
     hour = int(hour_str)
     minute = int(minute_str) if minute_str else 0
+    if not 0 <= minute <= 59:
+        return None
     if ampm:
         if not 1 <= hour <= 12:
             return None
@@ -287,11 +354,13 @@ def _try_parse_clock(lowered: str) -> dt_time | None:
             hour += 12
         elif ampm == "am" and hour == 12:
             hour = 0
-    elif not 0 <= hour <= 23:
+        return _ParsedClock(dt_time(hour, minute))
+    if not 0 <= hour <= 23:
         return None
-    if not 0 <= minute <= 59:
-        return None
-    return dt_time(hour, minute)
+    alt = None
+    if minute_str is not None and not hour_str.startswith("0") and 1 <= hour <= 12:
+        alt = dt_time((hour + 12) % 24, minute)
+    return _ParsedClock(dt_time(hour, minute), alt)
 
 
 def _try_parse_iso(lowered: str, now: datetime) -> datetime | None:

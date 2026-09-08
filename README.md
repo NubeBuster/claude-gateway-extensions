@@ -104,7 +104,7 @@ The deadline you provide is validated and you are given back the resolved time i
 | ----------------- | --------------------------------------------------------------- | ---------------------------------------------------- |
 | Relative duration | `2h`, `90m`, `2d 4h`                                            | duration from now (joined `2d4h` also accepted)      |
 | Clock time        | `9PM`, `21:00`, `04:20`                                         | today at that time, or tomorrow if already past      |
-| Ambiguous time    | `4:20` - is that 4:20PM or AM?                                  | resolves to soonest                                  |
+| Ambiguous time    | `4:20` - is that 4:20PM or AM?                                  | the next 4:20, morning or afternoon; write `04:20`/`16:20` to be explicit |
 | Named time        | `morning`, `noon`, `teatime`, `dinner`, `nighttime`, `midnight` | `09:00`, `12:00`, `16:00`, `18:00`, `22:00`, `00:00` |
 | Relative day      | `tomorrow 10AM`, `today 6PM`                                    | at that time (`tomorrow` alone = 24 hours from now)  |
 | Weekday           | `wed noon`, `fri 9AM`, `mo`, `tues`, `sunday`                   | the weekday's next occurrence, at that time if given |
