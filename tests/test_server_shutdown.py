@@ -1,7 +1,7 @@
 """Tests that a running daemon shuts down cleanly on SIGTERM.
 
-``systemctl --user stop`` sends ``SIGTERM`` to the unit ``ccbg install
---service`` writes. Without a handler the process dies where it stands, so
+``systemctl --user stop`` sends ``SIGTERM`` to the unit ``ccbg service
+install`` writes. Without a handler the process dies where it stands, so
 ``AppRunner.cleanup`` — and with it the app's ``cleanup_ctx``, the shared
 client session and the scheduler's per-session tasks — never runs.
 """

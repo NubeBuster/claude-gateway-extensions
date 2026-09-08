@@ -105,7 +105,7 @@ def make_app(
 
 
 #: Signals that ask the daemon to shut down. ``SIGTERM`` is what
-#: ``systemctl --user stop`` sends to the unit ``ccbg install --service``
+#: ``systemctl --user stop`` sends to the unit ``ccbg service install``
 #: writes, so it must run the same cleanup path as ``Ctrl-C``.
 SHUTDOWN_SIGNALS: tuple[signal.Signals, ...] = (signal.SIGTERM, signal.SIGINT)
 

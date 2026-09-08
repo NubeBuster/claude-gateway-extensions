@@ -5,10 +5,11 @@ from __future__ import annotations
 import io
 import json
 import os
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
-from claude_cache_bump_gateway.cli import doctor, install
+from claude_cache_bump_gateway.cli import doctor, install, service
 from claude_cache_bump_gateway.cli.client import DaemonUnreachable
 from claude_cache_bump_gateway.config import Config
 
@@ -50,7 +51,6 @@ def test_all_ok_after_full_install(tmp_path: Path) -> None:
         scope="user",
         url=URL,
         force=False,
-        service=False,
         dry_run=False,
         environ=environ,
         cwd=tmp_path,
@@ -80,6 +80,28 @@ def test_missing_hook_and_skill_are_warnings_not_failures(tmp_path: Path) -> Non
     output = stdout.getvalue()
     assert code == 0
     assert "warn:" in output
+
+
+def test_missing_service_unit_is_a_warning_with_install_hint(tmp_path: Path) -> None:
+    environ = {"HOME": str(tmp_path)}
+    config = Config.from_env({"CCBG_URL": URL})
+    stdout = io.StringIO()
+    code = doctor.run_doctor(config, environ, tmp_path, stdout, client_factory=_healthy_factory)
+    output = stdout.getvalue()
+    assert code == 0
+    assert "warn: systemd service not installed; run `ccbg service install`" in output
+
+
+def test_active_service_unit_is_ok(tmp_path: Path) -> None:
+    environ = {"HOME": str(tmp_path)}
+    service.install_service(environ, runner=lambda args: None)
+
+    def query(args: Sequence[str]) -> str:
+        return "enabled" if "is-enabled" in args else "active"
+
+    check = doctor.check_service(environ, query)
+    assert check.status == "ok"
+    assert "enabled=True, active=True" in check.message
 
 
 def test_api_key_helper_in_settings_is_detected(tmp_path: Path) -> None:

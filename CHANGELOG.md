@@ -11,10 +11,12 @@
 - Loopback-only JSON control API (`/ccbg/*`) for session status, enable/
   disable, immediate bump, and forget.
 - `ccbg` CLI: `serve`, `status`, `on`/`off`, `now`, `forget`, `hook`,
-  `statusline`, `install`/`uninstall`, `doctor`.
+  `statusline`, `install`/`uninstall`, `service install`/`uninstall`/
+  `status`, `doctor`.
 - Claude Code integration: `/cache` skill and `UserPromptSubmit` hook,
-  statusline segment, idempotent settings.json installer with systemd user
-  service support.
+  statusline segment, idempotent settings.json installer. The systemd user
+  service that runs the daemon is a separate `ccbg service` subcommand
+  group, since one daemon serves every project on the machine.
 - `/cache` takes an absolute deadline instead of an open-ended `on`:
   durations (`2h`, `2d 4h`), clock times (`9PM`, `21:00`, `noon`),
   `today`/`tomorrow`, and ISO dates, all parsed timezone-aware in the

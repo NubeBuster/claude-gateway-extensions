@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import io
 import sys
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -231,6 +232,60 @@ def test_forget() -> None:
     assert code == EXIT_OK
     assert "s1" in out
     assert "s1" not in client.sessions
+
+
+def test_install_service_flag_errors_with_pointer_to_service_install() -> None:
+    client = _FakeClient("http://x")
+    code, _, err = _run(["install", "--service"], client, environ={"HOME": "/nonexistent-home"})
+    assert code == EXIT_USAGE
+    assert "ccbg service install" in err
+
+
+def test_uninstall_service_flag_errors_with_pointer_to_service_uninstall() -> None:
+    client = _FakeClient("http://x")
+    code, _, err = _run(["uninstall", "--service"], client, environ={"HOME": "/nonexistent-home"})
+    assert code == EXIT_USAGE
+    assert "ccbg service uninstall" in err
+
+
+def test_service_install_uses_injected_runner(tmp_path: Path) -> None:
+    client = _FakeClient("http://x")
+    calls: list[list[str]] = []
+
+    def runner(args: list[str]) -> None:
+        calls.append(list(args))
+
+    code, out, _ = _run(
+        ["service", "install"],
+        client,
+        environ={"HOME": str(tmp_path)},
+        service_runner=runner,
+    )
+    assert code == EXIT_OK
+    assert "claude-cache-bump-gateway.service" in out
+    assert any(args[:2] == ["systemctl", "--user"] for args in calls)
+    assert (
+        tmp_path.resolve()
+        in (tmp_path / ".config" / "systemd" / "user" / "claude-cache-bump-gateway.service")
+        .resolve()
+        .parents
+    )
+
+
+def test_service_status_reports_not_installed_and_daemon_health() -> None:
+    client = _FakeClient("http://x")
+    code, out, _ = _run(["service", "status"], client, environ={"HOME": "/nonexistent-home"})
+    assert code == EXIT_OK
+    assert "not installed; run `ccbg service install`" in out
+    assert "daemon healthy" in out
+    assert client.calls == [("health", ())]
+
+
+def test_service_status_daemon_unreachable_is_a_failure() -> None:
+    client = _FakeClient("http://x", raise_unreachable=True)
+    code, out, _ = _run(["service", "status"], client, environ={"HOME": "/nonexistent-home"})
+    assert code == EXIT_FAILED
+    assert "fail: daemon not reachable" in out
 
 
 def test_doctor_reports_daemon_unreachable() -> None:

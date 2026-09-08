@@ -26,14 +26,14 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, TextIO
 
-from claude_cache_bump_gateway.cli import install
+from claude_cache_bump_gateway.cli import install, service
 from claude_cache_bump_gateway.cli.client import (
     ApiError,
     ClientFactory,
     ControlClient,
     DaemonUnreachable,
 )
-from claude_cache_bump_gateway.cli.doctor import run_doctor
+from claude_cache_bump_gateway.cli.doctor import check_daemon, run_doctor
 from claude_cache_bump_gateway.cli.hook import run_user_prompt_submit
 from claude_cache_bump_gateway.cli.statusline import run_statusline
 from claude_cache_bump_gateway.cli.when import At, WhenError, local_now, parse_when
@@ -59,7 +59,8 @@ class _Context:
     stderr: TextIO
     cwd: Path
     client_factory: ClientFactory
-    install_runner: install.Runner | None
+    service_runner: service.Runner | None
+    service_query: service.Query | None
 
 
 def _require_session(args: argparse.Namespace, ctx: _Context) -> str:
@@ -240,19 +241,27 @@ def _cmd_statusline(args: argparse.Namespace, config: Config, ctx: _Context) -> 
     return run_statusline(ctx.stdin, ctx.stdout, ctx.environ)
 
 
+#: Pointer printed when a removed flag is passed; kept as one constant so the
+#: install/uninstall messages and their test assertions stay in sync.
+_SERVICE_FLAG_REMOVED = (
+    "--service was removed from `ccbg {cmd}`; the daemon is per user, not per "
+    "scope — run `ccbg service {cmd}` instead\n"
+)
+
+
 def _cmd_install(args: argparse.Namespace, config: Config, ctx: _Context) -> int:
     """Install the Claude Code integration for the chosen scope."""
-    runner = ctx.install_runner if ctx.install_runner is not None else install.DEFAULT_RUNNER
+    if args.service:
+        ctx.stderr.write(_SERVICE_FLAG_REMOVED.format(cmd="install"))
+        return EXIT_USAGE
     try:
         result = install.install(
             scope=args.scope,
             url=config.url,
             force=args.force,
-            service=args.service,
             dry_run=args.dry_run,
             environ=ctx.environ,
             cwd=ctx.cwd,
-            runner=runner,
         )
     except install.InstallError as exc:
         ctx.stderr.write(f"{exc}\n")
@@ -262,28 +271,68 @@ def _cmd_install(args: argparse.Namespace, config: Config, ctx: _Context) -> int
         return EXIT_OK
     ctx.stdout.write(f"wrote {result.settings_path}\n")
     ctx.stdout.write(f"installed skill at {result.skill_dir}\n")
-    if result.wrote_service:
-        ctx.stdout.write("installed and started claude-cache-bump-gateway.service\n")
     return EXIT_OK
 
 
 def _cmd_uninstall(args: argparse.Namespace, config: Config, ctx: _Context) -> int:
     """Remove the Claude Code integration for the chosen scope."""
-    runner = ctx.install_runner if ctx.install_runner is not None else install.DEFAULT_RUNNER
+    if args.service:
+        ctx.stderr.write(_SERVICE_FLAG_REMOVED.format(cmd="uninstall"))
+        return EXIT_USAGE
     try:
         result = install.uninstall(
             scope=args.scope,
             url=config.url,
-            service=args.service,
             environ=ctx.environ,
             cwd=ctx.cwd,
-            runner=runner,
         )
     except install.InstallError as exc:
         ctx.stderr.write(f"{exc}\n")
         return EXIT_FAILED
     ctx.stdout.write(f"removed integration from {result.settings_path}\n")
     return EXIT_OK
+
+
+def _cmd_service_install(args: argparse.Namespace, config: Config, ctx: _Context) -> int:
+    """Write and enable the systemd user unit that runs the daemon."""
+    del args, config
+    runner = ctx.service_runner if ctx.service_runner is not None else service.DEFAULT_RUNNER
+    path = service.install_service(ctx.environ, runner)
+    ctx.stdout.write(f"installed and started claude-cache-bump-gateway.service ({path})\n")
+    return EXIT_OK
+
+
+def _cmd_service_uninstall(args: argparse.Namespace, config: Config, ctx: _Context) -> int:
+    """Disable and remove the systemd user unit, reversing exactly what install wrote."""
+    del args, config
+    runner = ctx.service_runner if ctx.service_runner is not None else service.DEFAULT_RUNNER
+    service.uninstall_service(ctx.environ, runner)
+    ctx.stdout.write("removed claude-cache-bump-gateway.service\n")
+    return EXIT_OK
+
+
+def _cmd_service_status(args: argparse.Namespace, config: Config, ctx: _Context) -> int:
+    """Print the systemd unit's present/enabled/active state and the daemon health check."""
+    del args
+    query = ctx.service_query if ctx.service_query is not None else service.DEFAULT_QUERY
+    status = service.service_status(ctx.environ, query)
+    if not status.present:
+        ctx.stdout.write("service: not installed; run `ccbg service install`\n")
+    else:
+        ctx.stdout.write(
+            f"service: unit present at {status.unit_path}, "
+            f"enabled={status.enabled}, active={status.active}\n"
+        )
+    client = ctx.client_factory(config.url)
+    health = check_daemon(client, config.url)
+    ctx.stdout.write(f"{health.status}: {health.message}\n")
+    return EXIT_OK if health.status != "fail" else EXIT_FAILED
+
+
+def _cmd_service(args: argparse.Namespace, config: Config, ctx: _Context) -> int:
+    """Dispatch a ``ccbg service`` subcommand by name."""
+    handler = _SERVICE_HANDLERS[args.service_command]
+    return handler(args, config, ctx)
 
 
 def _cmd_doctor(args: argparse.Namespace, config: Config, ctx: _Context) -> int:
@@ -337,23 +386,36 @@ def _build_parser() -> argparse.ArgumentParser:
 
     subparsers.add_parser("statusline", help="print a statusline segment")
 
+    _SCOPE_HELP = (
+        "chooses which Claude Code settings.json is edited (user or project); "
+        "the daemon is per user, see `ccbg service`"
+    )
+
     install_parser = subparsers.add_parser("install", help="install the Claude Code integration")
-    install_parser.add_argument("--scope", choices=["user", "project"], default="user")
     install_parser.add_argument(
-        "--service", action="store_true", help="also install a systemd unit"
+        "--scope", choices=["user", "project"], default="user", help=_SCOPE_HELP
     )
     install_parser.add_argument("--dry-run", action="store_true", dest="dry_run")
     install_parser.add_argument(
         "--force", action="store_true", help="override a conflicting ANTHROPIC_BASE_URL"
     )
+    install_parser.add_argument("--service", action="store_true", help=argparse.SUPPRESS)
 
     uninstall_parser = subparsers.add_parser("uninstall", help="remove the Claude Code integration")
-    uninstall_parser.add_argument("--scope", choices=["user", "project"], default="user")
     uninstall_parser.add_argument(
-        "--service", action="store_true", help="also remove the systemd unit"
+        "--scope", choices=["user", "project"], default="user", help=_SCOPE_HELP
     )
+    uninstall_parser.add_argument("--service", action="store_true", help=argparse.SUPPRESS)
 
     subparsers.add_parser("doctor", help="check the environment")
+
+    service_parser = subparsers.add_parser(
+        "service", help="manage the systemd user service running the daemon"
+    )
+    service_subparsers = service_parser.add_subparsers(dest="service_command", required=True)
+    service_subparsers.add_parser("install", help="write and enable the systemd user unit")
+    service_subparsers.add_parser("uninstall", help="disable and remove the systemd user unit")
+    service_subparsers.add_parser("status", help="show the unit state and daemon health")
 
     return parser
 
@@ -370,6 +432,13 @@ _HANDLERS: dict[str, Callable[[argparse.Namespace, Config, _Context], int]] = {
     "install": _cmd_install,
     "uninstall": _cmd_uninstall,
     "doctor": _cmd_doctor,
+    "service": _cmd_service,
+}
+
+_SERVICE_HANDLERS: dict[str, Callable[[argparse.Namespace, Config, _Context], int]] = {
+    "install": _cmd_service_install,
+    "uninstall": _cmd_service_uninstall,
+    "status": _cmd_service_status,
 }
 
 
@@ -382,7 +451,8 @@ def main(
     stderr: TextIO | None = None,
     cwd: Path | None = None,
     client_factory: ClientFactory = ControlClient,
-    install_runner: install.Runner | None = None,
+    service_runner: service.Runner | None = None,
+    service_query: service.Query | None = None,
 ) -> int:
     """Parse ``argv`` and dispatch to the matching subcommand handler.
 
@@ -404,7 +474,7 @@ def main(
         code = exc.code
         return code if isinstance(code, int) else EXIT_USAGE
 
-    ctx = _Context(env, inp, out, err, directory, client_factory, install_runner)
+    ctx = _Context(env, inp, out, err, directory, client_factory, service_runner, service_query)
 
     try:
         config = Config.from_env(env)

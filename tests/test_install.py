@@ -8,7 +8,6 @@ before any write, per the repo's test-isolation rule.
 from __future__ import annotations
 
 import json
-from collections.abc import Sequence
 from pathlib import Path
 
 import pytest
@@ -21,21 +20,6 @@ URL = "http://127.0.0.1:8787"
 def _assert_inside(path: Path, root: Path) -> None:
     """Assert ``path`` resolves inside ``root``; the test-isolation guardrail."""
     assert root.resolve() in path.resolve().parents or path.resolve() == root.resolve()
-
-
-def _recording_runner(args: Sequence[str]) -> None:
-    """A systemd runner for tests that must never touch the real systemd."""
-
-
-@pytest.fixture
-def fake_runner() -> tuple[list[list[str]], install.Runner]:
-    """A systemd runner that records calls instead of touching the real systemd."""
-    calls: list[list[str]] = []
-
-    def runner(args: Sequence[str]) -> None:
-        calls.append(list(args))
-
-    return calls, runner
 
 
 def test_settings_path_user_scope_is_inside_tmp_home(tmp_path: Path) -> None:
@@ -62,7 +46,6 @@ def test_install_creates_settings_with_only_documented_keys(tmp_path: Path) -> N
         scope="user",
         url=URL,
         force=False,
-        service=False,
         dry_run=False,
         environ=environ,
         cwd=tmp_path,
@@ -88,7 +71,6 @@ def test_install_preserves_unrelated_keys(tmp_path: Path) -> None:
         scope="user",
         url=URL,
         force=False,
-        service=False,
         dry_run=False,
         environ=environ,
         cwd=tmp_path,
@@ -110,7 +92,6 @@ def test_install_writes_backup_once(tmp_path: Path) -> None:
         scope="user",
         url=URL,
         force=False,
-        service=False,
         dry_run=False,
         environ=environ,
         cwd=tmp_path,
@@ -123,7 +104,6 @@ def test_install_writes_backup_once(tmp_path: Path) -> None:
         scope="user",
         url=URL,
         force=True,
-        service=False,
         dry_run=False,
         environ=environ,
         cwd=tmp_path,
@@ -138,7 +118,6 @@ def test_install_is_idempotent(tmp_path: Path) -> None:
             scope="user",
             url=URL,
             force=False,
-            service=False,
             dry_run=False,
             environ=environ,
             cwd=tmp_path,
@@ -159,7 +138,6 @@ def test_install_refuses_conflicting_base_url(tmp_path: Path) -> None:
             scope="user",
             url=URL,
             force=False,
-            service=False,
             dry_run=False,
             environ=environ,
             cwd=tmp_path,
@@ -179,7 +157,6 @@ def test_install_force_overrides_conflicting_base_url(tmp_path: Path) -> None:
         scope="user",
         url=URL,
         force=True,
-        service=False,
         dry_run=False,
         environ=environ,
         cwd=tmp_path,
@@ -196,7 +173,6 @@ def test_dry_run_writes_nothing(tmp_path: Path) -> None:
         scope="user",
         url=URL,
         force=False,
-        service=False,
         dry_run=True,
         environ=environ,
         cwd=tmp_path,
@@ -212,7 +188,6 @@ def test_uninstall_round_trip(tmp_path: Path) -> None:
         scope="user",
         url=URL,
         force=False,
-        service=False,
         dry_run=False,
         environ=environ,
         cwd=tmp_path,
@@ -221,7 +196,7 @@ def test_uninstall_round_trip(tmp_path: Path) -> None:
     skill_dir = install.skills_dir("user", environ, tmp_path)
     assert (skill_dir / "SKILL.md").is_file()
 
-    install.uninstall(scope="user", url=URL, service=False, environ=environ, cwd=tmp_path)
+    install.uninstall(scope="user", url=URL, environ=environ, cwd=tmp_path)
     data = json.loads(path.read_text())
     assert "env" not in data or "ANTHROPIC_BASE_URL" not in data.get("env", {})
     assert "hooks" not in data or "UserPromptSubmit" not in data.get("hooks", {})
@@ -234,47 +209,9 @@ def test_uninstall_only_removes_our_base_url(tmp_path: Path) -> None:
     path.parent.mkdir(parents=True)
     path.write_text(json.dumps({"env": {"ANTHROPIC_BASE_URL": "https://not-ours.example"}}))
 
-    install.uninstall(scope="user", url=URL, service=False, environ=environ, cwd=tmp_path)
+    install.uninstall(scope="user", url=URL, environ=environ, cwd=tmp_path)
     data = json.loads(path.read_text())
     assert data["env"]["ANTHROPIC_BASE_URL"] == "https://not-ours.example"
-
-
-def test_service_install_and_uninstall_use_injected_runner(
-    tmp_path: Path, fake_runner: tuple[list[list[str]], install.Runner]
-) -> None:
-    calls, runner = fake_runner
-    environ = {"HOME": str(tmp_path)}
-    result = install.install(
-        scope="user",
-        url=URL,
-        force=False,
-        service=True,
-        dry_run=False,
-        environ=environ,
-        cwd=tmp_path,
-        runner=runner,
-    )
-    assert result.wrote_service is True
-    unit_path = install.unit_path(environ)
-    _assert_inside(unit_path, tmp_path)
-    assert unit_path.is_file()
-    assert ["systemctl", "--user", "daemon-reload"] in calls
-    assert ["systemctl", "--user", "enable", "--now", "claude-cache-bump-gateway.service"] in calls
-
-    calls.clear()
-    install.uninstall(
-        scope="user", url=URL, service=True, environ=environ, cwd=tmp_path, runner=runner
-    )
-    assert not unit_path.exists()
-    assert ["systemctl", "--user", "disable", "--now", "claude-cache-bump-gateway.service"] in calls
-
-
-def test_render_unit_passes_through_ccbg_env_vars(tmp_path: Path) -> None:
-    environ = {"HOME": str(tmp_path), "CCBG_PORT": "9999", "UNRELATED": "x"}
-    text = install.render_unit("/usr/local/bin/ccbg", environ)
-    assert "ExecStart=/usr/local/bin/ccbg serve" in text
-    assert "Environment=CCBG_PORT=9999" in text
-    assert "UNRELATED" not in text
 
 
 def test_uninstall_without_settings_creates_nothing(tmp_path: Path) -> None:
@@ -287,10 +224,8 @@ def test_uninstall_without_settings_creates_nothing(tmp_path: Path) -> None:
     install.uninstall(
         scope="user",
         url="http://127.0.0.1:8787",
-        service=False,
         environ=environ,
         cwd=tmp_path,
-        runner=_recording_runner,
     )
 
     assert not path.exists()

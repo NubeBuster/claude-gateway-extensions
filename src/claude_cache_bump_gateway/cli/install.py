@@ -1,14 +1,18 @@
 """Idempotent installer/uninstaller for the Claude Code integration surface.
 
 Merges ``env.ANTHROPIC_BASE_URL`` and the ``UserPromptSubmit`` hook into the
-chosen ``settings.json``, copies the ``cache`` skill, and optionally
-writes and enables a systemd user unit. See the "Skill as pure fall-through"
-and "Environment variables only, split by process" (why no config file)
-decisions in ``docs/DESIGN.md`` "Decisions" for the rationale; the only
-``settings.json`` keys ever written are ``env`` (one
+chosen ``settings.json`` and copies the ``cache`` skill. See the "Skill as
+pure fall-through" and "Environment variables only, split by process" (why
+no config file) decisions in ``docs/DESIGN.md`` "Decisions" for the
+rationale; the only ``settings.json`` keys ever written are ``env`` (one
 entry, ``ANTHROPIC_BASE_URL``) and ``hooks.UserPromptSubmit`` (one entry).
 ``statusLine`` is deliberately not touched — ``ccbg statusline`` is something
 the user appends to their own command, per the README.
+
+The daemon (systemd user service) is a separate, per-machine concern with
+its own module, :mod:`claude_cache_bump_gateway.cli.service`: ``--scope``
+here only ever selects which ``settings.json`` is edited, never anything
+about the daemon.
 """
 
 from __future__ import annotations
@@ -17,9 +21,7 @@ import importlib.resources
 import json
 import os
 import shutil
-import subprocess
-import sys
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
@@ -31,25 +33,10 @@ Scope = Literal["user", "project"]
 HOOK_COMMAND = "ccbg hook user-prompt-submit"
 _HOOK_TIMEOUT_S = 5
 _SKILL_NAME = "cache"
-_UNIT_NAME = "claude-cache-bump-gateway.service"
-
-#: A runner executes a systemd command; tests inject a fake instead of the
-#: real ``subprocess.run`` so installer tests never touch the real systemd.
-Runner = Callable[[Sequence[str]], None]
 
 
 class InstallError(Exception):
     """Raised when install/uninstall cannot proceed safely (e.g. a real conflict)."""
-
-
-def _default_runner(args: Sequence[str]) -> None:
-    """Run a systemd command for real, raising on a non-zero exit."""
-    subprocess.run(args, check=True)
-
-
-#: The real runner, for callers (e.g. the CLI) that need to name the default
-#: explicitly instead of relying on a function's default argument value.
-DEFAULT_RUNNER: Runner = _default_runner
 
 
 def user_home(environ: Mapping[str, str]) -> Path:
@@ -216,71 +203,6 @@ def remove_skill(dest_dir: Path) -> None:
         shutil.rmtree(dest_dir)
 
 
-def _ccbg_executable() -> str:
-    """Return the absolute path of the running ``ccbg`` executable."""
-    found = shutil.which("ccbg")
-    if found:
-        return str(Path(found).resolve())
-    return str(Path(sys.argv[0]).resolve())
-
-
-def unit_path(environ: Mapping[str, str]) -> Path:
-    """Return the systemd user unit path for the daemon service."""
-    xdg_config_home = environ.get("XDG_CONFIG_HOME")
-    base = Path(xdg_config_home) if xdg_config_home else user_home(environ) / ".config"
-    return base / "systemd" / "user" / _UNIT_NAME
-
-
-def render_unit(executable: str, environ: Mapping[str, str]) -> str:
-    """Render the systemd user unit file content for ``executable``.
-
-    Passes through every ``CCBG_*`` variable currently set in ``environ`` as
-    an ``Environment=`` line, so the service sees the same configuration the
-    installing shell had.
-    """
-    env_lines = [
-        f"Environment={key}={value}"
-        for key, value in sorted(environ.items())
-        if key.startswith("CCBG_")
-    ]
-    lines = [
-        "[Unit]",
-        "Description=claude-cache-bump-gateway",
-        "",
-        "[Service]",
-        f"ExecStart={executable} serve",
-        *env_lines,
-        "Restart=on-failure",
-        "RestartSec=5",
-        "",
-        "[Install]",
-        "WantedBy=default.target",
-        "",
-    ]
-    return "\n".join(lines)
-
-
-def install_service(environ: Mapping[str, str], runner: Runner = _default_runner) -> Path:
-    """Write the systemd user unit and enable it now; return the unit path."""
-    executable = _ccbg_executable()
-    path = unit_path(environ)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(render_unit(executable, environ))
-    runner(["systemctl", "--user", "daemon-reload"])
-    runner(["systemctl", "--user", "enable", "--now", _UNIT_NAME])
-    return path
-
-
-def uninstall_service(environ: Mapping[str, str], runner: Runner = _default_runner) -> None:
-    """Disable and remove the systemd user unit, if present."""
-    path = unit_path(environ)
-    if not path.is_file():
-        return
-    runner(["systemctl", "--user", "disable", "--now", _UNIT_NAME])
-    path.unlink()
-    runner(["systemctl", "--user", "daemon-reload"])
-
-
 @dataclass
 class InstallResult:
     """Summary of what :func:`install` did (or would do, for ``--dry-run``)."""
@@ -289,7 +211,6 @@ class InstallResult:
     skill_dir: Path
     settings: dict[str, Any]
     dry_run: bool
-    wrote_service: bool
 
 
 def install(
@@ -297,11 +218,9 @@ def install(
     scope: Scope,
     url: str,
     force: bool,
-    service: bool,
     dry_run: bool,
     environ: Mapping[str, str],
     cwd: Path,
-    runner: Runner = _default_runner,
 ) -> InstallResult:
     """Idempotently install the Claude Code integration for ``scope``.
 
@@ -315,25 +234,19 @@ def install(
     merge_base_url(settings, url, force)
     merge_hook(settings)
     if dry_run:
-        return InstallResult(path, skill_dir, settings, True, False)
+        return InstallResult(path, skill_dir, settings, True)
     backup_settings(path)
     _atomic_write_json(path, settings)
     copy_skill(skill_dir)
-    wrote_service = False
-    if service:
-        install_service(environ, runner)
-        wrote_service = True
-    return InstallResult(path, skill_dir, settings, False, wrote_service)
+    return InstallResult(path, skill_dir, settings, False)
 
 
 def uninstall(
     *,
     scope: Scope,
     url: str,
-    service: bool,
     environ: Mapping[str, str],
     cwd: Path,
-    runner: Runner = _default_runner,
 ) -> InstallResult:
     """Reverse exactly what :func:`install` added for ``scope``.
 
@@ -350,23 +263,17 @@ def uninstall(
         backup_settings(path)
         _atomic_write_json(path, settings)
     remove_skill(skill_dir)
-    if service:
-        uninstall_service(environ, runner)
-    return InstallResult(path, skill_dir, settings, False, service)
+    return InstallResult(path, skill_dir, settings, False)
 
 
 __all__ = [
-    "DEFAULT_RUNNER",
     "HOOK_COMMAND",
     "InstallError",
     "InstallResult",
-    "Runner",
     "Scope",
     "hook_entry_has_command",
     "install",
-    "install_service",
     "settings_path",
     "skills_dir",
     "uninstall",
-    "uninstall_service",
 ]

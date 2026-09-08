@@ -20,7 +20,7 @@ a read (see "How it works").
 
 - Python 3.11+
 - Claude Code, with a claude.ai subscription or an `ANTHROPIC_API_KEY`
-- Linux or macOS. `ccbg install --service` (the systemd user unit) is Linux
+- Linux or macOS. `ccbg service install` (the systemd user unit) is Linux
   only; on macOS run `ccbg serve` yourself (a shell, `tmux`, or a `launchd`
   agent you write).
 
@@ -35,17 +35,21 @@ pipx install claude-cache-bump-gateway
 Then:
 
 ```sh
-ccbg install --scope user --service
+ccbg service install
+ccbg install --scope user
 ```
 
 > [!CAUTION]
 > This immediately affects all running Claude Code sessions in the given scope. Recommended to install when no large context sessions are live, to prevent potential cache misess or other risks.
 
-`ccbg install` idempotently merges `env.ANTHROPIC_BASE_URL` and a
-`UserPromptSubmit` hook into the chosen `settings.json`, and copies the
-`cache` skill into the matching `skills/` directory — nothing else in
-your `settings.json` is touched. `--service` also writes and enables a
-systemd user unit running `ccbg serve`.
+The daemon is per user, not per project — one instance serves every Claude
+Code project on the machine — so it has its own subcommand group,
+`ccbg service` (`install`, `uninstall`, `status`), separate from
+`ccbg install`. `ccbg service install` writes and enables a systemd user
+unit running `ccbg serve`. `ccbg install` idempotently merges
+`env.ANTHROPIC_BASE_URL` and a `UserPromptSubmit` hook into the chosen
+`settings.json`, and copies the `cache` skill into the matching `skills/`
+directory — nothing else in your `settings.json` is touched.
 
 ```sh
 ccbg doctor
@@ -224,7 +228,7 @@ daemon and does not go through a settings.json variable.
 
 ### Daemon settings (set where the daemon runs)
 
-The daemon does not read `settings.json`. `ccbg install --service` copies
+The daemon does not read `settings.json`. `ccbg service install` copies
 any of these that are set in your shell at install time into the systemd
 unit file, and otherwise you export them yourself before running `ccbg
 serve`. To change one later without reinstalling, run `systemctl --user
@@ -283,11 +287,13 @@ curl -s -X POST "http://127.0.0.1:8787/ccbg/sessions/$SESSION_ID/bump"
 - `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` or an `apiKeyHelper` all
   replace the forwarded subscription credential and change what gets billed;
   `ccbg doctor` flags any of them being set.
-- To uninstall: `ccbg uninstall --scope user --service` (match whatever
-  scope and `--service` flag you installed with). Reverses exactly the
-  settings.json edits `ccbg install` made and removes the systemd unit.
-  It also deletes the installed skill directory outright, including any
-  local edits you made to its `SKILL.md`.
+- To uninstall: `ccbg uninstall --scope user` (match whatever scope you
+  installed with) and, if you also ran `ccbg service install`,
+  `ccbg service uninstall`. `ccbg uninstall` reverses exactly the
+  settings.json edits `ccbg install` made and deletes the installed skill
+  directory outright, including any local edits you made to its
+  `SKILL.md`; `ccbg service uninstall` disables and removes the systemd
+  unit.
 
 ## Current planned `TODOs`
 

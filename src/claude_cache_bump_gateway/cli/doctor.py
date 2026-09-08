@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, TextIO
 
-from claude_cache_bump_gateway.cli import install
+from claude_cache_bump_gateway.cli import install, service
 from claude_cache_bump_gateway.cli.client import (
     ApiError,
     ClientFactory,
@@ -123,6 +123,26 @@ def check_credentials(environ: Mapping[str, str], cwd: Path) -> CheckResult:
     )
 
 
+def check_service(
+    environ: Mapping[str, str], query: service.Query = service.DEFAULT_QUERY
+) -> CheckResult:
+    """Check the systemd user unit's presence, and its enabled/active state if present."""
+    status = service.service_status(environ, query)
+    if not status.present:
+        return CheckResult("warn", "systemd service not installed; run `ccbg service install`")
+    if not status.active:
+        return CheckResult(
+            "warn",
+            f"systemd service at {status.unit_path} is not active "
+            f"(enabled={status.enabled}, active={status.active})",
+        )
+    return CheckResult(
+        "ok",
+        f"systemd service at {status.unit_path} is "
+        f"enabled={status.enabled}, active={status.active}",
+    )
+
+
 def check_state_dir(config: Config) -> CheckResult:
     """Check that the state directory, if it exists, is mode 0700."""
     if not config.state_dir.is_dir():
@@ -150,6 +170,7 @@ def run_doctor(
         check_hook(environ, cwd),
         check_skill(environ, cwd),
         check_credentials(environ, cwd),
+        check_service(environ),
         check_state_dir(config),
     ]
     for check in checks:
