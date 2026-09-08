@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import importlib
+import io
 import json
 import os
 import sys
@@ -33,6 +34,7 @@ from claude_gateway_extensions.cli.client import (
     DaemonUnreachable,
 )
 from claude_gateway_extensions.cli.doctor import check_daemon, run_doctor
+from claude_gateway_extensions.cli.fork_review import run_fork_review
 from claude_gateway_extensions.cli.hook import run_user_prompt_submit
 from claude_gateway_extensions.cli.statusline import run_statusline
 from claude_gateway_extensions.cli.when import At, WhenError, local_now, parse_when
@@ -244,6 +246,29 @@ def _cmd_hook(args: argparse.Namespace, config: Config, ctx: _Context) -> int:
         return run_user_prompt_submit(ctx.stdin, ctx.stdout, ctx.environ)
     ctx.stderr.write(f"unknown hook command: {args.hook_command}\n")
     return EXIT_USAGE
+
+
+def _cmd_fork_review(args: argparse.Namespace, config: Config, ctx: _Context) -> int:
+    """Run a shadow review fork against a hook event and print the mapped verdict.
+
+    ``--session``, when given, overrides the hook payload's ``session_id``
+    rather than being threaded through :func:`run_fork_review` as a separate
+    parameter -- mainly useful for invoking this by hand outside a real
+    hook, e.g. to try a template against a live session.
+    """
+    del config
+    stdin = ctx.stdin
+    if args.session:
+        raw = ctx.stdin.read()
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError:
+            payload = None
+        if isinstance(payload, dict):
+            payload["session_id"] = args.session
+            raw = json.dumps(payload)
+        stdin = io.StringIO(raw)
+    return run_fork_review(stdin, ctx.stdout, ctx.environ, args.template, prefix=args.prefix)
 
 
 def _cmd_statusline(args: argparse.Namespace, config: Config, ctx: _Context) -> int:
@@ -498,6 +523,22 @@ def _build_parser() -> argparse.ArgumentParser:
     hook_parser = subparsers.add_parser("hook", help="Claude Code hook entry points")
     hook_parser.add_argument("hook_command", choices=["user-prompt-submit"])
 
+    fork_review_parser = subparsers.add_parser(
+        "fork-review",
+        help="review a hook event via a shadow fork and map its verdict to the hook's output",
+    )
+    fork_review_parser.add_argument(
+        "--template", required=True, help="template name to render (user dir, then packaged)"
+    )
+    fork_review_parser.add_argument(
+        "--prefix",
+        default=None,
+        help="only act when the payload's prompt starts with this text (e.g. /btw)",
+    )
+    fork_review_parser.add_argument(
+        "--session", default=None, help="override the hook payload's session_id"
+    )
+
     subparsers.add_parser("statusline", help="print a statusline segment")
 
     _SCOPE_HELP = (
@@ -571,6 +612,7 @@ _HANDLERS: dict[str, Callable[[argparse.Namespace, Config, _Context], int]] = {
     "now": _cmd_now,
     "forget": _cmd_forget,
     "hook": _cmd_hook,
+    "fork-review": _cmd_fork_review,
     "statusline": _cmd_statusline,
     "configure": _cmd_configure,
     "unconfigure": _cmd_unconfigure,

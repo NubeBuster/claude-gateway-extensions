@@ -220,6 +220,12 @@ review" roadmap line; no part of it ships in 1.0.
   calls the API and maps the verdict to the output shape of whichever
   event the payload names; it is top-level rather than a `cgx hook
   <event>` entry point because one implementation serves every event.
+- **Fail-open, but visible.** Every failure the hook itself hits (a
+  missing template, an unreachable daemon, an API error) exits 0 with no
+  decision fields, same as the engine's fail-open verdicts, but also
+  emits `{"systemMessage": "cgx fork-review skipped: <reason>"}` so a
+  broken template or a dead daemon cannot fail invisibly;
+  `CGX_FORK_REVIEW_QUIET=1` suppresses it for scripted use.
 - **The verdict-to-hook mapping is fixed per event, and the template
   picks only the intervention style.** `PreToolUse` gets
   `hookSpecificOutput.permissionDecision` (`deny` by default, `ask` or a

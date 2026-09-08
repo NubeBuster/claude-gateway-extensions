@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import re
 import tomllib
+from importlib import resources
 from pathlib import Path
 
 import pytest
@@ -46,3 +47,25 @@ def test_no_second_http_or_cli_framework_is_a_runtime_dependency() -> None:
     assert not (names & _SECOND_FRAMEWORKS), (
         f"second framework declared: {names & _SECOND_FRAMEWORKS}"
     )
+
+
+#: The three packaged shadow-review-fork example templates; see
+#: ``src/claude_gateway_extensions/templates/`` and the "Shadow review fork"
+#: section in ``docs/DESIGN.md``.
+_PACKAGED_TEMPLATES = ["task-assignment", "permission-classifier", "btw"]
+
+
+@pytest.mark.parametrize("name", _PACKAGED_TEMPLATES)
+def test_packaged_fork_review_template_is_resource_readable(name: str) -> None:
+    """Each example template ships inside the package and is readable via ``importlib.resources``.
+
+    This is what :func:`~claude_gateway_extensions.cli.fork_review._load_template`
+    falls back to once the user's own ``CGX_TEMPLATE_DIR`` has nothing by that
+    name, in an installed layout (wheel or editable install) where there is
+    no ``src/`` checkout to read from directly.
+    """
+    resource = resources.files("claude_gateway_extensions").joinpath("templates", f"{name}.txt")
+    assert resource.is_file(), f"template resource missing from package: {name}"
+    text = resource.read_text(encoding="utf-8")
+    assert "intervene:" in text
+    assert "verdict" in text
