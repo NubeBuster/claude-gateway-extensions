@@ -5,9 +5,9 @@
 wired to a swappable :class:`~claude_cache_bump_gateway.core.store.SnapshotStore`,
 :class:`~claude_cache_bump_gateway.core.selector.TargetSelector`,
 :class:`~claude_cache_bump_gateway.core.upstream.Upstream` and
-:class:`~claude_cache_bump_gateway.core.clock.Clock`. :func:`serve` validates
-``Config`` and runs the resulting application until a shutdown signal
-(``SIGTERM`` or ``SIGINT``) arrives, then cleans up.
+:class:`~claude_cache_bump_gateway.core.clock.Clock`. :func:`serve` warns
+about a non-local ``Config.host`` and runs the resulting application until a
+shutdown signal (``SIGTERM`` or ``SIGINT``) arrives, then cleans up.
 """
 
 from __future__ import annotations
@@ -132,7 +132,7 @@ def remove_shutdown_handlers(loop: asyncio.AbstractEventLoop) -> None:
 
 
 async def serve(config: Config) -> None:
-    """Validate ``config``, build the app, and serve it on ``config.host:config.port``.
+    """Build the app and serve it on ``config.host:config.port``.
 
     Runs until a shutdown signal arrives (or the task is cancelled), then
     tears the listener and the scheduler down via
@@ -140,9 +140,13 @@ async def serve(config: Config) -> None:
     ``cleanup_ctx`` — closing the shared client session and stopping the
     scheduler's per-session tasks.
     """
-    config.validate()
     logging.basicConfig(level=config.log_level)
     logger.setLevel(config.log_level)
+    if not config.is_local_host():
+        logger.warning(
+            "CCBG_HOST=%s is reachable from other machines; the control API has no authentication",
+            config.host,
+        )
     app = make_app(config)
     logger.info(
         "ccbg serving host=%s port=%d upstream=%s state_dir=%s persist=%s",

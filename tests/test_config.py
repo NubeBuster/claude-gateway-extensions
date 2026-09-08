@@ -21,7 +21,6 @@ def test_defaults() -> None:
     assert config.max_streams_per_session == 8
     assert config.log_level == "INFO"
     assert config.url == "http://127.0.0.1:8787"
-    assert config.allow_non_loopback is False
 
 
 def test_default_state_dir_uses_xdg_state_home() -> None:
@@ -71,35 +70,23 @@ def test_on_cache_write_continue_accepted() -> None:
     assert config.on_cache_write == "continue"
 
 
-def test_non_loopback_host_refused_by_default() -> None:
-    with pytest.raises(ConfigError):
-        Config.from_env({"CCBG_HOST": "0.0.0.0"})
-
-
-def test_non_loopback_host_allowed_with_override() -> None:
-    config = Config.from_env({"CCBG_HOST": "0.0.0.0", "CCBG_ALLOW_NON_LOOPBACK": "true"})
-    assert config.host == "0.0.0.0"
-
-
 @pytest.mark.parametrize("host", ["127.0.0.1", "::1", "localhost"])
 def test_loopback_hosts_accepted(host: str) -> None:
     config = Config.from_env({"CCBG_HOST": host})
     assert config.host == host
+    assert config.is_local_host() is True
 
 
 @pytest.mark.parametrize("host", ["127.0.0.2", "127.255.255.254", "[::1]"])
-def test_any_loopback_ip_literal_accepted(host: str) -> None:
+def test_any_loopback_ip_literal_is_local(host: str) -> None:
     config = Config.from_env({"CCBG_HOST": host})
     assert config.host == host
+    assert config.is_local_host() is True
 
 
 @pytest.mark.parametrize("host", ["0.0.0.0", "192.168.1.10", "myhost"])
-def test_non_loopback_hosts_refused_by_default(host: str) -> None:
-    with pytest.raises(ConfigError):
-        Config.from_env({"CCBG_HOST": host})
-
-
-@pytest.mark.parametrize("host", ["0.0.0.0", "192.168.1.10", "myhost"])
-def test_non_loopback_hosts_accepted_with_override(host: str) -> None:
-    config = Config.from_env({"CCBG_HOST": host, "CCBG_ALLOW_NON_LOOPBACK": "true"})
+def test_non_local_hosts_are_accepted_but_not_local(host: str) -> None:
+    """A non-local CCBG_HOST is the user's explicit choice; it is never refused."""
+    config = Config.from_env({"CCBG_HOST": host})
     assert config.host == host
+    assert config.is_local_host() is False

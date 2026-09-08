@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import signal
 import socket
@@ -97,6 +98,25 @@ async def test_handlers_are_removed_after_serve_returns(tmp_path: Path) -> None:
         await asyncio.wait_for(stop.wait(), timeout=5)
     finally:
         remove_shutdown_handlers(loop)
+
+
+async def test_non_local_host_logs_a_warning_but_still_starts(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A non-local CCBG_HOST is the user's choice: serve() warns, it does not refuse."""
+    port = _free_port()
+    config = make_config(tmp_path, "http://127.0.0.1:1", host="0.0.0.0", port=port, persist=False)
+    caplog.set_level(logging.WARNING, logger="claude_cache_bump_gateway.server.app")
+    task = asyncio.create_task(serve(config))
+
+    assert await _wait_until(lambda: _is_listening(port)), "daemon never started listening"
+
+    os.kill(os.getpid(), signal.SIGTERM)
+    await asyncio.wait_for(task, timeout=5)
+
+    assert any("reachable from other machines" in record.message for record in caplog.records), (
+        "no warning logged for a non-local host"
+    )
 
 
 def test_shutdown_signals_cover_sigterm_and_sigint() -> None:

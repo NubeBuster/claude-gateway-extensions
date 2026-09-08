@@ -17,8 +17,8 @@ entry is not an approval to write the code.
 - `BumpResult`'s cache-write check is not optional — every bump path
   inspects `cache_creation_input_tokens` via the shared classifier, never a
   bare status-code check.
-- The daemon binds loopback only; a non-loopback `CCBG_HOST` is refused
-  unless `CCBG_ALLOW_NON_LOOPBACK=true`.
+- The daemon listens on `127.0.0.1` by default; a non-local `CCBG_HOST` is
+  the user's explicit choice and logs a warning, it is never refused.
 - `ccbg install`/`uninstall` write only `env.ANTHROPIC_BASE_URL` and
   `hooks.UserPromptSubmit` in `settings.json`, plus the skill copy. Never
   add another settings key without updating `docs/DESIGN.md` and both

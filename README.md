@@ -170,7 +170,7 @@ through every `CCBG_*` variable present when you ran `ccbg install --service`.
 
 | Variable                       | Default                                                       | Meaning                                                                                 |
 | ------------------------------ | ------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
-| `CCBG_HOST`                    | `127.0.0.1`                                                   | listen address; anything but loopback is refused without `CCBG_ALLOW_NON_LOOPBACK=true` |
+| `CCBG_HOST`                    | `127.0.0.1`                                                   | listen address                                                                          |
 | `CCBG_PORT`                    | `8787`                                                        | listen port                                                                             |
 | `CCBG_UPSTREAM`                | `https://api.anthropic.com`                                   | forward target                                                                          |
 | `CCBG_STATE_DIR`               | `${XDG_STATE_HOME:-~/.local/state}/claude-cache-bump-gateway` | persistence root                                                                        |
@@ -183,7 +183,6 @@ through every `CCBG_*` variable present when you ran `ccbg install --service`.
 | `CCBG_MAX_STREAMS_PER_SESSION` | `8`                                                           | snapshots retained per session                                                          |
 | `CCBG_LOG_LEVEL`               | `INFO`                                                        | Python logging level                                                                    |
 | `CCBG_URL`                     | `http://127.0.0.1:8787`                                       | where CLI subcommands find the daemon                                                   |
-| `CCBG_ALLOW_NON_LOOPBACK`      | `false`                                                       | allow `CCBG_HOST` to bind a non-loopback address                                        |
 
 This table is kept in sync with `docs/DESIGN.md` "Configuration"; if they
 ever disagree, `config.py` is the source of truth.

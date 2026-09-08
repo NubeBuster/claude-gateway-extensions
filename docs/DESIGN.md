@@ -203,7 +203,7 @@ frozen `Config` dataclass:
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `CCBG_HOST` | `127.0.0.1` | listen address; anything but loopback is refused without `CCBG_ALLOW_NON_LOOPBACK=true` |
+| `CCBG_HOST` | `127.0.0.1` | listen address; a non-local value logs a startup warning but is not refused |
 | `CCBG_PORT` | `8787` | listen port |
 | `CCBG_UPSTREAM` | `https://api.anthropic.com` | forward target |
 | `CCBG_STATE_DIR` | XDG state path above | persistence root |
@@ -216,7 +216,6 @@ frozen `Config` dataclass:
 | `CCBG_MAX_STREAMS_PER_SESSION` | `8` | snapshots retained per session |
 | `CCBG_LOG_LEVEL` | `INFO` | Python logging level |
 | `CCBG_URL` | `http://127.0.0.1:8787` | where CLI subcommands find the daemon |
-| `CCBG_ALLOW_NON_LOOPBACK` | `false` | allow `CCBG_HOST` to bind a non-loopback address |
 
 Why no configuration file: Claude Code already has a scoped configuration
 ladder (managed, user, project, local) whose `env` block is inherited by the
@@ -274,8 +273,9 @@ describes it as an opt-in with that trade-off.
 ## Security
 
 - The control API can spend the user's subscription quota and is unauthenticated.
-  The daemon binds loopback and refuses other addresses unless explicitly
-  overridden. Do not put it behind a port forward.
+  The daemon listens on `127.0.0.1` by default; a non-local `CCBG_HOST` is the
+  user's explicit choice and logs a startup warning rather than being refused.
+  Do not put it behind a port forward.
 - Persisted snapshots hold conversation content and credentials at mode 0600 in
   a 0700 directory. Disable persistence if that is unacceptable.
 - The proxy never logs request or response bodies. `DEBUG` logs headers with

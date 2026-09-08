@@ -90,7 +90,6 @@ def make_config(tmp_path: Path, upstream: str, **overrides: object) -> Config:
         "max_streams_per_session": 8,
         "log_level": "INFO",
         "url": "http://127.0.0.1:8787",
-        "allow_non_loopback": False,
     }
     fields.update(overrides)
     return Config(**fields)  # type: ignore[arg-type]

@@ -66,7 +66,7 @@ def _is_loopback_host(host: str) -> bool:
     loopback ``::1``, not just ``127.0.0.1``; surrounding brackets on an
     IPv6 literal (``[::1]``) are stripped before parsing. A value that is
     not ``localhost`` and does not parse as an IP address is treated as
-    non-loopback (fail closed) rather than raising here.
+    non-local (fail closed) rather than raising here.
     """
     if host == "localhost":
         return True
@@ -106,14 +106,15 @@ class Config:
     max_streams_per_session: int
     log_level: str
     url: str
-    allow_non_loopback: bool
 
     @classmethod
     def from_env(cls, environ: Mapping[str, str] | None = None) -> Config:
         """Build a :class:`Config` from ``CCBG_*`` variables in ``environ``.
 
-        Defaults to ``os.environ`` when ``environ`` is ``None``. Raises
-        :class:`ConfigError` on any malformed value.
+        Defaults to ``os.environ`` when ``environ`` is ``None``. Every
+        variable is optional and has a default, so a user who sets nothing
+        gets a working gateway. Raises :class:`ConfigError` on any
+        malformed value.
         """
         env = os.environ if environ is None else environ
 
@@ -135,11 +136,8 @@ class Config:
         )
         log_level = env.get("CCBG_LOG_LEVEL", "INFO")
         url = env.get("CCBG_URL", "http://127.0.0.1:8787")
-        allow_non_loopback = _parse_bool(
-            "CCBG_ALLOW_NON_LOOPBACK", env.get("CCBG_ALLOW_NON_LOOPBACK", "false")
-        )
 
-        config = cls(
+        return cls(
             host=host,
             port=port,
             upstream=upstream,
@@ -153,15 +151,8 @@ class Config:
             max_streams_per_session=max_streams_per_session,
             log_level=log_level,
             url=url,
-            allow_non_loopback=allow_non_loopback,
         )
-        config.validate()
-        return config
 
-    def validate(self) -> None:
-        """Refuse a non-loopback listen host unless ``allow_non_loopback`` is set."""
-        if not self.allow_non_loopback and not _is_loopback_host(self.host):
-            raise ConfigError(
-                f"CCBG_HOST={self.host!r} is not loopback; "
-                "set CCBG_ALLOW_NON_LOOPBACK=true to override"
-            )
+    def is_local_host(self) -> bool:
+        """Return whether ``host`` reaches this machine only (localhost or a loopback IP)."""
+        return _is_loopback_host(self.host)
