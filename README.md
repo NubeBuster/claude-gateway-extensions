@@ -65,27 +65,31 @@ Then, inside a Claude Code session: `/cache 2h`.
 
 The `/cache` command inside Claude Code is installed as a SKILL.md to provide autocomplete, but is intercepted by the `UserPromptSubmit` hook and the agent never sees it.
 
-It takes a deadline instead of an open-ended `on`: enabling bumping always
-says when it stops. `/cache` (or `/cache status`) reports status, `/cache
-bump` bumps immediately, `/cache off` (or `/cache 0`) disables it.
-Everything else is parsed as a deadline, case-insensitive and
-whitespace-tolerant:
+| Command                   | Effect                                                                            |
+| ------------------------- | --------------------------------------------------------------------------------- |
+| `/cache`                  | same as `/cache status`                                                           |
+|                           |                                                                                   |
+| `/cache <deadline>`       | turn bumping on until a deadline (e.g. `2h`, `9PM` or even `teatime`)             |
+| `/cache tomorrow teatime` | session cache will be kept warm until tomorrow `16:00` sharp, when the pot is hot |
+|                           |                                                                                   |
+| `/cache off`              | turn bumping off (also `/cache 0`)                                                |
+| `/cache status`           | show whether bumping is on and when the next bump fires                           |
+| `/cache bump`             | bump immediately, outside the normal schedule                                     |
 
-```
-/cache 2h                  # 2 hours from now
-/cache 90m                 # 90 minutes from now
-/cache 2d 4h                # 52 hours from now (also: 2d4h, joined)
-/cache 9PM                 # today at 21:00, or tomorrow if already past
-/cache tomorrow 10AM       # tomorrow at 10:00
-/cache tomorrow            # exactly 24 hours from now
-/cache today 6PM           # today at 18:00 (error if already past)
-/cache 2026-12-31 08:00    # an absolute local date and time (ISO only)
-```
+Bumping is always until a deadline to prevent bankruptcy by forgetfulness.
+The deadline you provide is validated and you are given back the resolved time in local ISO for clarity.
 
-All times are your local timezone. Named clock times `noon`, `midnight` and
-`teatime` (16:00) are also accepted. A deadline already in the past, or an
-unsupported date format such as `4/20/2027`, is rejected with a one-line
-reason instead of silently doing something else.
+| Format            | Examples                                                        | Meaning                                              |
+| ----------------- | --------------------------------------------------------------- | ---------------------------------------------------- |
+| Relative duration | `2h`, `90m`, `2d 4h`                                            | duration from now (joined `2d4h` also accepted)      |
+| Clock time        | `9PM`, `21:00`, `04:20`                                         | today at that time, or tomorrow if already past      |
+| Ambiguous time    | `4:20` - is that 4:20PM or AM?                                  | resolves to soonest                                  |
+| Named time        | `morning`, `noon`, `teatime`, `dinner`, `nighttime`, `midnight` | `09:00`, `12:00`, `16:00`, `18:00`, `22:00`, `00:00` |
+| Relative day      | `tomorrow 10AM`, `today 6PM`                                    | at that time (`tomorrow` alone = 24 hours from now)  |
+| Absolute date     | `2026-12-31 08:00`                                              | local ISO 8601 date and time                         |
+
+A deadline already in the past, or an unsupported date format such as `4/20/2027`,
+is rejected with an error message.
 
 CLI equivalents (`--session` defaults to `$CLAUDE_SESSION_ID`, which Claude
 Code sets in every hook and command it runs):
@@ -222,9 +226,9 @@ deadline you type at `/cache <duration|clock|date>` — or pass to `ccbg on
 --until` — is the actual per-session policy; it is sent straight to the
 daemon and does not go through a settings.json variable.
 
-| Variable   | Default                 | What it does                                                 |
-| ---------- | ----------------------- | ------------------------------------------------------------ |
-| `CCBG_URL` | `http://127.0.0.1:8787` | where the hook, the CLI and the statusline find the daemon   |
+| Variable   | Default                 | What it does                                               |
+| ---------- | ----------------------- | ---------------------------------------------------------- |
+| `CCBG_URL` | `http://127.0.0.1:8787` | where the hook, the CLI and the statusline find the daemon |
 
 ### Daemon settings (set where the daemon runs)
 
@@ -234,20 +238,20 @@ unit file, and otherwise you export them yourself before running `ccbg
 serve`. To change one later without reinstalling, run `systemctl --user
 edit claude-cache-bump-gateway.service`.
 
-| Variable                       | Default                                                       | What it does                                                                |
-| ------------------------------ | ------------------------------------------------------------- | --------------------------------------------------------------------------- |
-| `CCBG_HOST`                    | `127.0.0.1`                                                   | local only (`127.0.0.1`) by default; who can reach the daemon               |
-| `CCBG_PORT`                    | `8787`                                                        | which port the daemon listens on                                            |
-| `CCBG_UPSTREAM`                | `https://api.anthropic.com`                                   | where requests are actually forwarded to                                    |
-| `CCBG_STATE_DIR`               | `${XDG_STATE_HOME:-~/.local/state}/claude-cache-bump-gateway` | where session state and captured requests are saved                         |
-| `CCBG_PERSIST`                 | `true`                                                        | save state to disk so it survives a daemon restart                          |
-| `CCBG_DEFAULT_ENABLED`         | `false`                                                       | turn bumping on automatically for every new session                         |
-| `CCBG_INTERVAL_1H_S`           | `3000`                                                        | how often to refresh the cache when the model gives it a longer lifetime    |
-| `CCBG_INTERVAL_5M_S`           | `240`                                                         | how often to refresh the cache otherwise                                    |
+| Variable                       | Default                                                       | What it does                                                                               |
+| ------------------------------ | ------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| `CCBG_HOST`                    | `127.0.0.1`                                                   | local only (`127.0.0.1`) by default; who can reach the daemon                              |
+| `CCBG_PORT`                    | `8787`                                                        | which port the daemon listens on                                                           |
+| `CCBG_UPSTREAM`                | `https://api.anthropic.com`                                   | where requests are actually forwarded to                                                   |
+| `CCBG_STATE_DIR`               | `${XDG_STATE_HOME:-~/.local/state}/claude-cache-bump-gateway` | where session state and captured requests are saved                                        |
+| `CCBG_PERSIST`                 | `true`                                                        | save state to disk so it survives a daemon restart                                         |
+| `CCBG_DEFAULT_ENABLED`         | `false`                                                       | turn bumping on automatically for every new session                                        |
+| `CCBG_INTERVAL_1H_S`           | `3000`                                                        | how often to refresh the cache when the model gives it a longer lifetime                   |
+| `CCBG_INTERVAL_5M_S`           | `240`                                                         | how often to refresh the cache otherwise                                                   |
 | `CCBG_MAX_DURATION_S`          | `86400`                                                       | stop refreshing this long after the last real message, when no `/cache` deadline was given |
-| `CCBG_ON_CACHE_WRITE`          | `stop`                                                        | `stop` bumping or `continue` when a refresh finds the cache already expired |
-| `CCBG_MAX_STREAMS_PER_SESSION` | `8`                                                           | how many separate conversation branches to remember per session             |
-| `CCBG_LOG_LEVEL`               | `INFO`                                                        | how much detail the daemon logs                                             |
+| `CCBG_ON_CACHE_WRITE`          | `stop`                                                        | `stop` bumping or `continue` when a refresh finds the cache already expired                |
+| `CCBG_MAX_STREAMS_PER_SESSION` | `8`                                                           | how many separate conversation branches to remember per session                            |
+| `CCBG_LOG_LEVEL`               | `INFO`                                                        | how much detail the daemon logs                                                            |
 
 If a table and the code ever disagree, `config.py` is the source of truth.
 
