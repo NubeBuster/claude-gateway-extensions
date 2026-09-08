@@ -166,6 +166,8 @@ curl -s -X POST "http://127.0.0.1:8787/ccbg/sessions/$SESSION_ID/bump"
 - To uninstall: `ccbg uninstall --scope user --service` (match whatever
   scope and `--service` flag you installed with). Reverses exactly the
   settings.json edits `ccbg install` made and removes the systemd unit.
+  It also deletes the installed skill directory outright, including any
+  local edits you made to its `SKILL.md`.
 
 ## Development
 
