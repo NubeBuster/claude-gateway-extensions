@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import gzip
+import json
+
 from aiohttp import web
 
 from conftest import ServerHarness
@@ -117,3 +120,50 @@ async def test_bump_rejected_outcome_returns_409(harness: ServerHarness) -> None
     assert bump_resp.status == 409
     data = await bump_resp.json()
     assert data["outcome"] == "rejected"
+
+
+async def test_bump_detects_a_cache_write_in_a_gzipped_response(harness: ServerHarness) -> None:
+    """The app's client session does not auto-decompress; the bump path must decode anyway.
+
+    Without decoding, a gzipped 200 is unparseable, ``usage`` reads as
+    ``None`` and every bump classifies as ``ok`` — silently disabling the
+    stop-on-cache-write safety valve that keeps a stale session from paying
+    a full cache write on every interval.
+    """
+
+    async def messages_handler(request: web.Request) -> web.Response:
+        return web.json_response({"usage": {"input_tokens": 5}})
+
+    harness.fake.script(messages_handler)
+    resp = await harness.client.post(
+        "/v1/messages",
+        data=b'{"model": "claude-x", "max_tokens": 10, "messages": []}',
+        headers={
+            "x-claude-code-session-id": "sess-gz",
+            "authorization": "Bearer a",
+            "accept-encoding": "br, zstd",
+        },
+    )
+    assert resp.status == 200
+
+    async def gzipped_cache_write(request: web.Request) -> web.Response:
+        # The replay must have asked for an encoding the daemon can decode.
+        assert request.headers["accept-encoding"] == "gzip"
+        payload = json.dumps(
+            {"usage": {"input_tokens": 1, "cache_creation_input_tokens": 4096}}
+        ).encode()
+        return web.Response(
+            body=gzip.compress(payload),
+            headers={"content-encoding": "gzip", "content-type": "application/json"},
+        )
+
+    harness.fake.script(gzipped_cache_write)
+    bump_resp = await harness.client.post("/ccbg/sessions/sess-gz/bump")
+    assert bump_resp.status == 409
+    data = await bump_resp.json()
+    assert data["outcome"] == "cache_write"
+    assert data["usage"]["cache_creation_input_tokens"] == 4096
+
+    status = await (await harness.client.get("/ccbg/sessions/sess-gz")).json()
+    assert status["enabled"] is False
+    assert status["stopped_reason"] == "cache_write"

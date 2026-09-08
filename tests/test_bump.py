@@ -1,12 +1,15 @@
 """Tests for claude_cache_bump_gateway.core.bump."""
 
+import gzip
 import json
+import zlib
 
 from claude_cache_bump_gateway.core.bump import (
     build_bump_body,
     build_bump_headers,
     classify,
 )
+from claude_cache_bump_gateway.core.upstream import decode_body
 
 
 def test_build_bump_body_sets_max_tokens_zero_and_stream_false() -> None:
@@ -105,3 +108,35 @@ def test_classify_rejected_excerpt_capped_at_500_chars() -> None:
 def test_classify_transient_on_5xx() -> None:
     assert classify(500, b"boom").outcome == "transient"
     assert classify(503, b"boom").outcome == "transient"
+
+
+def test_build_bump_headers_pins_a_decodable_accept_encoding() -> None:
+    """A replay must not ask for an encoding this code cannot decode (br, zstd)."""
+    headers = build_bump_headers({"accept-encoding": "br, zstd", "content-type": "text/x"}, None)
+    assert headers["accept-encoding"] == "gzip"
+    assert headers["content-type"] == "text/x"
+
+
+def test_decode_body_handles_gzip_deflate_and_passes_others_through() -> None:
+    payload = b'{"usage": {"cache_creation_input_tokens": 7}}'
+    assert decode_body(gzip.compress(payload), "gzip") == payload
+    assert decode_body(zlib.compress(payload), "deflate") == payload
+    assert decode_body(payload, "identity") == payload
+    assert decode_body(payload, None) == payload
+    # Unknown or corrupt encodings are returned untouched rather than raising.
+    assert decode_body(payload, "br") == payload
+    assert decode_body(b"not gzip", "gzip") == b"not gzip"
+
+
+def test_classify_reads_usage_from_a_gzipped_body_via_decode() -> None:
+    """The cache_write safety valve must survive a compressed upstream response."""
+    payload = json.dumps({"usage": {"cache_creation_input_tokens": 12}}).encode()
+    decoded = decode_body(gzip.compress(payload), "gzip")
+    assert classify(200, decoded).outcome == "cache_write"
+
+
+def test_classify_survives_a_body_it_cannot_decode() -> None:
+    """An undecodable 200 body must not raise out of classify and kill the session task."""
+    result = classify(200, gzip.compress(b'{"usage": {}}'))
+    assert result.outcome == "ok"
+    assert result.usage is None

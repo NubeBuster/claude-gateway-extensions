@@ -42,13 +42,22 @@ def build_bump_body(body: bytes) -> bytes:
 def build_bump_headers(
     snapshot_headers: Mapping[str, str], credential: tuple[str, str] | None
 ) -> dict[str, str]:
-    """Return replay headers: hop-by-hop stripped, credential swapped, content-type ensured."""
+    """Return replay headers: hop-by-hop stripped, credential swapped, content-type ensured.
+
+    ``accept-encoding`` is forced to ``gzip`` rather than replayed. The
+    captured value is whatever Claude Code asked for (``br``, ``zstd``), and
+    a body this code cannot decode is a body whose ``usage`` cannot be read —
+    which would silently turn every ``cache_write`` into an ``ok``. Transport
+    encoding is not part of the cached prefix, so pinning it changes nothing
+    about what the replay hits.
+    """
     headers = filter_headers(snapshot_headers)
     if credential is not None:
         name, value = credential
         headers[name.lower()] = value
     if "content-type" not in headers:
         headers["content-type"] = "application/json"
+    headers["accept-encoding"] = "gzip"
     return headers
 
 
@@ -76,7 +85,9 @@ def classify(status: int, body_bytes: bytes) -> BumpResult:
         usage = None
         try:
             data = json.loads(body_bytes)
-        except json.JSONDecodeError:
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            # A body this code cannot read (an encoding it could not decode,
+            # binary junk) must never take the session's task down with it.
             data = None
         if isinstance(data, dict):
             usage = Usage.from_dict(data.get("usage"))

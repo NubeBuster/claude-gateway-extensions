@@ -8,11 +8,16 @@ need identical hop-by-hop stripping.
 
 from __future__ import annotations
 
+import gzip
+import logging
+import zlib
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Protocol
 
 import aiohttp
+
+logger = logging.getLogger(__name__)
 
 #: RFC 7230 hop-by-hop headers plus `host` and `content-length`, which must
 #: never be forwarded verbatim (the transport sets its own).
@@ -39,6 +44,30 @@ def filter_headers(headers: Mapping[str, str]) -> dict[str, str]:
         for key, value in headers.items()
         if key.lower() not in HOP_BY_HOP_HEADERS
     }
+
+
+def decode_body(body: bytes, content_encoding: str | None) -> bytes:
+    """Return ``body`` decompressed according to ``content_encoding``.
+
+    The proxy's shared ``ClientSession`` runs with ``auto_decompress=False``
+    so the passthrough path can forward bytes untouched; that setting also
+    applies to bump replays, whose body has to be *parsed* rather than
+    forwarded. Anything not understood (or that fails to decode) is returned
+    unchanged and left for the caller to fail on.
+    """
+    encoding = (content_encoding or "").strip().lower()
+    if not encoding or encoding == "identity":
+        return body
+    try:
+        if encoding == "gzip":
+            return gzip.decompress(body)
+        if encoding == "deflate":
+            return zlib.decompress(body)
+    except (OSError, zlib.error) as exc:
+        logger.debug("could not decode a %s response body: %s", encoding, exc)
+        return body
+    logger.debug("unsupported content-encoding %r on a replay response", encoding)
+    return body
 
 
 @dataclass
@@ -70,12 +99,18 @@ class AiohttpUpstream:
     async def send(
         self, method: str, url: str, headers: Mapping[str, str], body: bytes
     ) -> UpstreamResponse:
-        """Issue the request with redirects disabled and return the buffered response."""
+        """Issue the request with redirects disabled and return the buffered, decoded response.
+
+        The body is decompressed per its ``content-encoding`` (see
+        :func:`decode_body`) and that header dropped, because every caller
+        parses this body rather than forwarding it.
+        """
         async with self._session.request(
             method, url, headers=dict(headers), data=body, allow_redirects=False
         ) as response:
-            response_body = await response.read()
+            raw = await response.read()
             response_headers = {key.lower(): value for key, value in response.headers.items()}
-            return UpstreamResponse(
-                status=response.status, headers=response_headers, body=response_body
-            )
+            decoded = decode_body(raw, response_headers.get("content-encoding"))
+            if decoded is not raw:
+                response_headers.pop("content-encoding", None)
+            return UpstreamResponse(status=response.status, headers=response_headers, body=decoded)
