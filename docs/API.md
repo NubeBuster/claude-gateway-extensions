@@ -70,11 +70,18 @@ past `until` is accepted (not rejected as `interval_s`/`max_duration_s`
 would be): the session simply stops on its next scheduler tick.
 
 Disabling a session (`"enabled": false`) clears `until`, unlike
-`interval_s`/`max_duration_s`, which survive. An automatic stop clears it
-too, for every `stopped_reason` except `no_snapshot` (which only means
-nothing has been captured to replay yet). Re-enabling without a new `until`
-therefore falls back to the max-duration stop rather than resuming a
-deadline that is already spent.
+`interval_s`/`max_duration_s`, which survive. Every automatic stop
+(`deadline`, `max_duration`, `cache_write`, `unauthorized`, `rejected`,
+`transient`) clears it too. Re-enabling without a new `until` therefore
+falls back to the max-duration stop rather than resuming a deadline that is
+already spent.
+
+Enabling a session whose first request has not been captured yet is
+allowed and is not a stop condition: the session stays `"enabled": true`
+with `next_bump_at` and `streams` reporting nothing to bump
+(`null` and `0`), keeping its deadline and overrides, and starts bumping
+from the first `/v1/messages` request it sees. Only the immediate bump
+route below answers `404 no_snapshot` in that state.
 
 Response: the session's updated status dict (same shape as `GET
 /ccbg/sessions/{id}`).

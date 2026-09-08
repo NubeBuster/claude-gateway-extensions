@@ -10,6 +10,10 @@ from aiohttp import web
 
 from conftest import ServerHarness
 
+#: A deadline far enough ahead that the scheduler never reaches it mid-test
+#: (2100-01-01), for the tests that run against the real clock.
+_FUTURE_UNTIL = 4102444800
+
 
 async def test_health(harness: ServerHarness) -> None:
     resp = await harness.client.get("/ccbg/health")
@@ -187,15 +191,16 @@ async def test_put_rejects_non_positive_durations(
 
 
 async def test_put_accepts_until_and_reports_it_back(harness: ServerHarness) -> None:
+    """A future deadline survives the round trip; this harness runs on the real clock."""
     resp = await harness.client.put(
-        "/ccbg/sessions/sess-until", json={"enabled": True, "until": 1700006000}
+        "/ccbg/sessions/sess-until", json={"enabled": True, "until": _FUTURE_UNTIL}
     )
     assert resp.status == 200
     data = await resp.json()
-    assert data["until"] == 1700006000
+    assert data["until"] == _FUTURE_UNTIL
 
     fetched = await harness.client.get("/ccbg/sessions/sess-until")
-    assert (await fetched.json())["until"] == 1700006000
+    assert (await fetched.json())["until"] == _FUTURE_UNTIL
 
 
 async def test_put_rejects_non_numeric_until(harness: ServerHarness) -> None:

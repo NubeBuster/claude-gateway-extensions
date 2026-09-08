@@ -273,6 +273,59 @@ async def test_auto_stop_clears_the_deadline_so_re_enabling_runs_again(
     await scheduler.stop()
 
 
+async def test_enabled_before_any_request_waits_for_the_first_snapshot(
+    tmp_path: Path, clock: FakeClock, store: MemoryStore
+) -> None:
+    """`/cache 2h` as the opening prompt: wait for traffic, then bump, never stop."""
+    upstream = ScriptedUpstream([_ok_response()])
+    scheduler = Scheduler(_config(tmp_path), store, LargestPrefixSelector(), upstream, clock)
+
+    scheduler.set_enabled("sess-1", True, interval_s=5, until=9000.0)
+    await _pump(200)
+
+    waiting = store.get_state("sess-1")
+    assert waiting is not None
+    assert waiting.enabled is True
+    assert waiting.stopped_reason is None
+    assert waiting.until == 9000.0
+    assert scheduler.status("sess-1")["next_bump_at"] is None
+    assert upstream.calls == []
+
+    scheduler.note_request("sess-1", _snapshot(), ("authorization", "Bearer a"))
+    await _pump_until(lambda: store.get_state("sess-1").bump_count == 1)  # type: ignore[union-attr]
+
+    state = store.get_state("sess-1")
+    assert state is not None
+    assert state.enabled is True
+    assert state.stopped_reason is None
+    assert len(upstream.calls) == 1
+
+    await scheduler.stop()
+
+
+async def test_waiting_session_keeps_the_deadline_it_was_enabled_with(
+    tmp_path: Path, clock: FakeClock, store: MemoryStore
+) -> None:
+    """The deadline runs from when `/cache` was typed, not from the first request."""
+    upstream = ScriptedUpstream([])
+    scheduler = Scheduler(_config(tmp_path), store, LargestPrefixSelector(), upstream, clock)
+
+    scheduler.set_enabled("sess-1", True, interval_s=1000, until=1005.0)
+    await _pump_until(lambda: clock.now() >= 1002.0)
+    scheduler.note_request("sess-1", _snapshot(), ("authorization", "Bearer a"))
+
+    await _pump_until(lambda: store.get_state("sess-1").stopped_reason is not None)  # type: ignore[union-attr]
+
+    state = store.get_state("sess-1")
+    assert state is not None
+    assert state.stopped_reason == "deadline"
+    assert state.bump_count == 0
+    assert upstream.calls == []
+    assert clock.now() == pytest.approx(1005.0)
+
+    await scheduler.stop()
+
+
 async def test_deadline_takes_precedence_over_max_duration(
     tmp_path: Path, clock: FakeClock, store: MemoryStore
 ) -> None:

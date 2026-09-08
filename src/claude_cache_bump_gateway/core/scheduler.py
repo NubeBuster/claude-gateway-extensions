@@ -28,12 +28,6 @@ from claude_cache_bump_gateway.core.snapshot import (
 from claude_cache_bump_gateway.core.store import SnapshotStore
 from claude_cache_bump_gateway.core.upstream import Upstream
 
-#: Stop reasons that leave a session's ``until`` in place (see
-#: :meth:`Scheduler._persist_stop`). Every other reason is a session that ran
-#: out — its deadline is spent and must not outlive it. ``no_snapshot`` is not
-#: one of those: it only means no request has been captured yet.
-_KEEPS_DEADLINE_STOPS = frozenset({"no_snapshot"})
-
 
 class NoSnapshot(Exception):
     """Raised by :meth:`Scheduler.bump_now` when the session has nothing to replay."""
@@ -245,22 +239,18 @@ class Scheduler:
             task.cancel()
 
     def _persist_stop(self, session_id: str, reason: str) -> None:
-        """Set ``enabled = False`` and record ``stopped_reason`` for ``session_id``.
+        """Set ``enabled = False``, clear ``until`` and record ``stopped_reason``.
 
-        A stop that ends the session's working life also clears ``until``,
-        for the same reason :meth:`set_enabled` does on an explicit disable:
-        a later enable without a new deadline must fall back to the
-        max-duration stop instead of tripping over a deadline already in the
-        past and stopping again on its first tick. ``no_snapshot`` is the
-        exception (see :data:`_KEEPS_DEADLINE_STOPS`): nothing about the
-        session has run out, there is simply nothing to replay yet, so the
-        deadline the user asked for is kept.
+        Every stop reason ends the session's working life, so the deadline
+        goes with it, for the same reason :meth:`set_enabled` clears it on an
+        explicit disable: a later enable without a new deadline must fall
+        back to the max-duration stop instead of tripping over a deadline
+        already in the past and stopping again on its first tick.
         """
         state = self._store.get_state(session_id)
         if state is None:
             return
-        until = state.until if reason in _KEEPS_DEADLINE_STOPS else None
-        state = dataclasses.replace(state, enabled=False, stopped_reason=reason, until=until)
+        state = dataclasses.replace(state, enabled=False, stopped_reason=reason, until=None)
         self._store.put_state(state)
 
     def _effective_interval(self, state: SessionState, snapshot: Snapshot) -> int:
@@ -317,35 +307,36 @@ class Scheduler:
         return "transient"
 
     async def _run_session(self, session_id: str) -> None:
-        """Task body: wait for the next bump, then bump, forever until disabled or stopped."""
+        """Task body: wait for the next bump, then bump, forever until disabled or stopped.
+
+        Having no snapshot yet is a wait, not a stop: a session enabled
+        before its first request (the ``/cache 2h`` typed as the opening
+        prompt) keeps ticking with its deadline and overrides intact until
+        :meth:`note_request` captures one, and only then starts bumping.
+        """
         try:
             while True:
                 state = self._store.get_state(session_id)
                 if state is None or not state.enabled:
                     return
-                snapshots = self._store.get_snapshots(session_id)
-                snapshot = self._selector.select(snapshots)
-                if snapshot is None:
-                    self._persist_stop(session_id, "no_snapshot")
-                    return
                 if state.until is not None:
                     if self._clock.now() >= state.until:
                         self._persist_stop(session_id, "deadline")
                         return
-                else:
+                elif state.last_request_at is not None:
                     max_duration = (
                         state.max_duration_s
                         if state.max_duration_s is not None
                         else self._config.max_duration_s
                     )
-                    last_request_at = (
-                        state.last_request_at
-                        if state.last_request_at is not None
-                        else self._clock.now()
-                    )
-                    if self._clock.now() - last_request_at >= max_duration:
+                    if self._clock.now() - state.last_request_at >= max_duration:
                         self._persist_stop(session_id, "max_duration")
                         return
+                snapshots = self._store.get_snapshots(session_id)
+                snapshot = self._selector.select(snapshots)
+                if snapshot is None:
+                    await self._clock.sleep(self._TICK_S)
+                    continue
                 next_bump_at = self._next_bump_at(state, snapshot)
                 assert next_bump_at is not None
                 remaining = next_bump_at - self._clock.now()
