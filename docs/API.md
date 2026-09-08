@@ -83,6 +83,12 @@ with `next_bump_at` and `streams` reporting nothing to bump
 from the first `/v1/messages` request it sees. Only the immediate bump
 route below answers `404 no_snapshot` in that state.
 
+That wait is bounded. If no request ever arrives, the session stops at
+`until` (`stopped_reason: "deadline"`) when one was given, otherwise at
+`max_duration_s` measured from the moment it was enabled
+(`stopped_reason: "max_duration"`) — a session that never sees traffic
+does not stay enabled forever.
+
 Response: the session's updated status dict (same shape as `GET
 /ccbg/sessions/{id}`).
 

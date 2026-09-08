@@ -311,7 +311,8 @@ async def test_waiting_session_keeps_the_deadline_it_was_enabled_with(
     scheduler = Scheduler(_config(tmp_path), store, LargestPrefixSelector(), upstream, clock)
 
     scheduler.set_enabled("sess-1", True, interval_s=1000, until=1005.0)
-    await _pump_until(lambda: clock.now() >= 1002.0)
+    await _pump(5)
+    clock.advance(2.0)  # a waiting session sleeps; only the test moves time
     scheduler.note_request("sess-1", _snapshot(), ("authorization", "Bearer a"))
 
     await _pump_until(lambda: store.get_state("sess-1").stopped_reason is not None)  # type: ignore[union-attr]
@@ -322,6 +323,58 @@ async def test_waiting_session_keeps_the_deadline_it_was_enabled_with(
     assert state.bump_count == 0
     assert upstream.calls == []
     assert clock.now() == pytest.approx(1005.0)
+
+    await scheduler.stop()
+
+
+async def test_waiting_session_stops_at_max_duration_from_enabling(
+    tmp_path: Path, clock: FakeClock, store: MemoryStore
+) -> None:
+    """A session enabled with no traffic and no deadline is bounded, not endless."""
+    upstream = ScriptedUpstream([])
+    scheduler = Scheduler(_config(tmp_path), store, LargestPrefixSelector(), upstream, clock)
+
+    scheduler.set_enabled("sess-1", True, interval_s=5, max_duration_s=60)
+    await _pump(20)
+
+    waiting = store.get_state("sess-1")
+    assert waiting is not None
+    assert waiting.enabled is True
+    assert waiting.stopped_reason is None
+    assert clock.now() == pytest.approx(1000.0)  # waiting costs no ticks
+
+    clock.advance(60.0)
+    await _pump_until(lambda: store.get_state("sess-1").stopped_reason is not None)  # type: ignore[union-attr]
+
+    state = store.get_state("sess-1")
+    assert state is not None
+    assert state.stopped_reason == "max_duration"
+    assert state.enabled is False
+    assert state.bump_count == 0
+    assert upstream.calls == []
+
+    await scheduler.stop()
+
+
+async def test_snapshot_before_the_waiting_bound_starts_bumping(
+    tmp_path: Path, clock: FakeClock, store: MemoryStore
+) -> None:
+    """Traffic arriving inside the bound wakes the waiter instead of letting it expire."""
+    upstream = ScriptedUpstream([_ok_response()])
+    scheduler = Scheduler(_config(tmp_path), store, LargestPrefixSelector(), upstream, clock)
+
+    scheduler.set_enabled("sess-1", True, interval_s=5, max_duration_s=60)
+    await _pump(20)
+    clock.advance(30.0)
+    scheduler.note_request("sess-1", _snapshot(), ("authorization", "Bearer a"))
+
+    await _pump_until(lambda: store.get_state("sess-1").bump_count == 1)  # type: ignore[union-attr]
+
+    state = store.get_state("sess-1")
+    assert state is not None
+    assert state.enabled is True
+    assert state.stopped_reason is None
+    assert state.last_bump_at == pytest.approx(1035.0)
 
     await scheduler.stop()
 

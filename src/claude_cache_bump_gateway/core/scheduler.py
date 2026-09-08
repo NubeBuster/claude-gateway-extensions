@@ -69,6 +69,8 @@ class Scheduler:
         self._tasks: dict[str, asyncio.Task[None]] = {}
         self._in_flight: dict[str, int] = {}
         self._last_result: dict[str, BumpResult | None] = {}
+        self._wakeups: dict[str, asyncio.Event] = {}
+        self._enabled_since: dict[str, float] = {}
 
     async def start(self) -> None:
         """Prune stale snapshots and resume timers for every enabled session in the store."""
@@ -113,6 +115,8 @@ class Scheduler:
             self._store.put_snapshot(snapshot)
         if state.enabled:
             self._ensure_task(session_id)
+        if snapshot is not None:
+            self._wake(session_id)
 
     def set_enabled(
         self,
@@ -150,6 +154,7 @@ class Scheduler:
         self._store.put_state(state)
         if enabled:
             self._ensure_task(session_id)
+            self._wake(session_id)
         else:
             self._cancel_task(session_id)
         return state
@@ -179,6 +184,8 @@ class Scheduler:
         self._store.delete_session(session_id)
         self._last_result.pop(session_id, None)
         self._in_flight.pop(session_id, None)
+        self._wakeups.pop(session_id, None)
+        self._enabled_since.pop(session_id, None)
 
     def begin_request(self, session_id: str) -> None:
         """Mark a real request for ``session_id`` as in flight, deferring any pending bump."""
@@ -226,11 +233,23 @@ class Scheduler:
     # -- internals ---------------------------------------------------------
 
     def _ensure_task(self, session_id: str) -> None:
-        """Start a session task if none is currently running for it."""
+        """Start a session task if none is currently running for it.
+
+        Records the moment the session became enabled: that is the anchor the
+        max-duration bound is measured from while the session has no snapshot
+        to bump yet (see :meth:`_waiting_bound`).
+        """
         existing = self._tasks.get(session_id)
         if existing is not None and not existing.done():
             return
+        self._enabled_since[session_id] = self._clock.now()
         self._tasks[session_id] = asyncio.create_task(self._run_session(session_id))
+
+    def _wake(self, session_id: str) -> None:
+        """Wake a session task waiting for its first snapshot, if one is waiting."""
+        event = self._wakeups.get(session_id)
+        if event is not None:
+            event.set()
 
     def _cancel_task(self, session_id: str) -> None:
         """Cancel and forget the running task for ``session_id``, if any."""
@@ -270,6 +289,40 @@ class Scheduler:
         interval = self._effective_interval(state, snapshot)
         anchor = max(state.last_request_at or 0.0, state.last_bump_at or 0.0)
         return anchor + interval
+
+    def _waiting_bound(self, session_id: str, state: SessionState) -> float:
+        """Return the epoch time at which a session with no snapshot stops waiting.
+
+        A waiting session has no ``last_request_at`` to measure the max
+        duration from, so it is measured from the moment the session was
+        enabled; an explicit ``until`` replaces it, exactly as it does for a
+        session that is already bumping.
+        """
+        if state.until is not None:
+            return state.until
+        max_duration = (
+            state.max_duration_s
+            if state.max_duration_s is not None
+            else self._config.max_duration_s
+        )
+        return self._enabled_since.get(session_id, self._clock.now()) + max_duration
+
+    async def _await_first_snapshot(self, session_id: str, state: SessionState) -> None:
+        """Park until a snapshot is captured for ``session_id`` or its wait bound is due.
+
+        Costs one timer, not a tick per second: a session enabled before its
+        first request may wait for hours. Returning does not mean either
+        thing happened; the caller re-reads state and store and decides.
+        Clearing the wakeup here cannot lose a snapshot, because the caller
+        read the store with no await in between and :meth:`note_request`
+        only ever runs between awaits.
+        """
+        remaining = self._waiting_bound(session_id, state) - self._clock.now()
+        if remaining <= 0:
+            return
+        event = self._wakeups.setdefault(session_id, asyncio.Event())
+        event.clear()
+        await self._clock.wait_for_event(event, remaining)
 
     def _apply_result(self, session_id: str, result: BumpResult) -> str | None:
         """Record ``result`` and apply its bookkeeping effect; return a stop reason if any."""
@@ -311,17 +364,26 @@ class Scheduler:
 
         Having no snapshot yet is a wait, not a stop: a session enabled
         before its first request (the ``/cache 2h`` typed as the opening
-        prompt) keeps ticking with its deadline and overrides intact until
-        :meth:`note_request` captures one, and only then starts bumping.
+        prompt) keeps its deadline and overrides intact until
+        :meth:`note_request` captures one, and only then starts bumping. That
+        wait is bounded, not endless, and costs nothing while it lasts: it
+        ends when a snapshot arrives, at the session's deadline, or at its
+        max duration measured from the enable time, whichever comes first.
         """
         try:
             while True:
                 state = self._store.get_state(session_id)
                 if state is None or not state.enabled:
                     return
+                snapshots = self._store.get_snapshots(session_id)
+                snapshot = self._selector.select(snapshots)
                 if state.until is not None:
                     if self._clock.now() >= state.until:
                         self._persist_stop(session_id, "deadline")
+                        return
+                elif snapshot is None:
+                    if self._clock.now() >= self._waiting_bound(session_id, state):
+                        self._persist_stop(session_id, "max_duration")
                         return
                 elif state.last_request_at is not None:
                     max_duration = (
@@ -332,10 +394,8 @@ class Scheduler:
                     if self._clock.now() - state.last_request_at >= max_duration:
                         self._persist_stop(session_id, "max_duration")
                         return
-                snapshots = self._store.get_snapshots(session_id)
-                snapshot = self._selector.select(snapshots)
                 if snapshot is None:
-                    await self._clock.sleep(self._TICK_S)
+                    await self._await_first_snapshot(session_id, state)
                     continue
                 next_bump_at = self._next_bump_at(state, snapshot)
                 assert next_bump_at is not None
@@ -353,3 +413,4 @@ class Scheduler:
         finally:
             if self._tasks.get(session_id) is asyncio.current_task():
                 self._tasks.pop(session_id, None)
+                self._wakeups.pop(session_id, None)
