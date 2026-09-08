@@ -13,7 +13,7 @@ normal cache-read pricing per bump (often free on a subscription); it stops
 bumping a session the moment a bump would pay a full cache write instead of
 a read (see "How it works").
 
-0.1 ships cache bumping only; other features are on the roadmap in
+0.1 ships cache bumping only; other7 features are on the roadmap in
 `docs/DESIGN.md`.
 
 ## Requirements
@@ -24,7 +24,7 @@ a read (see "How it works").
   only; on macOS run `ccbg serve` yourself (a shell, `tmux`, or a `launchd`
   agent you write).
 
-## Install
+## Installation
 
 ```sh
 pipx install claude-cache-bump-gateway
@@ -36,14 +36,22 @@ Then:
 
 ```sh
 ccbg install --scope user --service
-ccbg doctor
 ```
+
+> [!CAUTION]
+> This immediately affects all running Claude Code sessions in the given scope. Recommended to install when no large context sessions are live, to prevent potential cache misess or other risks.
 
 `ccbg install` idempotently merges `env.ANTHROPIC_BASE_URL` and a
 `UserPromptSubmit` hook into the chosen `settings.json`, and copies the
 `cache` skill into the matching `skills/` directory — nothing else in
 your `settings.json` is touched. `--service` also writes and enables a
-systemd user unit running `ccbg serve`. `ccbg doctor` reports what is and
+systemd user unit running `ccbg serve`.
+
+```sh
+ccbg doctor
+```
+
+`ccbg doctor` reports what is and
 is not wired up. Use `--scope project` to wire a single project's
 `.claude/settings.json` instead of (or alongside) your user one.
 
@@ -51,10 +59,10 @@ Then, inside a Claude Code session: `/cache on`.
 
 ## Usage
 
-The `/cache` command inside Claude Code:
+The `/cache` command inside Claude Code is installed as a SKILL.md to provide autocomplete, but is intercepted by the `UserPromptSubmit` hook and the agent never sees it.
 
 | Command         | Effect                                                  |
-| --------------- | -------------------------------------------------------- |
+| --------------- | ------------------------------------------------------- |
 | `/cache`        | same as `/cache status`                                 |
 | `/cache on`     | turn bumping on for the current session                 |
 | `/cache on 2h`  | turn bumping on with a 2-hour max duration override     |
@@ -108,29 +116,29 @@ ccbg now --session "$CLAUDE_SESSION_ID"
 }
 ```
 
-| Field             | Type                       | Meaning                                                              |
-| ------------------ | -------------------------- | ---------------------------------------------------------------------- |
-| `session_id`       | string                     | the session this status is for                                       |
-| `enabled`          | bool                       | whether bumping is currently on                                      |
-| `interval_s`       | int or null                | per-session bump interval override; `null` uses the config default   |
-| `max_duration_s`   | int or null                | per-session max-duration override; `null` uses the config default    |
-| `last_request_at`  | float (epoch s) or null    | when the last real `/v1/messages` request was captured               |
-| `last_bump_at`     | float (epoch s) or null    | when the last successful bump replay ran                             |
-| `bump_count`       | int                        | number of successful bumps for this session                          |
-| `stopped_reason`   | string or null             | why bumping was turned off automatically (e.g. `cache_write`), if it was |
-| `next_bump_at`     | float (epoch s) or null    | when the next scheduled bump will fire; `null` if disabled or no snapshot |
-| `streams`          | int                        | number of distinct request streams captured for this session         |
-| `last_result`      | object or null             | the most recent `BumpResult` (below), or `null` if never bumped       |
-| `last_result.outcome`      | string             | `ok`, `cache_write`, `unauthorized`, `rejected`, or `transient`       |
-| `last_result.status`       | int or null        | upstream HTTP status of the bump replay                              |
-| `last_result.usage`        | object or null      | token usage from the replay response (fields below), or `null`       |
-| `last_result.usage.input_tokens`                | int | fresh (non-cached) input tokens billed                |
-| `last_result.usage.output_tokens`               | int | output tokens billed                                   |
-| `last_result.usage.cache_read_input_tokens`     | int | input tokens served from cache (a successful bump)     |
-| `last_result.usage.cache_creation_input_tokens` | int | input tokens billed as a fresh cache write              |
-| `last_result.detail`       | string              | short human-readable detail, empty on `ok`                           |
-| `last_result.stream_key`   | string or null      | which captured stream was replayed                                   |
-| `last_result.model`        | string or null      | the model of the replayed stream                                     |
+| Field                                           | Type                    | Meaning                                                                   |
+| ----------------------------------------------- | ----------------------- | ------------------------------------------------------------------------- |
+| `session_id`                                    | string                  | the session this status is for                                            |
+| `enabled`                                       | bool                    | whether bumping is currently on                                           |
+| `interval_s`                                    | int or null             | per-session bump interval override; `null` uses the config default        |
+| `max_duration_s`                                | int or null             | per-session max-duration override; `null` uses the config default         |
+| `last_request_at`                               | float (epoch s) or null | when the last real `/v1/messages` request was captured                    |
+| `last_bump_at`                                  | float (epoch s) or null | when the last successful bump replay ran                                  |
+| `bump_count`                                    | int                     | number of successful bumps for this session                               |
+| `stopped_reason`                                | string or null          | why bumping was turned off automatically (e.g. `cache_write`), if it was  |
+| `next_bump_at`                                  | float (epoch s) or null | when the next scheduled bump will fire; `null` if disabled or no snapshot |
+| `streams`                                       | int                     | number of distinct request streams captured for this session              |
+| `last_result`                                   | object or null          | the most recent `BumpResult` (below), or `null` if never bumped           |
+| `last_result.outcome`                           | string                  | `ok`, `cache_write`, `unauthorized`, `rejected`, or `transient`           |
+| `last_result.status`                            | int or null             | upstream HTTP status of the bump replay                                   |
+| `last_result.usage`                             | object or null          | token usage from the replay response (fields below), or `null`            |
+| `last_result.usage.input_tokens`                | int                     | fresh (non-cached) input tokens billed                                    |
+| `last_result.usage.output_tokens`               | int                     | output tokens billed                                                      |
+| `last_result.usage.cache_read_input_tokens`     | int                     | input tokens served from cache (a successful bump)                        |
+| `last_result.usage.cache_creation_input_tokens` | int                     | input tokens billed as a fresh cache write                                |
+| `last_result.detail`                            | string                  | short human-readable detail, empty on `ok`                                |
+| `last_result.stream_key`                        | string or null          | which captured stream was replayed                                        |
+| `last_result.model`                             | string or null          | the model of the replayed stream                                          |
 
 Full contract, including every other route: `docs/API.md`.
 
@@ -198,11 +206,11 @@ overrides when you run `/cache on` (`CCBG_URL` just tells the hook, the CLI
 and the statusline where to find the daemon).
 
 | Variable              | Default                 | What it does                                                             |
-| ---------------------- | -------------------------- | ------------------------------------------------------------------------- |
-| `CCBG_INTERVAL_1H_S`  | `3000`                   | how often to refresh the cache when the model gives it a longer lifetime |
-| `CCBG_INTERVAL_5M_S`  | `240`                    | how often to refresh the cache otherwise                                |
-| `CCBG_MAX_DURATION_S` | `86400`                  | stop refreshing this long after you last sent a real message            |
-| `CCBG_URL`            | `http://127.0.0.1:8787`  | where the hook, the CLI and the statusline find the daemon              |
+| --------------------- | ----------------------- | ------------------------------------------------------------------------ |
+| `CCBG_INTERVAL_1H_S`  | `3000`                  | how often to refresh the cache when the model gives it a longer lifetime |
+| `CCBG_INTERVAL_5M_S`  | `240`                   | how often to refresh the cache otherwise                                 |
+| `CCBG_MAX_DURATION_S` | `86400`                 | stop refreshing this long after you last sent a real message             |
+| `CCBG_URL`            | `http://127.0.0.1:8787` | where the hook, the CLI and the statusline find the daemon               |
 
 ### Daemon settings (set where the daemon runs)
 
@@ -212,17 +220,17 @@ unit file, and otherwise you export them yourself before running `ccbg
 serve`. To change one later without reinstalling, run `systemctl --user
 edit claude-cache-bump-gateway.service`.
 
-| Variable                       | Default                                                       | What it does                                                     |
-| ------------------------------- | --------------------------------------------------------------- | -------------------------------------------------------------------- |
-| `CCBG_HOST`                    | `127.0.0.1`                                                   | local only (`127.0.0.1`) by default; who can reach the daemon    |
-| `CCBG_PORT`                    | `8787`                                                        | which port the daemon listens on                                 |
-| `CCBG_UPSTREAM`                | `https://api.anthropic.com`                                   | where requests are actually forwarded to                         |
-| `CCBG_STATE_DIR`               | `${XDG_STATE_HOME:-~/.local/state}/claude-cache-bump-gateway` | where session state and captured requests are saved               |
-| `CCBG_PERSIST`                 | `true`                                                        | save state to disk so it survives a daemon restart                |
-| `CCBG_DEFAULT_ENABLED`         | `false`                                                       | turn bumping on automatically for every new session               |
+| Variable                       | Default                                                       | What it does                                                                |
+| ------------------------------ | ------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| `CCBG_HOST`                    | `127.0.0.1`                                                   | local only (`127.0.0.1`) by default; who can reach the daemon               |
+| `CCBG_PORT`                    | `8787`                                                        | which port the daemon listens on                                            |
+| `CCBG_UPSTREAM`                | `https://api.anthropic.com`                                   | where requests are actually forwarded to                                    |
+| `CCBG_STATE_DIR`               | `${XDG_STATE_HOME:-~/.local/state}/claude-cache-bump-gateway` | where session state and captured requests are saved                         |
+| `CCBG_PERSIST`                 | `true`                                                        | save state to disk so it survives a daemon restart                          |
+| `CCBG_DEFAULT_ENABLED`         | `false`                                                       | turn bumping on automatically for every new session                         |
 | `CCBG_ON_CACHE_WRITE`          | `stop`                                                        | `stop` bumping or `continue` when a refresh finds the cache already expired |
-| `CCBG_MAX_STREAMS_PER_SESSION` | `8`                                                           | how many separate conversation branches to remember per session   |
-| `CCBG_LOG_LEVEL`               | `INFO`                                                        | how much detail the daemon logs                                   |
+| `CCBG_MAX_STREAMS_PER_SESSION` | `8`                                                           | how many separate conversation branches to remember per session             |
+| `CCBG_LOG_LEVEL`               | `INFO`                                                        | how much detail the daemon logs                                             |
 
 If a table and the code ever disagree, `config.py` is the source of truth.
 
