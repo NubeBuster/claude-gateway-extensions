@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any, TextIO
 
 from claude_cache_bump_gateway.cli.client import ApiError, ControlClient, DaemonUnreachable
@@ -30,6 +30,7 @@ from claude_cache_bump_gateway.cli.when import (
     parse_when,
 )
 from claude_cache_bump_gateway.config import Config
+from claude_cache_bump_gateway.core.status_format import format_deadline
 
 _COMMAND_PREFIX = "/cache"
 
@@ -64,18 +65,12 @@ def _interval_minutes(session: Mapping[str, Any]) -> int | None:
     return max(0, round((next_bump_at - anchor) / 60))
 
 
-def _iso_local(epoch: float) -> str:
-    """Format an epoch timestamp as a minute-precision local ISO 8601 string with offset."""
-    local = datetime.fromtimestamp(epoch, tz=UTC).astimezone()
-    return local.isoformat(timespec="minutes")
-
-
 def _format_on_reason(session: Mapping[str, Any], now: float) -> str:
     """Format the reason line for an enabled ``status`` (no new deadline this call)."""
     until = session.get("until")
     minutes = _minutes_until(session.get("next_bump_at"), now)
     if isinstance(until, int | float):
-        head = f"cache: on until {_iso_local(until)}"
+        head = f"cache: on until {format_deadline(until, now)}"
     else:
         head = "cache: on for this session"
     if minutes is None:
@@ -83,14 +78,14 @@ def _format_on_reason(session: Mapping[str, Any], now: float) -> str:
     return f"{head}, next bump in {minutes}m"
 
 
-def _format_until_reason(session: Mapping[str, Any]) -> str:
+def _format_until_reason(session: Mapping[str, Any], now: float) -> str:
     """Format the reason line for freshly enabling bumping with an absolute deadline."""
     until = session.get("until")
     if not isinstance(until, int | float):
         return "cache: on for this session"
     minutes = _interval_minutes(session)
-    suffix = f" (bump every {minutes}m)" if minutes is not None else ""
-    return f"cache: bumping until {_iso_local(until)}{suffix}"
+    suffix = f", bump every {minutes}m" if minutes is not None else ""
+    return f"cache: bumping until {format_deadline(until, now)}{suffix}"
 
 
 def _format_now_reason(result: Mapping[str, Any]) -> str:
@@ -131,7 +126,7 @@ def _handle_command(client: ControlClient, session_id: str, argument: str, now_d
 
     if isinstance(deadline, At):
         session = client.set_session(session_id, True, until=deadline.when.timestamp())
-        return _format_until_reason(session)
+        return _format_until_reason(session, now_dt.timestamp())
 
     assert isinstance(deadline, Status)
     try:

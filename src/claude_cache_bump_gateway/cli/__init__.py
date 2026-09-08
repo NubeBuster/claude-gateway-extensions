@@ -22,7 +22,6 @@ import sys
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, TextIO
 
@@ -38,6 +37,7 @@ from claude_cache_bump_gateway.cli.hook import run_user_prompt_submit
 from claude_cache_bump_gateway.cli.statusline import run_statusline
 from claude_cache_bump_gateway.cli.when import At, WhenError, local_now, parse_when
 from claude_cache_bump_gateway.config import Config, ConfigError
+from claude_cache_bump_gateway.core.status_format import format_deadline
 
 EXIT_OK = 0
 EXIT_FAILED = 1
@@ -79,11 +79,11 @@ def _require_session(args: argparse.Namespace, ctx: _Context) -> str:
     return session_id
 
 
-def _format_until_local(until: object) -> str:
-    """Format an ``until`` epoch value as a local ISO 8601 timestamp, or ``-`` if unset."""
+def _format_until_local(until: object, now: float) -> str:
+    """Format an ``until`` epoch value via :func:`format_deadline`, or ``-`` if unset."""
     if not isinstance(until, int | float):
         return "-"
-    return datetime.fromtimestamp(until, tz=UTC).astimezone().isoformat(timespec="minutes")
+    return format_deadline(until, now)
 
 
 def _format_status_line(session: Mapping[str, Any], now: float) -> str:
@@ -97,7 +97,7 @@ def _format_status_line(session: Mapping[str, Any], now: float) -> str:
     last_result = session.get("last_result")
     last_outcome = last_result.get("outcome") if isinstance(last_result, dict) else None
     stopped_reason = session.get("stopped_reason") or "-"
-    until = _format_until_local(session.get("until"))
+    until = _format_until_local(session.get("until"), now)
     return (
         f"{session_id}  enabled={enabled}  next_bump={next_bump}  until={until}  "
         f"last_result={last_outcome or '-'}  stopped={stopped_reason}"
