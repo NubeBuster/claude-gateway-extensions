@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import gzip
 import json
 
 from aiohttp import web
@@ -250,3 +251,36 @@ async def test_upstream_unreachable_returns_502(tmp_path) -> None:
         assert data["error"]["type"] == "ccbg_upstream_unreachable"
     finally:
         await client.close()
+
+
+async def test_capture_reads_usage_from_a_gzipped_response(harness: ServerHarness) -> None:
+    """A compressed /v1/messages response must still be forwarded verbatim and captured.
+
+    Without decoding the tee'd copy, json.loads raised UnicodeDecodeError
+    inside _capture, so no snapshot was stored at all and the session had
+    nothing to bump.
+    """
+    payload = json.dumps({"usage": {"input_tokens": 11, "cache_read_input_tokens": 4096}}).encode()
+    compressed = gzip.compress(payload)
+
+    async def gzipped(request: web.Request) -> web.Response:
+        return web.Response(
+            body=compressed,
+            headers={"content-encoding": "gzip", "content-type": "application/json"},
+        )
+
+    harness.fake.script(gzipped)
+    resp = await harness.client.post(
+        "/v1/messages",
+        data=b'{"model": "claude-x", "max_tokens": 10, "messages": []}',
+        headers={"x-claude-code-session-id": "sess-cap", "accept-encoding": "gzip"},
+        auto_decompress=False,
+    )
+    assert resp.status == 200
+    assert await resp.read() == compressed  # forwarded byte-for-byte, still compressed
+
+    store = harness.app[STORE_KEY]
+    snapshots = store.get_snapshots("sess-cap")
+    assert len(snapshots) == 1
+    assert snapshots[0].usage.cache_read_input_tokens == 4096
+    assert snapshots[0].usage.total_input == 4107

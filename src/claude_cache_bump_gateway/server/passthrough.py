@@ -24,7 +24,7 @@ from claude_cache_bump_gateway.config import Config
 from claude_cache_bump_gateway.core.clock import Clock
 from claude_cache_bump_gateway.core.scheduler import Scheduler
 from claude_cache_bump_gateway.core.snapshot import Snapshot, Usage, stream_key
-from claude_cache_bump_gateway.core.upstream import filter_headers
+from claude_cache_bump_gateway.core.upstream import decode_body, filter_headers
 from claude_cache_bump_gateway.server.keys import (
     CLIENT_SESSION_KEY,
     CLOCK_KEY,
@@ -142,6 +142,7 @@ async def _forward(
         should_tee = is_messages and upstream_resp.status < 400 and request_body is not None
         tee_buffer = bytearray() if should_tee else None
         content_type = upstream_resp.headers.get("content-type", "")
+        content_encoding = upstream_resp.headers.get("content-encoding")
 
         try:
             async for chunk in upstream_resp.content.iter_any():
@@ -155,7 +156,14 @@ async def _forward(
 
     if tee_buffer is not None and session_id is not None and request_body is not None:
         _capture(
-            scheduler, clock, session_id, request_body, headers, bytes(tee_buffer), content_type
+            scheduler,
+            clock,
+            session_id,
+            request_body,
+            headers,
+            bytes(tee_buffer),
+            content_type,
+            content_encoding,
         )
     return resp
 
@@ -168,6 +176,7 @@ def _capture(
     headers: Mapping[str, str],
     tee_body: bytes,
     content_type: str,
+    content_encoding: str | None,
 ) -> None:
     """Store a snapshot of a completed ``/v1/messages`` exchange for ``session_id``.
 
@@ -178,7 +187,7 @@ def _capture(
         key = stream_key(request_body)
         body_data = json.loads(request_body)
         model = body_data.get("model") if isinstance(body_data, dict) else None
-        usage = _extract_usage(tee_body, content_type)
+        usage = _extract_usage(tee_body, content_type, content_encoding)
         snapshot = Snapshot(
             session_id=session_id,
             stream_key=key,
@@ -194,12 +203,19 @@ def _capture(
         logger.debug("failed to capture snapshot for session %s", session_id, exc_info=True)
 
 
-def _extract_usage(body: bytes, content_type: str) -> Usage:
-    """Parse the tee'd response body into a :class:`Usage`, handling SSE or plain JSON."""
+def _extract_usage(body: bytes, content_type: str, content_encoding: str | None = None) -> Usage:
+    """Parse the tee'd response body into a :class:`Usage`, handling SSE or plain JSON.
+
+    The tee'd copy is decompressed first: what goes to the client is
+    forwarded byte-for-byte, but this private copy has to be readable, and
+    Anthropic gzips ``/v1/messages`` responses whenever the client asks for
+    it (which Claude Code does).
+    """
+    decoded = decode_body(body, content_encoding)
     if "text/event-stream" in content_type.lower():
-        raw = _parse_sse_usage(body)
+        raw = _parse_sse_usage(decoded)
     else:
-        raw = _parse_json_usage(body)
+        raw = _parse_json_usage(decoded)
     return Usage.from_dict(raw)
 
 
@@ -239,7 +255,7 @@ def _parse_json_usage(body: bytes) -> dict[str, Any] | None:
     """Return the ``usage`` field of a plain JSON response body, if present."""
     try:
         data = json.loads(body)
-    except json.JSONDecodeError:
+    except (json.JSONDecodeError, UnicodeDecodeError):
         return None
     if not isinstance(data, dict):
         return None
