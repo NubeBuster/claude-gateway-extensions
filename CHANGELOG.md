@@ -71,3 +71,19 @@
   `claude-gateway-extensions`: cache bumping is its first feature, not its
   identity. CLI `ccbg` is now `cgx`, env prefix `CCBG_` is now `CGX_`, and
   the control API prefix `/ccbg/` is now `/cgx/`.
+- Windows and macOS support without systemd: `cgx serve`, the hook,
+  statusline and `cgx configure` now run on any OS. `CGX_STATE_DIR`
+  defaults to `%LOCALAPPDATA%\claude-gateway-extensions` on Windows
+  (`LOCALAPPDATA` in the environment is what selects this, keeping the
+  default testable without touching `sys.platform`) and home-directory
+  resolution now honours `USERPROFILE` when `HOME` is unset. Snapshot
+  file/directory permissions (0600/0700) are best-effort off POSIX,
+  inheriting the user profile's ACLs on Windows instead. `cgx service
+  <install|uninstall|status>` now exits 1 with a pointer to `cgx serve
+  --port <N>` plus `cgx configure --port <N>` on any non-Linux platform,
+  since it manages a systemd user unit; `cgx doctor` skips the systemd
+  check there with a one-line note instead of a permanent warning. CI
+  gained a `windows-latest` job running `ruff check`, `pyright` and
+  `pytest` directly; the daemon's `tzdata` runtime dependency is
+  Windows-only (`zoneinfo` needs it there, `aiohttp` is still the only
+  dependency everywhere else).

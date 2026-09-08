@@ -7,6 +7,7 @@ one line per check and returns exit code 1 if any check failed.
 from __future__ import annotations
 
 import stat
+import sys
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -215,10 +216,22 @@ def run_doctor(
     cwd: Path,
     stdout: TextIO,
     client_factory: ClientFactory = ControlClient,
+    platform: str = sys.platform,
 ) -> int:
-    """Run every check, print one line each, and return 1 if any check failed else 0."""
+    """Run every check, print one line each, and return 1 if any check failed else 0.
+
+    ``platform`` (default ``sys.platform``, overridable for tests) skips
+    :func:`check_service` on anything but Linux: the systemd unit it checks
+    for can never exist there, so the check would only ever produce a
+    permanent, unfixable warning. A one-line ``ok`` note takes its place.
+    """
     client = client_factory(config.url)
     daemon_check = check_daemon(client, config.url)
+    service_check = (
+        check_service(environ)
+        if platform == "linux"
+        else CheckResult("ok", "systemd service checks skipped (not on Linux)")
+    )
     checks = [
         daemon_check,
         check_base_url(config, environ, cwd),
@@ -226,7 +239,7 @@ def run_doctor(
         check_hook(environ, cwd),
         check_skill(environ, cwd),
         check_credentials(environ, cwd),
-        check_service(environ),
+        service_check,
         check_state_dir(config),
     ]
     for check in checks:

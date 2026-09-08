@@ -5,9 +5,12 @@ from __future__ import annotations
 import io
 import json
 import os
+import sys
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
+
+import pytest
 
 from claude_gateway_extensions.cli import doctor, install, service
 from claude_gateway_extensions.cli.client import DaemonUnreachable
@@ -82,6 +85,7 @@ def test_missing_hook_and_skill_are_warnings_not_failures(tmp_path: Path) -> Non
     assert "warn:" in output
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="run_doctor skips the systemd check there")
 def test_missing_service_unit_is_a_warning_with_install_hint(tmp_path: Path) -> None:
     environ = {"HOME": str(tmp_path)}
     config = Config.from_env({"CGX_URL": URL})
@@ -102,6 +106,32 @@ def test_active_service_unit_is_ok(tmp_path: Path) -> None:
     check = doctor.check_service(environ, query)
     assert check.status == "ok"
     assert "enabled=True, active=True" in check.message
+
+
+def test_run_doctor_skips_service_check_on_non_linux(tmp_path: Path) -> None:
+    """On a non-Linux ``platform``, run_doctor must not warn about a systemd unit."""
+    environ = {"HOME": str(tmp_path)}
+    config = Config.from_env({"CGX_URL": URL})
+    stdout = io.StringIO()
+    code = doctor.run_doctor(
+        config, environ, tmp_path, stdout, client_factory=_healthy_factory, platform="win32"
+    )
+    output = stdout.getvalue()
+    assert code == 0
+    assert "warn: systemd service not installed" not in output
+    assert "ok: systemd service checks skipped (not on Linux)" in output
+
+
+def test_run_doctor_still_checks_service_when_platform_is_linux(tmp_path: Path) -> None:
+    environ = {"HOME": str(tmp_path)}
+    config = Config.from_env({"CGX_URL": URL})
+    stdout = io.StringIO()
+    code = doctor.run_doctor(
+        config, environ, tmp_path, stdout, client_factory=_healthy_factory, platform="linux"
+    )
+    output = stdout.getvalue()
+    assert code == 0
+    assert "warn: systemd service not installed; run `cgx service install`" in output
 
 
 def test_api_key_helper_in_settings_is_detected(tmp_path: Path) -> None:

@@ -4,12 +4,16 @@ Defines the :class:`SnapshotStore` protocol plus two implementations:
 :class:`MemoryStore` (process-local, LRU-capped) and :class:`FileStore`
 (one JSON file per snapshot and per session state, under the XDG state
 directory, permissioned per the "Plaintext snapshots at 0600, persistence
-opt-out" decision in ``docs/DESIGN.md`` "Decisions").
+opt-out" decision in ``docs/DESIGN.md`` "Decisions"). The 0700/0600 chmod
+calls are best-effort (see :func:`_chmod_best_effort`): on Windows they are
+a no-op or fail silently, and the snapshot directory instead inherits the
+access-control list of the user profile it lives under.
 """
 
 from __future__ import annotations
 
 import base64
+import contextlib
 import json
 import os
 import re
@@ -111,6 +115,22 @@ class MemoryStore:
                 del streams[key]
 
 
+def _chmod_best_effort(path: Path, mode: int) -> None:
+    """Set ``path``'s mode to ``mode``, swallowing errors on platforms that don't support it.
+
+    ``os.chmod`` on Windows only ever toggles the read-only attribute (it
+    understands none of the 0700/0600 owner bits this module asks for) and
+    can still raise ``OSError`` in some configurations (e.g. a locked or
+    ACL-restricted file); on Windows the directory/file instead inherits
+    the permissions of the user profile it lives under, which is the OS's
+    own access-control mechanism. Never raise here: a permission call that
+    is a no-op or fails on a non-POSIX filesystem must not stop a snapshot
+    from being written.
+    """
+    with contextlib.suppress(OSError):
+        os.chmod(path, mode)
+
+
 def _atomic_write(path: Path, data: bytes) -> None:
     """Write ``data`` to ``path`` atomically with mode 0600, via a temp file + rename."""
     tmp_path = path.with_name(f".{path.name}.tmp")
@@ -121,7 +141,7 @@ def _atomic_write(path: Path, data: bytes) -> None:
     except BaseException:
         tmp_path.unlink(missing_ok=True)
         raise
-    os.chmod(tmp_path, _FILE_MODE)
+    _chmod_best_effort(tmp_path, _FILE_MODE)
     os.replace(tmp_path, path)
 
 
@@ -212,9 +232,13 @@ class FileStore:
 
     @staticmethod
     def _ensure_dir(path: Path) -> None:
-        """Create ``path`` (and parents) if missing, and enforce mode 0700 on it."""
+        """Create ``path`` (and parents) if missing, and enforce mode 0700 on it.
+
+        The chmod is best-effort (see :func:`_chmod_best_effort`): on
+        Windows the directory instead inherits the user profile's ACLs.
+        """
         path.mkdir(parents=True, exist_ok=True)
-        os.chmod(path, _DIR_MODE)
+        _chmod_best_effort(path, _DIR_MODE)
 
     def _session_dir(self, session_id: str) -> Path:
         """Return the (validated) directory for ``session_id``, creating it at 0700."""

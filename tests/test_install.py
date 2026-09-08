@@ -29,6 +29,19 @@ def test_settings_path_user_scope_is_inside_tmp_home(tmp_path: Path) -> None:
     assert path == tmp_path / ".claude" / "settings.json"
 
 
+def test_user_home_falls_back_to_userprofile_without_home(tmp_path: Path) -> None:
+    """Windows has no ``HOME``; ``user_home`` must still resolve from ``USERPROFILE``."""
+    environ = {"USERPROFILE": str(tmp_path)}
+    assert install.user_home(environ) == tmp_path
+
+
+def test_user_home_prefers_home_over_userprofile(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    userprofile = tmp_path / "userprofile"
+    environ = {"HOME": str(home), "USERPROFILE": str(userprofile)}
+    assert install.user_home(environ) == home
+
+
 def test_settings_path_project_scope_is_inside_tmp_cwd(tmp_path: Path) -> None:
     cwd = tmp_path / "project"
     cwd.mkdir()

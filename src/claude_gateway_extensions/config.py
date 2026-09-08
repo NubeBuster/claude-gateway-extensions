@@ -27,20 +27,37 @@ class ConfigError(ValueError):
     """Raised when a ``CGX_*`` environment variable has an invalid value."""
 
 
-def _default_state_dir(env: Mapping[str, str]) -> Path:
-    """Return the XDG state directory default for this daemon's persistence root.
+def resolve_home(env: Mapping[str, str]) -> Path:
+    """Return the user's home directory, honouring ``env`` over the real process environment.
 
-    Reads ``XDG_STATE_HOME`` and ``HOME`` from ``env`` (not ``os.environ``
-    directly) so :meth:`Config.from_env` is fully testable via its
-    ``environ`` argument.
+    Checks ``HOME`` then ``USERPROFILE`` (the Windows equivalent) in
+    ``env``, so callers stay testable via their own ``environ`` mapping
+    without touching ``os.environ``. Falls back to :meth:`Path.home` (which
+    *does* read the real process environment) only when neither is set in
+    ``env`` — the same fallback :func:`_default_state_dir` and
+    ``cli/install.py``'s ``user_home`` share.
+    """
+    home = env.get("HOME") or env.get("USERPROFILE")
+    return Path(home) if home else Path.home()
+
+
+def _default_state_dir(env: Mapping[str, str]) -> Path:
+    """Return the state directory default for this daemon's persistence root.
+
+    Precedence: ``XDG_STATE_HOME`` (an explicit override, honoured on every
+    platform) then, on Windows, ``LOCALAPPDATA`` (presence in ``env`` is
+    what signals Windows here — this module reads only its ``environ``
+    mapping, never ``sys.platform``, so the Windows branch stays testable
+    from any OS) then the POSIX/XDG default ``~/.local/state`` under
+    :func:`resolve_home`.
     """
     xdg_state_home = env.get("XDG_STATE_HOME")
     if xdg_state_home:
-        base = Path(xdg_state_home)
-    else:
-        home = env.get("HOME")
-        base = (Path(home) if home else Path.home()) / ".local" / "state"
-    return base / "claude-gateway-extensions"
+        return Path(xdg_state_home) / "claude-gateway-extensions"
+    local_app_data = env.get("LOCALAPPDATA")
+    if local_app_data:
+        return Path(local_app_data) / "claude-gateway-extensions"
+    return resolve_home(env) / ".local" / "state" / "claude-gateway-extensions"
 
 
 def _parse_bool(name: str, raw: str) -> bool:

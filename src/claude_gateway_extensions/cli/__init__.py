@@ -61,6 +61,7 @@ class _Context:
     client_factory: ClientFactory
     service_runner: service.Runner | None
     service_query: service.Query | None
+    platform: str
 
 
 def _require_session(args: argparse.Namespace, ctx: _Context) -> str:
@@ -385,8 +386,26 @@ def _cmd_service_status(args: argparse.Namespace, config: Config, ctx: _Context)
     return EXIT_OK if health.status != "fail" else EXIT_FAILED
 
 
+#: ``cgx service`` manages a systemd user unit, so it is Linux-only; printed
+#: verbatim (as one line) by :func:`_cmd_service` on every other platform,
+#: pointing at the two commands that replace it (see README's "Windows and
+#: macOS" section).
+_SERVICE_LINUX_ONLY_MSG = (
+    "cgx service manages a systemd user unit and is Linux-only; on this "
+    "platform run `cgx serve --port <N>` under your own process manager, "
+    "then `cgx configure --port <N>`\n"
+)
+
+
 def _cmd_service(args: argparse.Namespace, config: Config, ctx: _Context) -> int:
-    """Dispatch a ``cgx service`` subcommand by name."""
+    """Dispatch a ``cgx service`` subcommand by name.
+
+    Refuses every subcommand on a non-Linux ``ctx.platform`` instead of
+    reaching the individual handlers, which assume a systemd user session.
+    """
+    if ctx.platform != "linux":
+        ctx.stderr.write(_SERVICE_LINUX_ONLY_MSG)
+        return EXIT_FAILED
     handler = _SERVICE_HANDLERS[args.service_command]
     return handler(args, config, ctx)
 
@@ -394,7 +413,14 @@ def _cmd_service(args: argparse.Namespace, config: Config, ctx: _Context) -> int
 def _cmd_doctor(args: argparse.Namespace, config: Config, ctx: _Context) -> int:
     """Run the doctor checks."""
     del args
-    return run_doctor(config, ctx.environ, ctx.cwd, ctx.stdout, client_factory=ctx.client_factory)
+    return run_doctor(
+        config,
+        ctx.environ,
+        ctx.cwd,
+        ctx.stdout,
+        client_factory=ctx.client_factory,
+        platform=ctx.platform,
+    )
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -540,13 +566,16 @@ def main(
     client_factory: ClientFactory = ControlClient,
     service_runner: service.Runner | None = None,
     service_query: service.Query | None = None,
+    platform: str = sys.platform,
 ) -> int:
     """Parse ``argv`` and dispatch to the matching subcommand handler.
 
     Every ambient dependency (environment, stdio, working directory, the
-    control API client, the systemd runner) defaults to the real thing and
-    can be overridden, which is how tests exercise this function directly
-    instead of shelling out to a subprocess.
+    control API client, the systemd runner, ``sys.platform``) defaults to
+    the real thing and can be overridden, which is how tests exercise this
+    function directly instead of shelling out to a subprocess or actually
+    running on a different OS. ``platform`` gates ``cgx service`` and the
+    systemd check in ``cgx doctor``, both Linux-only.
     """
     env = os.environ if environ is None else environ
     out = sys.stdout if stdout is None else stdout
@@ -561,7 +590,9 @@ def main(
         code = exc.code
         return code if isinstance(code, int) else EXIT_USAGE
 
-    ctx = _Context(env, inp, out, err, directory, client_factory, service_runner, service_query)
+    ctx = _Context(
+        env, inp, out, err, directory, client_factory, service_runner, service_query, platform
+    )
 
     try:
         config = Config.from_env(env)

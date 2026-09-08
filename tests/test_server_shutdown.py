@@ -14,6 +14,7 @@ import logging
 import os
 import signal
 import socket
+import sys
 from pathlib import Path
 
 import pytest
@@ -24,6 +25,15 @@ from claude_gateway_extensions.server.app import (
     serve,
 )
 from conftest import make_config
+
+#: Every test here sends a real SIGTERM/SIGINT via ``os.kill``/``signal.raise_signal``
+#: and expects the loop's own signal handler to catch it; on Windows those
+#: calls terminate the process outright instead (see
+#: ``server/app.py``'s ``install_shutdown_handlers`` docstring), so the
+#: whole module is POSIX-only.
+pytestmark = pytest.mark.skipif(
+    sys.platform == "win32", reason="real SIGTERM/SIGINT delivery is POSIX-only"
+)
 
 
 def _free_port() -> int:

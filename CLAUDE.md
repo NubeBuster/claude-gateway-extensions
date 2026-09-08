@@ -25,8 +25,9 @@ is designed into that file before any code is written for it.
   sole bypass, and a non-TTY stdin without it writes nothing.
 - One module parses a `/cache` argument, `cli/when.py`; the hook, `cgx on
   --until` and any new caller go through `parse_when`.
-- Single runtime dependency: `aiohttp`. Do not add a second HTTP or web
-  framework; the CLI client uses `urllib` deliberately, to stay import-light.
+- Single runtime dependency: `aiohttp`, plus `tzdata` on Windows (`zoneinfo`
+  needs it there). Do not add a second HTTP or web framework; the CLI
+  client uses `urllib` deliberately, to stay import-light.
 - CLI is `argparse`, not `typer` (overrides the root Scripts CLAUDE.md's
   Typer preference — that rule is for `~/Scripts`, not this repo).
 

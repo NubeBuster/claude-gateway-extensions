@@ -1,7 +1,9 @@
 """Tests for claude_gateway_extensions.core.store."""
 
 import json
+import os
 import stat
+import sys
 from pathlib import Path
 
 import pytest
@@ -56,6 +58,7 @@ def test_memory_store_prune() -> None:
     assert remaining == {"b"}
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX chmod bits do not apply on Windows")
 def test_file_store_permissions_and_round_trip(tmp_path: Path) -> None:
     root = tmp_path / "state"
     store = FileStore(root, max_streams_per_session=8)
@@ -80,6 +83,26 @@ def test_file_store_permissions_and_round_trip(tmp_path: Path) -> None:
     assert got_snapshots[0].body == snap.body
     got_state = reloaded.get_state("sess-1")
     assert got_state == state
+
+
+def test_file_store_survives_a_platform_that_rejects_chmod(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A ``chmod`` that raises (e.g. an ACL-only filesystem) must not stop a write."""
+
+    def _raise(*args: object, **kwargs: object) -> None:
+        raise OSError("no chmod here")
+
+    monkeypatch.setattr(os, "chmod", _raise)
+    root = tmp_path / "state"
+    store = FileStore(root, max_streams_per_session=8)
+    snap = _snapshot("sess-1", "stream-a")
+    store.put_snapshot(snap)
+    state = SessionState(session_id="sess-1", enabled=True)
+    store.put_state(state)
+    assert store.get_snapshots("sess-1") == [snap]
+    assert store.get_state("sess-1") == state
+    assert (root / "sess-1" / "stream-a.json").is_file()
 
 
 def test_file_store_round_trips_until(tmp_path: Path) -> None:

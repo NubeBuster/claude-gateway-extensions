@@ -283,6 +283,7 @@ def test_unconfigure_service_flag_errors_with_pointer_to_service_uninstall() -> 
     assert "cgx service uninstall" in err
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="cgx service is Linux-only")
 def test_service_install_uses_injected_runner(tmp_path: Path) -> None:
     client = _FakeClient("http://x")
     calls: list[list[str]] = []
@@ -307,6 +308,7 @@ def test_service_install_uses_injected_runner(tmp_path: Path) -> None:
     )
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="cgx service is Linux-only")
 def test_service_install_port_and_host_flags(tmp_path: Path) -> None:
     client = _FakeClient("http://x")
     calls: list[list[str]] = []
@@ -328,6 +330,7 @@ def test_service_install_port_and_host_flags(tmp_path: Path) -> None:
     assert "applied:" in out
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="cgx service is Linux-only")
 def test_service_status_reports_installed_unit_port(tmp_path: Path) -> None:
     client = _FakeClient("http://x")
     code, out, _ = _run(
@@ -348,6 +351,7 @@ def test_service_status_reports_installed_unit_port(tmp_path: Path) -> None:
     assert "port=9999" in out
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="cgx service is Linux-only")
 def test_service_install_dry_run_prints_diff_and_writes_nothing(tmp_path: Path) -> None:
     client = _FakeClient("http://x")
     environ = {"HOME": str(tmp_path)}
@@ -360,6 +364,7 @@ def test_service_install_dry_run_prints_diff_and_writes_nothing(tmp_path: Path) 
     assert not unit_path.exists()
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="cgx service is Linux-only")
 def test_service_install_non_tty_stdin_without_yes_aborts(tmp_path: Path) -> None:
     client = _FakeClient("http://x")
     environ = {"HOME": str(tmp_path)}
@@ -373,6 +378,7 @@ def test_service_install_non_tty_stdin_without_yes_aborts(tmp_path: Path) -> Non
     assert not unit_path.exists()
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="cgx service is Linux-only")
 def test_service_install_interactive_y_applies(tmp_path: Path) -> None:
     client = _FakeClient("http://x")
     environ = {"HOME": str(tmp_path)}
@@ -389,6 +395,7 @@ def test_service_install_interactive_y_applies(tmp_path: Path) -> None:
     assert unit_path.is_file()
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="cgx service is Linux-only")
 def test_service_install_is_idempotent_on_a_second_run(tmp_path: Path) -> None:
     client = _FakeClient("http://x")
     environ = {"HOME": str(tmp_path)}
@@ -404,6 +411,7 @@ def test_service_install_is_idempotent_on_a_second_run(tmp_path: Path) -> None:
     assert out == "no changes\n"
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="cgx service is Linux-only")
 def test_service_uninstall_round_trip_with_yes(tmp_path: Path) -> None:
     client = _FakeClient("http://x")
     environ = {"HOME": str(tmp_path)}
@@ -421,6 +429,7 @@ def test_service_uninstall_round_trip_with_yes(tmp_path: Path) -> None:
     assert not unit_path.exists()
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="cgx service is Linux-only")
 def test_service_uninstall_with_nothing_installed_is_no_changes(tmp_path: Path) -> None:
     client = _FakeClient("http://x")
     environ = {"HOME": str(tmp_path)}
@@ -431,6 +440,7 @@ def test_service_uninstall_with_nothing_installed_is_no_changes(tmp_path: Path) 
     assert out == "no changes\n"
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="cgx service is Linux-only")
 def test_service_uninstall_non_tty_stdin_without_yes_aborts(tmp_path: Path) -> None:
     client = _FakeClient("http://x")
     environ = {"HOME": str(tmp_path)}
@@ -697,3 +707,38 @@ def test_serve_missing_server_module_is_a_clean_failure(monkeypatch: pytest.Monk
     code, _, err = _run(["serve"], client)
     assert code == EXIT_FAILED
     assert "server" in err.lower()
+
+
+@pytest.mark.parametrize("subcommand", ["install", "uninstall", "status"])
+@pytest.mark.parametrize("platform", ["win32", "darwin"])
+def test_service_any_subcommand_is_linux_only(
+    subcommand: str, platform: str, tmp_path: Path
+) -> None:
+    """``cgx service <anything>`` refuses on non-Linux with a one-line pointer."""
+    client = _FakeClient("http://x")
+    code, _, err = _run(
+        ["service", subcommand],
+        client,
+        environ={"HOME": str(tmp_path)},
+        platform=platform,
+    )
+    assert code == EXIT_FAILED
+    assert "cgx service manages a systemd user unit and is Linux-only" in err
+    assert "cgx serve --port <N>" in err
+    assert "cgx configure --port <N>" in err
+    unit_path = tmp_path / ".config" / "systemd" / "user" / "claude-gateway-extensions.service"
+    assert not unit_path.exists()
+
+
+def test_service_install_still_works_when_platform_is_linux(tmp_path: Path) -> None:
+    """The explicit ``platform="linux"`` default must not regress the existing behaviour."""
+    client = _FakeClient("http://x")
+    code, out, _ = _run(
+        ["service", "install", "--yes"],
+        client,
+        environ={"HOME": str(tmp_path)},
+        service_runner=lambda args: None,
+        platform="linux",
+    )
+    assert code == EXIT_OK
+    assert "claude-gateway-extensions.service" in out

@@ -28,6 +28,7 @@ from typing import Any, Literal
 from urllib.parse import urlsplit
 
 from claude_gateway_extensions.cli.confirm import PlannedChange
+from claude_gateway_extensions.config import resolve_home
 
 #: ``managed`` is deliberately absent: it is root-owned and machine-wide,
 #: which would apply the same ``ANTHROPIC_BASE_URL``/hook to every user on
@@ -52,9 +53,12 @@ class InstallError(Exception):
 
 
 def user_home(environ: Mapping[str, str]) -> Path:
-    """Return the home directory to use, honouring ``HOME`` from ``environ``."""
-    home = environ.get("HOME")
-    return Path(home) if home else Path.home()
+    """Return the home directory to use.
+
+    Delegates to :func:`claude_gateway_extensions.config.resolve_home`,
+    which honours ``HOME`` then ``USERPROFILE`` (Windows) from ``environ``.
+    """
+    return resolve_home(environ)
 
 
 def settings_path(scope: Scope, environ: Mapping[str, str], cwd: Path) -> Path:

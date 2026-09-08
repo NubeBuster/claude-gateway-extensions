@@ -38,6 +38,28 @@ def test_explicit_state_dir_overrides_default() -> None:
     assert config.state_dir == Path("/srv/cgx")
 
 
+def test_default_state_dir_uses_localappdata_on_windows() -> None:
+    """``LOCALAPPDATA`` (a Windows-only env var) picks the Windows default, from any OS."""
+    config = Config.from_env({"LOCALAPPDATA": "C:\\Users\\someone\\AppData\\Local"})
+    assert config.state_dir == Path("C:\\Users\\someone\\AppData\\Local") / (
+        "claude-gateway-extensions"
+    )
+
+
+def test_default_state_dir_prefers_xdg_state_home_over_localappdata() -> None:
+    config = Config.from_env(
+        {"XDG_STATE_HOME": "/tmp/xdg-state", "LOCALAPPDATA": "C:\\Users\\someone\\AppData\\Local"}
+    )
+    assert config.state_dir == Path("/tmp/xdg-state/claude-gateway-extensions")
+
+
+def test_default_state_dir_falls_back_to_userprofile_without_home() -> None:
+    config = Config.from_env({"USERPROFILE": "C:\\Users\\someone"})
+    assert config.state_dir == Path("C:\\Users\\someone") / ".local" / "state" / (
+        "claude-gateway-extensions"
+    )
+
+
 @pytest.mark.parametrize("raw", ["true", "True", "1", "yes", "YES"])
 def test_bool_parsing_true(raw: str) -> None:
     config = Config.from_env({"CGX_PERSIST": raw})

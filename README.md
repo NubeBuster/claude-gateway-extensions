@@ -38,8 +38,19 @@ pipx install claude-gateway-extensions
 
 For manual installation see [the sections below](#manual-configuration)
 
-> [!TODO DOCUMENTATION]
-> We need to provide instructions for support for Windows and gate this behind it being optional and not for Windows. But this all depends also on how we will do the port stuff. So I cannot write this yet. Till in when this information becomes available.
+**Windows and macOS**: the installer above (`cgx service install`) manages a
+systemd user unit and is Linux only. On Windows or macOS, run the daemon
+yourself under any process manager — a terminal, `tmux`, Task Scheduler, a
+`launchd` agent — and point Claude Code at it manually:
+
+```sh
+cgx serve --port 8787
+cgx configure --scope user --port 8787
+```
+
+Snapshot files still get 0700/0600 permissions on Linux and macOS; on
+Windows they instead inherit the user profile's ACLs, since `chmod` has no
+equivalent there.
 
 To install the gateway proxy daemon service:
 
@@ -308,7 +319,7 @@ edit claude-gateway-extensions.service`.
 | `CGX_HOST`                    | `127.0.0.1`                                                   | local only (`127.0.0.1`) by default; who can reach the daemon                              |
 | `CGX_PORT`                    | `8787`                                                        | which port the daemon listens on                                                           |
 | `CGX_UPSTREAM`                | `https://api.anthropic.com`                                   | where requests are actually forwarded to                                                   |
-| `CGX_STATE_DIR`               | `${XDG_STATE_HOME:-~/.local/state}/claude-gateway-extensions` | where session state and captured requests are saved                                        |
+| `CGX_STATE_DIR`               | `${XDG_STATE_HOME:-~/.local/state}/claude-gateway-extensions` (POSIX); `%LOCALAPPDATA%\claude-gateway-extensions` (Windows) | where session state and captured requests are saved |
 | `CGX_PERSIST`                 | `true`                                                        | save state to disk so it survives a daemon restart                                         |
 | `CGX_DEFAULT_ENABLED`         | `false`                                                       | turn bumping on automatically for every new session                                        |
 | `CGX_INTERVAL_1H_S`           | `3000`                                                        | how often to refresh the cache when the model gives it a longer lifetime                   |
