@@ -1,11 +1,11 @@
-"""Tests for claude_cache_bump_gateway.cli.confirm's diff rendering and apply flow."""
+"""Tests for claude_gateway_extensions.cli.confirm's diff rendering and apply flow."""
 
 from __future__ import annotations
 
 import io
 from pathlib import Path
 
-from claude_cache_bump_gateway.cli.confirm import PlannedChange, apply_changes, render_change
+from claude_gateway_extensions.cli.confirm import PlannedChange, apply_changes, render_change
 
 
 class _TtyStdin(io.StringIO):

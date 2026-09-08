@@ -17,11 +17,11 @@ import asyncio
 import contextlib
 import dataclasses
 
-from claude_cache_bump_gateway.config import Config
-from claude_cache_bump_gateway.core.bump import BumpResult, bump_once
-from claude_cache_bump_gateway.core.clock import Clock
-from claude_cache_bump_gateway.core.selector import TargetSelector
-from claude_cache_bump_gateway.core.snapshot import (
+from claude_gateway_extensions.config import Config
+from claude_gateway_extensions.core.bump import BumpResult, bump_once
+from claude_gateway_extensions.core.clock import Clock
+from claude_gateway_extensions.core.selector import TargetSelector
+from claude_gateway_extensions.core.snapshot import (
     CACHE_TTL_1H_S,
     CACHE_TTL_5M_S,
     SessionState,
@@ -29,9 +29,9 @@ from claude_cache_bump_gateway.core.snapshot import (
     SnapshotError,
     wants_1h_ttl,
 )
-from claude_cache_bump_gateway.core.status_format import format_status_times
-from claude_cache_bump_gateway.core.store import SnapshotStore
-from claude_cache_bump_gateway.core.upstream import Upstream
+from claude_gateway_extensions.core.status_format import format_status_times
+from claude_gateway_extensions.core.store import SnapshotStore
+from claude_gateway_extensions.core.upstream import Upstream
 
 
 class NoSnapshot(Exception):

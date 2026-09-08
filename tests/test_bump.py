@@ -1,15 +1,15 @@
-"""Tests for claude_cache_bump_gateway.core.bump."""
+"""Tests for claude_gateway_extensions.core.bump."""
 
 import gzip
 import json
 import zlib
 
-from claude_cache_bump_gateway.core.bump import (
+from claude_gateway_extensions.core.bump import (
     build_bump_body,
     build_bump_headers,
     classify,
 )
-from claude_cache_bump_gateway.core.upstream import decode_body
+from claude_gateway_extensions.core.upstream import decode_body
 
 
 def test_build_bump_body_sets_max_tokens_zero_and_stream_false() -> None:

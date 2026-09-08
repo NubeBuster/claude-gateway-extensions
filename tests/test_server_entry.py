@@ -1,6 +1,6 @@
 """Tests for the server package's synchronous ``run`` entry point.
 
-``ccbg serve`` imports ``claude_cache_bump_gateway.server`` lazily and calls
+``cgx serve`` imports ``claude_gateway_extensions.server`` lazily and calls
 ``run(config)``; these tests pin that contract from the server side.
 """
 
@@ -12,7 +12,7 @@ from typing import Any
 
 import pytest
 
-from claude_cache_bump_gateway import server
+from claude_gateway_extensions import server
 from conftest import make_config
 
 

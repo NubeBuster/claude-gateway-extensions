@@ -1,4 +1,4 @@
-"""Tests for claude_cache_bump_gateway.cli.service.
+"""Tests for claude_gateway_extensions.cli.service.
 
 Every test works against a temp ``HOME`` (never the real one) and asserts
 the resolved unit path actually falls inside the temp directory before any
@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from claude_cache_bump_gateway.cli import service
+from claude_gateway_extensions.cli import service
 
 
 def _assert_inside(path: Path, root: Path) -> None:
@@ -43,12 +43,12 @@ def test_install_and_uninstall_use_injected_runner(
     assert unit_path.is_file()
     assert unit_path == service.unit_path(environ)
     assert ["systemctl", "--user", "daemon-reload"] in calls
-    assert ["systemctl", "--user", "enable", "--now", "claude-cache-bump-gateway.service"] in calls
+    assert ["systemctl", "--user", "enable", "--now", "claude-gateway-extensions.service"] in calls
 
     calls.clear()
     service.uninstall_service(environ, runner)
     assert not unit_path.exists()
-    assert ["systemctl", "--user", "disable", "--now", "claude-cache-bump-gateway.service"] in calls
+    assert ["systemctl", "--user", "disable", "--now", "claude-gateway-extensions.service"] in calls
 
 
 def test_uninstall_without_install_is_a_no_op(
@@ -61,11 +61,11 @@ def test_uninstall_without_install_is_a_no_op(
     assert calls == []
 
 
-def test_render_unit_passes_through_ccbg_env_vars(tmp_path: Path) -> None:
-    environ = {"HOME": str(tmp_path), "CCBG_PORT": "9999", "UNRELATED": "x"}
-    text = service.render_unit("/usr/local/bin/ccbg", environ)
-    assert "ExecStart=/usr/local/bin/ccbg serve" in text
-    assert "Environment=CCBG_PORT=9999" in text
+def test_render_unit_passes_through_cgx_env_vars(tmp_path: Path) -> None:
+    environ = {"HOME": str(tmp_path), "CGX_PORT": "9999", "UNRELATED": "x"}
+    text = service.render_unit("/usr/local/bin/cgx", environ)
+    assert "ExecStart=/usr/local/bin/cgx serve" in text
+    assert "Environment=CGX_PORT=9999" in text
     assert "UNRELATED" not in text
 
 
@@ -117,34 +117,34 @@ def test_status_reports_disabled_inactive_unit(
 
 
 def test_render_unit_explicit_port_overrides_shell_env(tmp_path: Path) -> None:
-    """--port must win over whatever CCBG_PORT happens to be in the installing shell."""
-    environ = {"HOME": str(tmp_path), "CCBG_PORT": "1111"}
-    text = service.render_unit("/usr/local/bin/ccbg", environ, port=9999)
-    assert "Environment=CCBG_PORT=9999" in text
-    assert "Environment=CCBG_PORT=1111" not in text
+    """--port must win over whatever CGX_PORT happens to be in the installing shell."""
+    environ = {"HOME": str(tmp_path), "CGX_PORT": "1111"}
+    text = service.render_unit("/usr/local/bin/cgx", environ, port=9999)
+    assert "Environment=CGX_PORT=9999" in text
+    assert "Environment=CGX_PORT=1111" not in text
 
 
 def test_render_unit_explicit_port_with_no_env_port_set(tmp_path: Path) -> None:
     environ = {"HOME": str(tmp_path)}
-    text = service.render_unit("/usr/local/bin/ccbg", environ, port=9999)
-    assert "Environment=CCBG_PORT=9999" in text
+    text = service.render_unit("/usr/local/bin/cgx", environ, port=9999)
+    assert "Environment=CGX_PORT=9999" in text
 
 
 def test_render_unit_explicit_host_overrides_shell_env(tmp_path: Path) -> None:
-    environ = {"HOME": str(tmp_path), "CCBG_HOST": "0.0.0.0"}
-    text = service.render_unit("/usr/local/bin/ccbg", environ, host="127.0.0.1")
-    assert "Environment=CCBG_HOST=127.0.0.1" in text
-    assert "Environment=CCBG_HOST=0.0.0.0" not in text
+    environ = {"HOME": str(tmp_path), "CGX_HOST": "0.0.0.0"}
+    text = service.render_unit("/usr/local/bin/cgx", environ, host="127.0.0.1")
+    assert "Environment=CGX_HOST=127.0.0.1" in text
+    assert "Environment=CGX_HOST=0.0.0.0" not in text
 
 
-def test_render_unit_still_passes_through_other_ccbg_vars_with_explicit_port(
+def test_render_unit_still_passes_through_other_cgx_vars_with_explicit_port(
     tmp_path: Path,
 ) -> None:
-    """Explicit --port must not disable the documented pass-through of other CCBG_* vars."""
-    environ = {"HOME": str(tmp_path), "CCBG_LOG_LEVEL": "DEBUG"}
-    text = service.render_unit("/usr/local/bin/ccbg", environ, port=9999)
-    assert "Environment=CCBG_PORT=9999" in text
-    assert "Environment=CCBG_LOG_LEVEL=DEBUG" in text
+    """Explicit --port must not disable the documented pass-through of other CGX_* vars."""
+    environ = {"HOME": str(tmp_path), "CGX_LOG_LEVEL": "DEBUG"}
+    text = service.render_unit("/usr/local/bin/cgx", environ, port=9999)
+    assert "Environment=CGX_PORT=9999" in text
+    assert "Environment=CGX_LOG_LEVEL=DEBUG" in text
 
 
 def test_install_service_forwards_port_and_host(
@@ -154,8 +154,8 @@ def test_install_service_forwards_port_and_host(
     environ = {"HOME": str(tmp_path)}
     unit_path = service.install_service(environ, runner, port=9999, host="0.0.0.0")
     text = unit_path.read_text()
-    assert "Environment=CCBG_PORT=9999" in text
-    assert "Environment=CCBG_HOST=0.0.0.0" in text
+    assert "Environment=CGX_PORT=9999" in text
+    assert "Environment=CGX_HOST=0.0.0.0" in text
 
 
 def test_installed_port_absent_without_a_unit(tmp_path: Path) -> None:
@@ -212,7 +212,7 @@ def test_plan_install_service_apply_writes_and_enables(
     change.apply()
     assert change.path.is_file()
     assert ["systemctl", "--user", "daemon-reload"] in calls
-    assert ["systemctl", "--user", "enable", "--now", "claude-cache-bump-gateway.service"] in calls
+    assert ["systemctl", "--user", "enable", "--now", "claude-gateway-extensions.service"] in calls
 
 
 def test_plan_uninstall_service_omits_change_when_nothing_installed(tmp_path: Path) -> None:
@@ -241,4 +241,4 @@ def test_plan_uninstall_service_apply_removes_and_disables(
     (change,) = service.plan_uninstall_service(environ, runner)
     change.apply()
     assert not change.path.exists()
-    assert ["systemctl", "--user", "disable", "--now", "claude-cache-bump-gateway.service"] in calls
+    assert ["systemctl", "--user", "disable", "--now", "claude-gateway-extensions.service"] in calls

@@ -1,6 +1,6 @@
-# claude-cache-bump-gateway
+# claude-gateway-extensions
 
-`ccbg` is a local transparent HTTP proxy between Claude Code and the
+`cgx` is a local transparent HTTP proxy between Claude Code and the
 Anthropic API. It records the last `/v1/messages` request of a Claude Code
 session and, while bumping is turned on for that session, replays it with
 `max_tokens: 0` shortly before the server-side prompt cache would expire. A
@@ -21,17 +21,17 @@ a read (see "How it works").
 - Python 3.11+
 - Claude Code
 - [Both claude.ai substriptions and API billing are supported](https://code.claude.com/docs/en/gateways#subscriptions-and-gateways)
-- Linux or macOS. `ccbg service install` (the systemd user unit) is Linux
-  only; on macOS run `ccbg serve` yourself (a shell, `tmux`, or a `launchd`
-  agent you write). Running without systemd: `ccbg serve --port 8787` in any
-  process manager or terminal, then `ccbg configure --port 8787`.
+- Linux or macOS. `cgx service install` (the systemd user unit) is Linux
+  only; on macOS run `cgx serve` yourself (a shell, `tmux`, or a `launchd`
+  agent you write). Running without systemd: `cgx serve --port 8787` in any
+  process manager or terminal, then `cgx configure --port 8787`.
 
 ## Installation
 
 ```sh
-pipx install claude-cache-bump-gateway
-# or: uv tool install claude-cache-bump-gateway
-# or, until this is published: pip install git+https://github.com/NubeBuster/claude-cache-bump-gateway
+pipx install claude-gateway-extensions
+# or: uv tool install claude-gateway-extensions
+# or, until this is published: pip install git+https://github.com/NubeBuster/claude-gateway-extensions
 ```
 
 ### Automatic Installers
@@ -44,12 +44,12 @@ For manual installation see [the sections below](#manual-configuration)
 To install the gateway proxy daemon service:
 
 ```sh
-ccbg service install
+cgx service install
 ```
 
 The service install requires no root, but reserves a port system wide. For concurrent proxies on the same machine, separate ports must be assigned.
 
-Both `ccbg service install` and `ccbg configure` accept `--port N` to pick a
+Both `cgx service install` and `cgx configure` accept `--port N` to pick a
 non-default port; keep the two in sync (see "Running without systemd"
 above).
 
@@ -58,9 +58,9 @@ above).
 Then configure Claude Code for routing to the gateway, installing hooks and dding `/cache` skill:
 
 ```sh
-ccbg configure --scope user
+cgx configure --scope user
 # Or skip diff confirmation
-ccbg configure --scope user -y
+cgx configure --scope user -y
 ```
 
 > [!CAUTION]
@@ -78,10 +78,10 @@ All of these writes are gated by your confirmation in the CLI, showing a colored
 ---
 
 ```sh
-ccbg doctor
+cgx doctor
 ```
 
-`ccbg doctor` reports what is and
+`cgx doctor` reports what is and
 is not wired up. Use `--scope project` to wire a single project's
 `.claude/settings.json` instead of (or alongside) your user one.
 
@@ -122,16 +122,16 @@ CLI equivalents (`--session` defaults to `$CLAUDE_SESSION_ID`, which Claude
 Code sets in every hook and command it runs):
 
 ```sh
-ccbg on --session "$CLAUDE_SESSION_ID" --until 2h
-ccbg on --session "$CLAUDE_SESSION_ID"             # daemon's default max duration
-ccbg off --session "$CLAUDE_SESSION_ID"
-ccbg status                                        # every known session
-ccbg status --session "$CLAUDE_SESSION_ID" --json
-ccbg now --session "$CLAUDE_SESSION_ID"
+cgx on --session "$CLAUDE_SESSION_ID" --until 2h
+cgx on --session "$CLAUDE_SESSION_ID"             # daemon's default max duration
+cgx off --session "$CLAUDE_SESSION_ID"
+cgx status                                        # every known session
+cgx status --session "$CLAUDE_SESSION_ID" --json
+cgx now --session "$CLAUDE_SESSION_ID"
 ```
 
-`ccbg status --session "$CLAUDE_SESSION_ID" --json` and `GET
-/ccbg/sessions/{id}` both return the same session status object. It always
+`cgx status --session "$CLAUDE_SESSION_ID" --json` and `GET
+/cgx/sessions/{id}` both return the same session status object. It always
 carries a short `formatted` block of human-readable strings for display:
 
 ```json
@@ -223,8 +223,8 @@ Full contract, including every other route: `docs/API.md`.
 
 </details>
 
-To show cache status in your own statusline, append `ccbg statusline`
-to your existing `statusLine` command, e.g. `existing-command; ccbg
+To show cache status in your own statusline, append `cgx statusline`
+to your existing `statusLine` command, e.g. `existing-command; cgx
 statusline`. It reads the same statusline JSON from stdin and prints one
 short segment (`cache: on, next in 47m`, `cache: off`, or nothing
 when the daemon is unreachable or the session is unknown); it never blocks.
@@ -255,20 +255,20 @@ The [automatic installers](#automatic-installers) above can do this automaticall
 
 ### Claude Code Settings
 
-Claude Code applies these per user, project, or local scope (`CCBG_URL`
+Claude Code applies these per user, project, or local scope (`CGX_URL`
 tells the hook, the CLI and the statusline where to find the daemon). The
-deadline you type at `/cache <duration|clock|date>` — or pass to `ccbg on
+deadline you type at `/cache <duration|clock|date>` — or pass to `cgx on
 --until` — is the actual per-session policy; it is sent straight to the
 daemon and does not go through a settings.json variable.
 
 | Variable   | Default                 | What it does                                               |
 | ---------- | ----------------------- | ---------------------------------------------------------- |
-| `CCBG_URL` | `http://127.0.0.1:8787` | where the hook, the CLI and the statusline find the daemon; falls back to a loopback `ANTHROPIC_BASE_URL` (which `ccbg configure` sets) when unset |
+| `CGX_URL` | `http://127.0.0.1:8787` | where the hook, the CLI and the statusline find the daemon; falls back to a loopback `ANTHROPIC_BASE_URL` (which `cgx configure` sets) when unset |
 
 #### Claude Code Hook
 
 You do not need to configure anything. Put this in `~/.claude/settings.json`,
-or let `ccbg configure` do it:
+or let `cgx configure` do it:
 
 ```json
 {
@@ -281,7 +281,7 @@ or let `ccbg configure` do it:
         "hooks": [
           {
             "type": "command",
-            "command": "ccbg hook user-prompt-submit",
+            "command": "cgx hook user-prompt-submit",
             "timeout": 5
           }
         ]
@@ -297,41 +297,41 @@ tables below.
 
 ### Daemon Environment Variables
 
-The daemon does not read `settings.json`. `ccbg service install` copies
+The daemon does not read `settings.json`. `cgx service install` copies
 any of these that are set in your shell at install time into the systemd
-unit file, and otherwise you export them yourself before running `ccbg
+unit file, and otherwise you export them yourself before running `cgx
 serve`. To change one later without reinstalling, run `systemctl --user
-edit claude-cache-bump-gateway.service`.
+edit claude-gateway-extensions.service`.
 
 | Variable                       | Default                                                       | What it does                                                                               |
 | ------------------------------ | ------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| `CCBG_HOST`                    | `127.0.0.1`                                                   | local only (`127.0.0.1`) by default; who can reach the daemon                              |
-| `CCBG_PORT`                    | `8787`                                                        | which port the daemon listens on                                                           |
-| `CCBG_UPSTREAM`                | `https://api.anthropic.com`                                   | where requests are actually forwarded to                                                   |
-| `CCBG_STATE_DIR`               | `${XDG_STATE_HOME:-~/.local/state}/claude-cache-bump-gateway` | where session state and captured requests are saved                                        |
-| `CCBG_PERSIST`                 | `true`                                                        | save state to disk so it survives a daemon restart                                         |
-| `CCBG_DEFAULT_ENABLED`         | `false`                                                       | turn bumping on automatically for every new session                                        |
-| `CCBG_INTERVAL_1H_S`           | `3000`                                                        | how often to refresh the cache when the model gives it a longer lifetime                   |
-| `CCBG_INTERVAL_5M_S`           | `240`                                                         | how often to refresh the cache otherwise                                                   |
-| `CCBG_MAX_DURATION_S`          | `86400`                                                       | stop refreshing this long after the last real message, when no `/cache` deadline was given |
-| `CCBG_ON_CACHE_WRITE`          | `stop`                                                        | `stop` bumping or `continue` when a refresh finds the cache already expired                |
-| `CCBG_MAX_STREAMS_PER_SESSION` | `8`                                                           | how many separate conversation branches to remember per session                            |
-| `CCBG_LOG_LEVEL`               | `INFO`                                                        | how much detail the daemon logs                                                            |
+| `CGX_HOST`                    | `127.0.0.1`                                                   | local only (`127.0.0.1`) by default; who can reach the daemon                              |
+| `CGX_PORT`                    | `8787`                                                        | which port the daemon listens on                                                           |
+| `CGX_UPSTREAM`                | `https://api.anthropic.com`                                   | where requests are actually forwarded to                                                   |
+| `CGX_STATE_DIR`               | `${XDG_STATE_HOME:-~/.local/state}/claude-gateway-extensions` | where session state and captured requests are saved                                        |
+| `CGX_PERSIST`                 | `true`                                                        | save state to disk so it survives a daemon restart                                         |
+| `CGX_DEFAULT_ENABLED`         | `false`                                                       | turn bumping on automatically for every new session                                        |
+| `CGX_INTERVAL_1H_S`           | `3000`                                                        | how often to refresh the cache when the model gives it a longer lifetime                   |
+| `CGX_INTERVAL_5M_S`           | `240`                                                         | how often to refresh the cache otherwise                                                   |
+| `CGX_MAX_DURATION_S`          | `86400`                                                       | stop refreshing this long after the last real message, when no `/cache` deadline was given |
+| `CGX_ON_CACHE_WRITE`          | `stop`                                                        | `stop` bumping or `continue` when a refresh finds the cache already expired                |
+| `CGX_MAX_STREAMS_PER_SESSION` | `8`                                                           | how many separate conversation branches to remember per session                            |
+| `CGX_LOG_LEVEL`               | `INFO`                                                        | how much detail the daemon logs                                                            |
 
 If a table and the code ever disagree, `config.py` is the source of truth.
 
 ## Integrating
 
-The control API (`/ccbg/*` on the same listener, JSON, local-only by
+The control API (`/cgx/*` on the same listener, JSON, local-only by
 default, unauthenticated) is the integration point for anything that is not this
 project — PTY wrappers, editor plugins, other statuslines. Full contract:
 `docs/API.md`.
 
 ```sh
-curl -s -X PUT "http://127.0.0.1:8787/ccbg/sessions/$SESSION_ID" \
+curl -s -X PUT "http://127.0.0.1:8787/cgx/sessions/$SESSION_ID" \
   -H 'content-type: application/json' -d '{"enabled": true}'
-curl -s "http://127.0.0.1:8787/ccbg/sessions/$SESSION_ID"
-curl -s -X POST "http://127.0.0.1:8787/ccbg/sessions/$SESSION_ID/bump"
+curl -s "http://127.0.0.1:8787/cgx/sessions/$SESSION_ID"
+curl -s -X POST "http://127.0.0.1:8787/cgx/sessions/$SESSION_ID/bump"
 ```
 
 ## Security and privacy
@@ -341,9 +341,9 @@ curl -s -X POST "http://127.0.0.1:8787/ccbg/sessions/$SESSION_ID/bump"
   `127.0.0.1` or put it behind a port forward.
 - Persisted snapshots hold the full conversation and the request credential
   (they are what gets replayed), at file mode 0600 inside a 0700 directory.
-  Set `CCBG_PERSIST=false` to keep everything in memory only, at the cost of
+  Set `CGX_PERSIST=false` to keep everything in memory only, at the cost of
   losing bump state across daemon restarts.
-- The proxy never logs request or response bodies. `CCBG_LOG_LEVEL=DEBUG`
+- The proxy never logs request or response bodies. `CGX_LOG_LEVEL=DEBUG`
   logs headers with credential values redacted.
 
 ## Notes
@@ -355,13 +355,13 @@ curl -s -X POST "http://127.0.0.1:8787/ccbg/sessions/$SESSION_ID/bump"
   may change or break without notice.
 - `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` or an `apiKeyHelper` all
   replace the forwarded subscription credential and change what gets billed;
-  `ccbg doctor` flags any of them being set.
-- To uninstall: `ccbg unconfigure --scope user` (match whatever scope you
-  configured with) and, if you also ran `ccbg service install`,
-  `ccbg service uninstall`. `ccbg unconfigure` reverses exactly the
-  settings.json edits `ccbg configure` made and deletes the installed skill
+  `cgx doctor` flags any of them being set.
+- To uninstall: `cgx unconfigure --scope user` (match whatever scope you
+  configured with) and, if you also ran `cgx service install`,
+  `cgx service uninstall`. `cgx unconfigure` reverses exactly the
+  settings.json edits `cgx configure` made and deletes the installed skill
   directory outright, including any local edits you made to its
-  `SKILL.md`; `ccbg service uninstall` disables and removes the systemd
+  `SKILL.md`; `cgx service uninstall` disables and removes the systemd
   unit.
 
 ## Current planned `TODOs`
@@ -384,8 +384,8 @@ curl -s -X POST "http://127.0.0.1:8787/ccbg/sessions/$SESSION_ID/bump"
 ## Development
 
 ```sh
-git clone https://github.com/NubeBuster/claude-cache-bump-gateway
-cd claude-cache-bump-gateway
+git clone https://github.com/NubeBuster/claude-gateway-extensions
+cd claude-gateway-extensions
 python3 -m venv .venv && .venv/bin/pip install -e '.[dev]'
 # or: uv sync --extra dev
 make check   # ruff check, ruff format --check, pyright, pytest
@@ -393,8 +393,8 @@ make fix     # ruff format, ruff check --fix
 ```
 
 The `cache` skill lives at `claude/skills/cache/SKILL.md` in the repo root;
-`ccbg configure` copies it into the target `skills/` directory. Cloned
-instead of installed and want it without running `ccbg configure`? Copy
+`cgx configure` copies it into the target `skills/` directory. Cloned
+instead of installed and want it without running `cgx configure`? Copy
 `claude/skills/cache/` into `~/.claude/skills/` (or a project's
 `.claude/skills/`) yourself.
 

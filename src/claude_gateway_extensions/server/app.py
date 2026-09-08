@@ -2,10 +2,10 @@
 
 ``make_app`` builds the application: the control API and the transparent
 passthrough route, each wired to a swappable
-:class:`~claude_cache_bump_gateway.core.store.SnapshotStore`,
-:class:`~claude_cache_bump_gateway.core.selector.TargetSelector`,
-:class:`~claude_cache_bump_gateway.core.upstream.Upstream` and
-:class:`~claude_cache_bump_gateway.core.clock.Clock`. :func:`serve` warns
+:class:`~claude_gateway_extensions.core.store.SnapshotStore`,
+:class:`~claude_gateway_extensions.core.selector.TargetSelector`,
+:class:`~claude_gateway_extensions.core.upstream.Upstream` and
+:class:`~claude_gateway_extensions.core.clock.Clock`. :func:`serve` warns
 about a non-local ``Config.host`` and runs the resulting application until a
 shutdown signal (``SIGTERM`` or ``SIGINT``) arrives, then cleans up.
 """
@@ -21,14 +21,14 @@ from collections.abc import AsyncIterator
 import aiohttp
 from aiohttp import web
 
-from claude_cache_bump_gateway.config import Config
-from claude_cache_bump_gateway.core.clock import Clock, SystemClock
-from claude_cache_bump_gateway.core.scheduler import Scheduler
-from claude_cache_bump_gateway.core.selector import LargestPrefixSelector, TargetSelector
-from claude_cache_bump_gateway.core.store import FileStore, MemoryStore, SnapshotStore
-from claude_cache_bump_gateway.core.upstream import AiohttpUpstream, Upstream
-from claude_cache_bump_gateway.server import control, passthrough
-from claude_cache_bump_gateway.server.keys import (
+from claude_gateway_extensions.config import Config
+from claude_gateway_extensions.core.clock import Clock, SystemClock
+from claude_gateway_extensions.core.scheduler import Scheduler
+from claude_gateway_extensions.core.selector import LargestPrefixSelector, TargetSelector
+from claude_gateway_extensions.core.store import FileStore, MemoryStore, SnapshotStore
+from claude_gateway_extensions.core.upstream import AiohttpUpstream, Upstream
+from claude_gateway_extensions.server import control, passthrough
+from claude_gateway_extensions.server.keys import (
     CLIENT_SESSION_KEY,
     CLOCK_KEY,
     CONFIG_KEY,
@@ -98,14 +98,14 @@ def make_app(
     app.cleanup_ctx.append(_lifecycle)
 
     # Control routes must be registered before the passthrough catch-all so
-    # /ccbg/* is served locally rather than forwarded.
+    # /cgx/* is served locally rather than forwarded.
     control.register(app)
     passthrough.register(app)
     return app
 
 
 #: Signals that ask the daemon to shut down. ``SIGTERM`` is what
-#: ``systemctl --user stop`` sends to the unit ``ccbg service install``
+#: ``systemctl --user stop`` sends to the unit ``cgx service install``
 #: writes, so it must run the same cleanup path as ``Ctrl-C``.
 SHUTDOWN_SIGNALS: tuple[signal.Signals, ...] = (signal.SIGTERM, signal.SIGINT)
 
@@ -144,12 +144,12 @@ async def serve(config: Config) -> None:
     logger.setLevel(config.log_level)
     if not config.is_local_host():
         logger.warning(
-            "CCBG_HOST=%s is reachable from other machines; the control API has no authentication",
+            "CGX_HOST=%s is reachable from other machines; the control API has no authentication",
             config.host,
         )
     app = make_app(config)
     logger.info(
-        "ccbg serving host=%s port=%d upstream=%s state_dir=%s persist=%s",
+        "cgx serving host=%s port=%d upstream=%s state_dir=%s persist=%s",
         config.host,
         config.port,
         config.upstream,
@@ -165,7 +165,7 @@ async def serve(config: Config) -> None:
     install_shutdown_handlers(loop, stop)
     try:
         await stop.wait()
-        logger.info("ccbg shutting down")
+        logger.info("cgx shutting down")
     finally:
         remove_shutdown_handlers(loop)
         await runner.cleanup()

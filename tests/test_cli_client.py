@@ -1,4 +1,4 @@
-"""Tests for claude_cache_bump_gateway.cli.client against a fake in-process HTTP server."""
+"""Tests for claude_gateway_extensions.cli.client against a fake in-process HTTP server."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from typing import ClassVar
 
 import pytest
 
-from claude_cache_bump_gateway.cli.client import ApiError, ControlClient, DaemonUnreachable
+from claude_gateway_extensions.cli.client import ApiError, ControlClient, DaemonUnreachable
 
 Handler = Callable[["_FakeRequestHandler"], None]
 
@@ -82,21 +82,21 @@ def fake_server() -> Iterator[tuple[str, dict[tuple[str, str], tuple[int, object
 
 def test_health(fake_server: tuple[str, dict]) -> None:
     base_url, routes = fake_server
-    routes[("GET", "/ccbg/health")] = (200, {"status": "ok"})
+    routes[("GET", "/cgx/health")] = (200, {"status": "ok"})
     client = ControlClient(base_url)
     assert client.health() == {"status": "ok"}
 
 
 def test_list_sessions_unwraps_the_envelope(fake_server: tuple[str, dict]) -> None:
     base_url, routes = fake_server
-    routes[("GET", "/ccbg/sessions")] = (200, {"sessions": [{"session_id": "abc"}]})
+    routes[("GET", "/cgx/sessions")] = (200, {"sessions": [{"session_id": "abc"}]})
     client = ControlClient(base_url)
     assert client.list_sessions() == [{"session_id": "abc"}]
 
 
 def test_list_sessions_rejects_a_malformed_envelope(fake_server: tuple[str, dict]) -> None:
     base_url, routes = fake_server
-    routes[("GET", "/ccbg/sessions")] = (200, {"nope": 1})
+    routes[("GET", "/cgx/sessions")] = (200, {"nope": 1})
     client = ControlClient(base_url)
     with pytest.raises(ApiError):
         client.list_sessions()
@@ -104,7 +104,7 @@ def test_list_sessions_rejects_a_malformed_envelope(fake_server: tuple[str, dict
 
 def test_get_session_404_raises_api_error(fake_server: tuple[str, dict]) -> None:
     base_url, routes = fake_server
-    routes[("GET", "/ccbg/sessions/missing")] = (404, {"error": "unknown_session"})
+    routes[("GET", "/cgx/sessions/missing")] = (404, {"error": "unknown_session"})
     client = ControlClient(base_url)
     with pytest.raises(ApiError) as exc_info:
         client.get_session("missing")
@@ -113,7 +113,7 @@ def test_get_session_404_raises_api_error(fake_server: tuple[str, dict]) -> None
 
 def test_set_session_put(fake_server: tuple[str, dict]) -> None:
     base_url, routes = fake_server
-    routes[("PUT", "/ccbg/sessions/abc")] = (200, {"session_id": "abc", "enabled": True})
+    routes[("PUT", "/cgx/sessions/abc")] = (200, {"session_id": "abc", "enabled": True})
     client = ControlClient(base_url)
     result = client.set_session("abc", True, interval_s=120, max_duration_s=3600)
     assert result == {"session_id": "abc", "enabled": True}
@@ -121,28 +121,28 @@ def test_set_session_put(fake_server: tuple[str, dict]) -> None:
 
 def test_bump_ok(fake_server: tuple[str, dict]) -> None:
     base_url, routes = fake_server
-    routes[("POST", "/ccbg/sessions/abc/bump")] = (200, {"outcome": "ok"})
+    routes[("POST", "/cgx/sessions/abc/bump")] = (200, {"outcome": "ok"})
     client = ControlClient(base_url)
     assert client.bump("abc") == {"outcome": "ok"}
 
 
 def test_bump_409_does_not_raise(fake_server: tuple[str, dict]) -> None:
     base_url, routes = fake_server
-    routes[("POST", "/ccbg/sessions/abc/bump")] = (409, {"outcome": "cache_write"})
+    routes[("POST", "/cgx/sessions/abc/bump")] = (409, {"outcome": "cache_write"})
     client = ControlClient(base_url)
     assert client.bump("abc") == {"outcome": "cache_write"}
 
 
 def test_bump_404_no_snapshot_does_not_raise(fake_server: tuple[str, dict]) -> None:
     base_url, routes = fake_server
-    routes[("POST", "/ccbg/sessions/abc/bump")] = (404, {"error": "no_snapshot"})
+    routes[("POST", "/cgx/sessions/abc/bump")] = (404, {"error": "no_snapshot"})
     client = ControlClient(base_url)
     assert client.bump("abc") == {"error": "no_snapshot"}
 
 
 def test_bump_500_raises_api_error(fake_server: tuple[str, dict]) -> None:
     base_url, routes = fake_server
-    routes[("POST", "/ccbg/sessions/abc/bump")] = (500, {"error": "boom"})
+    routes[("POST", "/cgx/sessions/abc/bump")] = (500, {"error": "boom"})
     client = ControlClient(base_url)
     with pytest.raises(ApiError) as exc_info:
         client.bump("abc")
@@ -151,7 +151,7 @@ def test_bump_500_raises_api_error(fake_server: tuple[str, dict]) -> None:
 
 def test_forget(fake_server: tuple[str, dict]) -> None:
     base_url, routes = fake_server
-    routes[("DELETE", "/ccbg/sessions/abc")] = (200, {})
+    routes[("DELETE", "/cgx/sessions/abc")] = (200, {})
     client = ControlClient(base_url)
     client.forget("abc")  # must not raise
 

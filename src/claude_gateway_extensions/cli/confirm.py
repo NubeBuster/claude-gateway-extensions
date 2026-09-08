@@ -4,7 +4,7 @@ Generic on purpose: this module knows only about ``(path, old_content,
 new_content, apply)`` tuples (:class:`PlannedChange`), never about
 ``settings.json``, the skill directory, or systemd units specifically. See
 ``cli/install.py``'s ``plan_install``/``plan_uninstall`` for the concrete
-plans that ``ccbg configure``/``ccbg unconfigure`` build and hand to
+plans that ``cgx configure``/``cgx unconfigure`` build and hand to
 :func:`apply_changes`.
 
 Exit codes returned by :func:`apply_changes` (chosen to match

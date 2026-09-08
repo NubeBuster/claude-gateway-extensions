@@ -1,4 +1,4 @@
-"""Tests for claude_cache_bump_gateway.cli.statusline."""
+"""Tests for claude_gateway_extensions.cli.statusline."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from typing import ClassVar
 
 import pytest
 
-from claude_cache_bump_gateway.cli.statusline import run_statusline
+from claude_gateway_extensions.cli.statusline import run_statusline
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -86,11 +86,11 @@ def _pin_now(monkeypatch: pytest.MonkeyPatch) -> float:
 def test_on_with_next_bump(fake_daemon: tuple[str, dict], monkeypatch: pytest.MonkeyPatch) -> None:
     base_url, routes = fake_daemon
     now = _pin_now(monkeypatch)
-    routes[("GET", "/ccbg/sessions/s1")] = (
+    routes[("GET", "/cgx/sessions/s1")] = (
         200,
         {"session_id": "s1", "enabled": True, "next_bump_at": now + 47 * 60},
     )
-    out = _run({"session_id": "s1"}, {"CCBG_URL": base_url})
+    out = _run({"session_id": "s1"}, {"CGX_URL": base_url})
     assert out.strip() == "cache: on, next in 47m"
 
 
@@ -100,11 +100,11 @@ def test_on_with_deadline_today(
     base_url, routes = fake_daemon
     now = _pin_now(monkeypatch)
     until = now + 47 * 60
-    routes[("GET", "/ccbg/sessions/s1")] = (
+    routes[("GET", "/cgx/sessions/s1")] = (
         200,
         {"session_id": "s1", "enabled": True, "until": until, "next_bump_at": now + 40 * 60},
     )
-    out = _run({"session_id": "s1"}, {"CCBG_URL": base_url})
+    out = _run({"session_id": "s1"}, {"CGX_URL": base_url})
     expected = datetime.fromtimestamp(until, tz=UTC).astimezone().strftime("%H:%M")
     assert out.strip() == f"cache: on, until {expected}"
 
@@ -115,40 +115,40 @@ def test_on_with_deadline_another_day(
     base_url, routes = fake_daemon
     now = _pin_now(monkeypatch)
     until = now + 3 * 86400
-    routes[("GET", "/ccbg/sessions/s1")] = (
+    routes[("GET", "/cgx/sessions/s1")] = (
         200,
         {"session_id": "s1", "enabled": True, "until": until, "next_bump_at": now + 40 * 60},
     )
-    out = _run({"session_id": "s1"}, {"CCBG_URL": base_url})
+    out = _run({"session_id": "s1"}, {"CGX_URL": base_url})
     expected = datetime.fromtimestamp(until, tz=UTC).astimezone().strftime("%m-%d %H:%M")
     assert out.strip() == f"cache: on, until {expected}"
 
 
 def test_off(fake_daemon: tuple[str, dict]) -> None:
     base_url, routes = fake_daemon
-    routes[("GET", "/ccbg/sessions/s1")] = (200, {"session_id": "s1", "enabled": False})
-    out = _run({"session_id": "s1"}, {"CCBG_URL": base_url})
+    routes[("GET", "/cgx/sessions/s1")] = (200, {"session_id": "s1", "enabled": False})
+    out = _run({"session_id": "s1"}, {"CGX_URL": base_url})
     assert out.strip() == "cache: off"
 
 
 def test_off_with_stopped_reason(fake_daemon: tuple[str, dict]) -> None:
     base_url, routes = fake_daemon
-    routes[("GET", "/ccbg/sessions/s1")] = (
+    routes[("GET", "/cgx/sessions/s1")] = (
         200,
         {"session_id": "s1", "enabled": False, "stopped_reason": "unauthorized"},
     )
-    out = _run({"session_id": "s1"}, {"CCBG_URL": base_url})
+    out = _run({"session_id": "s1"}, {"CGX_URL": base_url})
     assert out.strip() == "cache: off, stopped: unauthorized"
 
 
 def test_daemon_unreachable_prints_nothing() -> None:
-    out = _run({"session_id": "s1"}, {"CCBG_URL": "http://127.0.0.1:1"})
+    out = _run({"session_id": "s1"}, {"CGX_URL": "http://127.0.0.1:1"})
     assert out == ""
 
 
 def test_unknown_session_prints_nothing(fake_daemon: tuple[str, dict]) -> None:
     base_url, _routes = fake_daemon
-    out = _run({"session_id": "missing"}, {"CCBG_URL": base_url})
+    out = _run({"session_id": "missing"}, {"CGX_URL": base_url})
     assert out == ""
 
 

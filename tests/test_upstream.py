@@ -1,8 +1,8 @@
-"""Tests for claude_cache_bump_gateway.core.upstream."""
+"""Tests for claude_gateway_extensions.core.upstream."""
 
 from multidict import CIMultiDict
 
-from claude_cache_bump_gateway.core.upstream import filter_headers
+from claude_gateway_extensions.core.upstream import filter_headers
 
 
 def test_filter_headers_preserves_repeated_header_values() -> None:

@@ -17,7 +17,7 @@ from collections import OrderedDict
 from pathlib import Path
 from typing import Protocol
 
-from claude_cache_bump_gateway.core.snapshot import SessionState, Snapshot, Usage
+from claude_gateway_extensions.core.snapshot import SessionState, Snapshot, Usage
 
 #: Session ids are used verbatim as filesystem directory names; anything not
 #: matching this pattern is rejected before it ever reaches the filesystem.

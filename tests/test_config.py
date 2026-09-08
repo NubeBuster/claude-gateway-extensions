@@ -1,10 +1,10 @@
-"""Tests for claude_cache_bump_gateway.config."""
+"""Tests for claude_gateway_extensions.config."""
 
 from pathlib import Path
 
 import pytest
 
-from claude_cache_bump_gateway.config import Config, ConfigError
+from claude_gateway_extensions.config import Config, ConfigError
 
 
 def test_defaults() -> None:
@@ -25,84 +25,84 @@ def test_defaults() -> None:
 
 def test_default_state_dir_uses_xdg_state_home() -> None:
     config = Config.from_env({"XDG_STATE_HOME": "/tmp/xdg-state"})
-    assert config.state_dir == Path("/tmp/xdg-state/claude-cache-bump-gateway")
+    assert config.state_dir == Path("/tmp/xdg-state/claude-gateway-extensions")
 
 
 def test_default_state_dir_falls_back_to_home() -> None:
     config = Config.from_env({"HOME": "/home/someone"})
-    assert config.state_dir == Path("/home/someone/.local/state/claude-cache-bump-gateway")
+    assert config.state_dir == Path("/home/someone/.local/state/claude-gateway-extensions")
 
 
 def test_explicit_state_dir_overrides_default() -> None:
-    config = Config.from_env({"CCBG_STATE_DIR": "/srv/ccbg"})
-    assert config.state_dir == Path("/srv/ccbg")
+    config = Config.from_env({"CGX_STATE_DIR": "/srv/cgx"})
+    assert config.state_dir == Path("/srv/cgx")
 
 
 @pytest.mark.parametrize("raw", ["true", "True", "1", "yes", "YES"])
 def test_bool_parsing_true(raw: str) -> None:
-    config = Config.from_env({"CCBG_PERSIST": raw})
+    config = Config.from_env({"CGX_PERSIST": raw})
     assert config.persist is True
 
 
 @pytest.mark.parametrize("raw", ["false", "False", "0", "no", "NO"])
 def test_bool_parsing_false(raw: str) -> None:
-    config = Config.from_env({"CCBG_PERSIST": raw})
+    config = Config.from_env({"CGX_PERSIST": raw})
     assert config.persist is False
 
 
 def test_bool_parsing_invalid_raises() -> None:
     with pytest.raises(ConfigError):
-        Config.from_env({"CCBG_PERSIST": "maybe"})
+        Config.from_env({"CGX_PERSIST": "maybe"})
 
 
 def test_int_parsing_invalid_raises() -> None:
     with pytest.raises(ConfigError):
-        Config.from_env({"CCBG_PORT": "not-a-port"})
+        Config.from_env({"CGX_PORT": "not-a-port"})
 
 
 def test_on_cache_write_invalid_raises() -> None:
     with pytest.raises(ConfigError):
-        Config.from_env({"CCBG_ON_CACHE_WRITE": "explode"})
+        Config.from_env({"CGX_ON_CACHE_WRITE": "explode"})
 
 
 def test_on_cache_write_continue_accepted() -> None:
-    config = Config.from_env({"CCBG_ON_CACHE_WRITE": "continue"})
+    config = Config.from_env({"CGX_ON_CACHE_WRITE": "continue"})
     assert config.on_cache_write == "continue"
 
 
 @pytest.mark.parametrize("host", ["127.0.0.1", "::1", "localhost"])
 def test_loopback_hosts_accepted(host: str) -> None:
-    config = Config.from_env({"CCBG_HOST": host})
+    config = Config.from_env({"CGX_HOST": host})
     assert config.host == host
     assert config.is_local_host() is True
 
 
 @pytest.mark.parametrize("host", ["127.0.0.2", "127.255.255.254", "[::1]"])
 def test_any_loopback_ip_literal_is_local(host: str) -> None:
-    config = Config.from_env({"CCBG_HOST": host})
+    config = Config.from_env({"CGX_HOST": host})
     assert config.host == host
     assert config.is_local_host() is True
 
 
 @pytest.mark.parametrize("host", ["0.0.0.0", "192.168.1.10", "myhost"])
 def test_non_local_hosts_are_accepted_but_not_local(host: str) -> None:
-    """A non-local CCBG_HOST is the user's explicit choice; it is never refused."""
-    config = Config.from_env({"CCBG_HOST": host})
+    """A non-local CGX_HOST is the user's explicit choice; it is never refused."""
+    config = Config.from_env({"CGX_HOST": host})
     assert config.host == host
     assert config.is_local_host() is False
 
 
 def test_url_defaults_from_host_and_port() -> None:
-    """With nothing set, url tracks CCBG_HOST/CCBG_PORT rather than a hardcoded literal."""
-    config = Config.from_env({"CCBG_PORT": "9001"})
+    """With nothing set, url tracks CGX_HOST/CGX_PORT rather than a hardcoded literal."""
+    config = Config.from_env({"CGX_PORT": "9001"})
     assert config.url == "http://127.0.0.1:9001"
 
 
-def test_url_prefers_ccbg_url_over_everything() -> None:
+def test_url_prefers_cgx_url_over_everything() -> None:
     config = Config.from_env(
         {
-            "CCBG_URL": "http://127.0.0.1:9999",
-            "CCBG_PORT": "9001",
+            "CGX_URL": "http://127.0.0.1:9999",
+            "CGX_PORT": "9001",
             "ANTHROPIC_BASE_URL": "http://127.0.0.1:7000",
         }
     )

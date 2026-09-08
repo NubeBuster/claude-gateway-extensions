@@ -1,4 +1,4 @@
-"""Tests for claude_cache_bump_gateway.cli argparse dispatch and exit codes.
+"""Tests for claude_gateway_extensions.cli argparse dispatch and exit codes.
 
 The daemon is never touched: every test injects a fake ``ControlClient`` via
 ``main(..., client_factory=...)``, per the dependency-injection design in
@@ -16,8 +16,8 @@ from typing import Any
 
 import pytest
 
-from claude_cache_bump_gateway.cli import EXIT_FAILED, EXIT_OK, EXIT_UNREACHABLE, EXIT_USAGE, main
-from claude_cache_bump_gateway.cli.client import ApiError, DaemonUnreachable
+from claude_gateway_extensions.cli import EXIT_FAILED, EXIT_OK, EXIT_UNREACHABLE, EXIT_USAGE, main
+from claude_gateway_extensions.cli.client import ApiError, DaemonUnreachable
 
 
 class _FakeClient:
@@ -271,16 +271,16 @@ def test_configure_service_flag_errors_with_pointer_to_service_install() -> None
     client = _FakeClient("http://x")
     code, _, err = _run(["configure", "--service"], client, environ={"HOME": "/nonexistent-home"})
     assert code == EXIT_USAGE
-    assert "ccbg configure" in err
-    assert "ccbg service install" in err
+    assert "cgx configure" in err
+    assert "cgx service install" in err
 
 
 def test_unconfigure_service_flag_errors_with_pointer_to_service_uninstall() -> None:
     client = _FakeClient("http://x")
     code, _, err = _run(["unconfigure", "--service"], client, environ={"HOME": "/nonexistent-home"})
     assert code == EXIT_USAGE
-    assert "ccbg unconfigure" in err
-    assert "ccbg service uninstall" in err
+    assert "cgx unconfigure" in err
+    assert "cgx service uninstall" in err
 
 
 def test_service_install_uses_injected_runner(tmp_path: Path) -> None:
@@ -297,11 +297,11 @@ def test_service_install_uses_injected_runner(tmp_path: Path) -> None:
         service_runner=runner,
     )
     assert code == EXIT_OK
-    assert "claude-cache-bump-gateway.service" in out
+    assert "claude-gateway-extensions.service" in out
     assert any(args[:2] == ["systemctl", "--user"] for args in calls)
     assert (
         tmp_path.resolve()
-        in (tmp_path / ".config" / "systemd" / "user" / "claude-cache-bump-gateway.service")
+        in (tmp_path / ".config" / "systemd" / "user" / "claude-gateway-extensions.service")
         .resolve()
         .parents
     )
@@ -321,10 +321,10 @@ def test_service_install_port_and_host_flags(tmp_path: Path) -> None:
         service_runner=runner,
     )
     assert code == EXIT_OK
-    unit_path = tmp_path / ".config" / "systemd" / "user" / "claude-cache-bump-gateway.service"
+    unit_path = tmp_path / ".config" / "systemd" / "user" / "claude-gateway-extensions.service"
     text = unit_path.read_text()
-    assert "Environment=CCBG_PORT=9999" in text
-    assert "Environment=CCBG_HOST=0.0.0.0" in text
+    assert "Environment=CGX_PORT=9999" in text
+    assert "Environment=CGX_HOST=0.0.0.0" in text
     assert "applied:" in out
 
 
@@ -356,7 +356,7 @@ def test_service_install_dry_run_prints_diff_and_writes_nothing(tmp_path: Path) 
     )
     assert code == EXIT_OK
     assert "will create" in out
-    unit_path = tmp_path / ".config" / "systemd" / "user" / "claude-cache-bump-gateway.service"
+    unit_path = tmp_path / ".config" / "systemd" / "user" / "claude-gateway-extensions.service"
     assert not unit_path.exists()
 
 
@@ -369,7 +369,7 @@ def test_service_install_non_tty_stdin_without_yes_aborts(tmp_path: Path) -> Non
     assert code == EXIT_USAGE
     assert "will create" in out
     assert "--yes" in err
-    unit_path = tmp_path / ".config" / "systemd" / "user" / "claude-cache-bump-gateway.service"
+    unit_path = tmp_path / ".config" / "systemd" / "user" / "claude-gateway-extensions.service"
     assert not unit_path.exists()
 
 
@@ -385,7 +385,7 @@ def test_service_install_interactive_y_applies(tmp_path: Path) -> None:
     )
     assert code == EXIT_OK
     assert "Apply this change to" in out
-    unit_path = tmp_path / ".config" / "systemd" / "user" / "claude-cache-bump-gateway.service"
+    unit_path = tmp_path / ".config" / "systemd" / "user" / "claude-gateway-extensions.service"
     assert unit_path.is_file()
 
 
@@ -417,7 +417,7 @@ def test_service_uninstall_round_trip_with_yes(tmp_path: Path) -> None:
     )
     assert code == EXIT_OK
     assert "applied:" in out
-    unit_path = tmp_path / ".config" / "systemd" / "user" / "claude-cache-bump-gateway.service"
+    unit_path = tmp_path / ".config" / "systemd" / "user" / "claude-gateway-extensions.service"
     assert not unit_path.exists()
 
 
@@ -445,7 +445,7 @@ def test_service_uninstall_non_tty_stdin_without_yes_aborts(tmp_path: Path) -> N
     assert code == EXIT_USAGE
     assert "will remove" in out
     assert "--yes" in err
-    unit_path = tmp_path / ".config" / "systemd" / "user" / "claude-cache-bump-gateway.service"
+    unit_path = tmp_path / ".config" / "systemd" / "user" / "claude-gateway-extensions.service"
     assert unit_path.is_file()
 
 
@@ -461,7 +461,7 @@ def test_configure_writes_url_for_explicit_port(tmp_path: Path) -> None:
     settings_path = tmp_path / ".claude" / "settings.json"
     data = json.loads(settings_path.read_text())
     assert data["env"]["ANTHROPIC_BASE_URL"] == "http://127.0.0.1:9999"
-    assert data["env"]["CCBG_URL"] == "http://127.0.0.1:9999"
+    assert data["env"]["CGX_URL"] == "http://127.0.0.1:9999"
 
 
 def test_configure_port_falls_back_to_installed_service_port(tmp_path: Path) -> None:
@@ -613,7 +613,7 @@ def test_service_status_reports_not_installed_and_daemon_health() -> None:
     client = _FakeClient("http://x")
     code, out, _ = _run(["service", "status"], client, environ={"HOME": "/nonexistent-home"})
     assert code == EXIT_OK
-    assert "not installed; run `ccbg service install`" in out
+    assert "not installed; run `cgx service install`" in out
     assert "daemon healthy" in out
     assert client.calls == [("health", ())]
 
@@ -636,10 +636,10 @@ def test_serve_imports_server_module_lazily(monkeypatch: pytest.MonkeyPatch) -> 
     """``serve`` must not require the server package to exist until invoked."""
     import types
 
-    fake_module = types.ModuleType("claude_cache_bump_gateway.server")
+    fake_module = types.ModuleType("claude_gateway_extensions.server")
     calls: list[Any] = []
     fake_module.run = lambda config: calls.append(config)  # type: ignore[attr-defined]
-    monkeypatch.setitem(sys.modules, "claude_cache_bump_gateway.server", fake_module)
+    monkeypatch.setitem(sys.modules, "claude_gateway_extensions.server", fake_module)
 
     client = _FakeClient("http://x")
     code, _, _ = _run(["serve"], client)
@@ -650,16 +650,16 @@ def test_serve_imports_server_module_lazily(monkeypatch: pytest.MonkeyPatch) -> 
 def test_serve_port_flag_overrides_env(monkeypatch: pytest.MonkeyPatch) -> None:
     import types
 
-    fake_module = types.ModuleType("claude_cache_bump_gateway.server")
+    fake_module = types.ModuleType("claude_gateway_extensions.server")
     calls: list[Any] = []
     fake_module.run = lambda config: calls.append(config)  # type: ignore[attr-defined]
-    monkeypatch.setitem(sys.modules, "claude_cache_bump_gateway.server", fake_module)
+    monkeypatch.setitem(sys.modules, "claude_gateway_extensions.server", fake_module)
 
     client = _FakeClient("http://x")
     code, _, _ = _run(
         ["serve", "--port", "9999", "--host", "0.0.0.0"],
         client,
-        environ={"CCBG_PORT": "1111"},
+        environ={"CGX_PORT": "1111"},
     )
     assert code == EXIT_OK
     assert calls[0].port == 9999
@@ -669,13 +669,13 @@ def test_serve_port_flag_overrides_env(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_serve_without_flags_uses_env_port(monkeypatch: pytest.MonkeyPatch) -> None:
     import types
 
-    fake_module = types.ModuleType("claude_cache_bump_gateway.server")
+    fake_module = types.ModuleType("claude_gateway_extensions.server")
     calls: list[Any] = []
     fake_module.run = lambda config: calls.append(config)  # type: ignore[attr-defined]
-    monkeypatch.setitem(sys.modules, "claude_cache_bump_gateway.server", fake_module)
+    monkeypatch.setitem(sys.modules, "claude_gateway_extensions.server", fake_module)
 
     client = _FakeClient("http://x")
-    code, _, _ = _run(["serve"], client, environ={"CCBG_PORT": "1111"})
+    code, _, _ = _run(["serve"], client, environ={"CGX_PORT": "1111"})
     assert code == EXIT_OK
     assert calls[0].port == 1111
 

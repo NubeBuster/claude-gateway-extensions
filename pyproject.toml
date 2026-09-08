@@ -3,9 +3,9 @@ requires = ["hatchling>=1.25"]
 build-backend = "hatchling.build"
 
 [project]
-name = "claude-cache-bump-gateway"
+name = "claude-gateway-extensions"
 dynamic = ["version"]
-description = "Local transparent proxy that keeps a Claude Code session's prompt cache warm while you are away."
+description = "Gateway extensions for Claude Code: a local gateway with cache bumping, and more to come"
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
@@ -35,21 +35,20 @@ dev = [
 ]
 
 [project.scripts]
-claude-cache-bump-gateway = "claude_cache_bump_gateway.cli:main"
-ccbg = "claude_cache_bump_gateway.cli:main"
+cgx = "claude_gateway_extensions.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/NubeBuster/claude-cache-bump-gateway"
-Issues = "https://github.com/NubeBuster/claude-cache-bump-gateway/issues"
+Homepage = "https://github.com/NubeBuster/claude-gateway-extensions"
+Issues = "https://github.com/NubeBuster/claude-gateway-extensions/issues"
 
 [tool.hatch.version]
-path = "src/claude_cache_bump_gateway/__init__.py"
+path = "src/claude_gateway_extensions/__init__.py"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/claude_cache_bump_gateway"]
+packages = ["src/claude_gateway_extensions"]
 
 [tool.hatch.build.targets.wheel.force-include]
-"claude/skills/cache" = "claude_cache_bump_gateway/data/skills/cache"
+"claude/skills/cache" = "claude_gateway_extensions/data/skills/cache"
 
 [tool.hatch.build.targets.sdist]
 include = ["src", "docs", "claude", "tests", "README.md", "LICENSE", "pyproject.toml"]

@@ -1,18 +1,18 @@
-"""Manage the systemd user unit that runs the daemon (``ccbg serve``).
+"""Manage the systemd user unit that runs the daemon (``cgx serve``).
 
 One daemon serves every project on a machine, so this is deliberately
-separate from ``ccbg configure``'s per-scope ``settings.json`` edits (see
+separate from ``cgx configure``'s per-scope ``settings.json`` edits (see
 ``cli/install.py``'s module docstring and ``docs/DESIGN.md`` "Claude Code
 integration"). :func:`install_service`/:func:`uninstall_service` write and
 remove exactly the unit file this module renders; :func:`service_status`
 reports its present/enabled/active state without touching ``settings.json``.
 
 A bad unit edit breaks the live daemon just as surely as a bad
-``settings.json`` edit breaks a live session, so ``ccbg service
+``settings.json`` edit breaks a live session, so ``cgx service
 install``/``uninstall`` plan the unit change first
 (:func:`plan_install_service`/:func:`plan_uninstall_service`) and go
-through the same colored-diff-and-confirm flow as ``ccbg
-configure``/``unconfigure`` — see :mod:`claude_cache_bump_gateway.cli.confirm`.
+through the same colored-diff-and-confirm flow as ``cgx
+configure``/``unconfigure`` — see :mod:`claude_gateway_extensions.cli.confirm`.
 """
 
 from __future__ import annotations
@@ -24,10 +24,10 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from claude_cache_bump_gateway.cli.confirm import PlannedChange
-from claude_cache_bump_gateway.cli.install import user_home
+from claude_gateway_extensions.cli.confirm import PlannedChange
+from claude_gateway_extensions.cli.install import user_home
 
-_UNIT_NAME = "claude-cache-bump-gateway.service"
+_UNIT_NAME = "claude-gateway-extensions.service"
 
 #: A runner executes a systemd command that changes state (enable/disable);
 #: tests inject a fake instead of the real ``subprocess.run`` so service
@@ -66,9 +66,9 @@ def _default_query(args: Sequence[str]) -> str:
 DEFAULT_QUERY: Query = _default_query
 
 
-def _ccbg_executable() -> str:
-    """Return the absolute path of the running ``ccbg`` executable."""
-    found = shutil.which("ccbg")
+def _cgx_executable() -> str:
+    """Return the absolute path of the running ``cgx`` executable."""
+    found = shutil.which("cgx")
     if found:
         return str(Path(found).resolve())
     return str(Path(sys.argv[0]).resolve())
@@ -90,23 +90,23 @@ def render_unit(
 ) -> str:
     """Render the systemd user unit file content for ``executable``.
 
-    Passes through every ``CCBG_*`` variable currently set in ``environ`` as
+    Passes through every ``CGX_*`` variable currently set in ``environ`` as
     an ``Environment=`` line, so the service sees the same configuration the
     installing shell had (documented in the README's "Daemon settings"
     section). ``port``/``host``, when given, are written explicitly as
-    ``CCBG_PORT``/``CCBG_HOST``, overriding whatever those two happened to
+    ``CGX_PORT``/``CGX_HOST``, overriding whatever those two happened to
     be in the installing shell — the whole point of ``--port``/``--host`` is
     to pin the unit's port independent of shell state.
     """
-    env_vars = {key: value for key, value in environ.items() if key.startswith("CCBG_")}
+    env_vars = {key: value for key, value in environ.items() if key.startswith("CGX_")}
     if port is not None:
-        env_vars["CCBG_PORT"] = str(port)
+        env_vars["CGX_PORT"] = str(port)
     if host is not None:
-        env_vars["CCBG_HOST"] = host
+        env_vars["CGX_HOST"] = host
     env_lines = [f"Environment={key}={value}" for key, value in sorted(env_vars.items())]
     lines = [
         "[Unit]",
-        "Description=claude-cache-bump-gateway",
+        "Description=claude-gateway-extensions",
         "",
         "[Service]",
         f"ExecStart={executable} serve",
@@ -131,9 +131,9 @@ def install_service(
     """Write the systemd user unit and enable it now; return the unit path.
 
     ``port``/``host`` are forwarded to :func:`render_unit` to pin the unit's
-    ``CCBG_PORT``/``CCBG_HOST`` explicitly.
+    ``CGX_PORT``/``CGX_HOST`` explicitly.
     """
-    executable = _ccbg_executable()
+    executable = _cgx_executable()
     path = unit_path(environ)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(render_unit(executable, environ, port=port, host=host))
@@ -163,10 +163,10 @@ def plan_install_service(
 
     Nothing is written; ``apply`` calls :func:`install_service` for real
     (write, then ``daemon-reload`` and ``enable --now``) on confirmation.
-    The caller (``ccbg service install``) shows the returned
+    The caller (``cgx service install``) shows the returned
     :class:`PlannedChange` as a diff and confirms it before calling ``apply``.
     """
-    executable = _ccbg_executable()
+    executable = _cgx_executable()
     path = unit_path(environ)
     new_content = render_unit(executable, environ, port=port, host=host)
     old_content = path.read_text() if path.is_file() else None
@@ -217,16 +217,16 @@ def service_status(environ: Mapping[str, str], query: Query = _default_query) ->
 
 
 def installed_port(environ: Mapping[str, str]) -> int | None:
-    """Return the ``CCBG_PORT`` baked into the installed unit file, or ``None``.
+    """Return the ``CGX_PORT`` baked into the installed unit file, or ``None``.
 
     ``None`` covers both "no unit installed" and "the unit has no explicit
-    ``CCBG_PORT`` line" (the daemon would then fall back to its own
+    ``CGX_PORT`` line" (the daemon would then fall back to its own
     default/environment at start time, which this function cannot see).
     """
     path = unit_path(environ)
     if not path.is_file():
         return None
-    prefix = "Environment=CCBG_PORT="
+    prefix = "Environment=CGX_PORT="
     for line in path.read_text().splitlines():
         if line.startswith(prefix):
             try:

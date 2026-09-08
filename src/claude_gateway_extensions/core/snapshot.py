@@ -20,7 +20,7 @@ class SnapshotError(ValueError):
 
 #: Anthropic's actual prompt-cache TTL, in seconds, for a snapshot whose
 #: ``cache_control.ttl`` is ``"1h"``. Distinct from the daemon's configured
-#: bump interval (``CCBG_INTERVAL_1H_S``), which is a smaller safety margin
+#: bump interval (``CGX_INTERVAL_1H_S``), which is a smaller safety margin
 #: under this TTL, not the TTL itself.
 CACHE_TTL_1H_S = 3600
 

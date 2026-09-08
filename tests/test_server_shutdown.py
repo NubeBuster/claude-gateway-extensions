@@ -1,6 +1,6 @@
 """Tests that a running daemon shuts down cleanly on SIGTERM.
 
-``systemctl --user stop`` sends ``SIGTERM`` to the unit ``ccbg service
+``systemctl --user stop`` sends ``SIGTERM`` to the unit ``cgx service
 install`` writes. Without a handler the process dies where it stands, so
 ``AppRunner.cleanup`` — and with it the app's ``cleanup_ctx``, the shared
 client session and the scheduler's per-session tasks — never runs.
@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-from claude_cache_bump_gateway.server.app import (
+from claude_gateway_extensions.server.app import (
     install_shutdown_handlers,
     remove_shutdown_handlers,
     serve,
@@ -63,7 +63,7 @@ async def test_sigterm_stops_the_daemon_and_leaves_state_on_disk(tmp_path: Path)
         import urllib.request
 
         request = urllib.request.Request(
-            f"http://127.0.0.1:{port}/ccbg/sessions/sess-term",
+            f"http://127.0.0.1:{port}/cgx/sessions/sess-term",
             data=json.dumps({"enabled": True}).encode(),
             headers={"content-type": "application/json"},
             method="PUT",
@@ -103,10 +103,10 @@ async def test_handlers_are_removed_after_serve_returns(tmp_path: Path) -> None:
 async def test_non_local_host_logs_a_warning_but_still_starts(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """A non-local CCBG_HOST is the user's choice: serve() warns, it does not refuse."""
+    """A non-local CGX_HOST is the user's choice: serve() warns, it does not refuse."""
     port = _free_port()
     config = make_config(tmp_path, "http://127.0.0.1:1", host="0.0.0.0", port=port, persist=False)
-    caplog.set_level(logging.WARNING, logger="claude_cache_bump_gateway.server.app")
+    caplog.set_level(logging.WARNING, logger="claude_gateway_extensions.server.app")
     task = asyncio.create_task(serve(config))
 
     assert await _wait_until(lambda: _is_listening(port)), "daemon never started listening"
@@ -120,7 +120,7 @@ async def test_non_local_host_logs_a_warning_but_still_starts(
 
 
 def test_shutdown_signals_cover_sigterm_and_sigint() -> None:
-    from claude_cache_bump_gateway.server.app import SHUTDOWN_SIGNALS
+    from claude_gateway_extensions.server.app import SHUTDOWN_SIGNALS
 
     assert set(SHUTDOWN_SIGNALS) == {signal.SIGTERM, signal.SIGINT}
 

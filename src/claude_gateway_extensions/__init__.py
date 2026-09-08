@@ -1,4 +1,4 @@
-"""claude-cache-bump-gateway: keep a Claude Code session's prompt cache warm.
+"""claude-gateway-extensions: keep a Claude Code session's prompt cache warm.
 
 A small transparent HTTP proxy between Claude Code and the Anthropic API that
 records the last request of each session and periodically replays it with

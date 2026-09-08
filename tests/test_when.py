@@ -1,4 +1,4 @@
-"""Exhaustive tests for claude_cache_bump_gateway.cli.when.parse_when."""
+"""Exhaustive tests for claude_gateway_extensions.cli.when.parse_when."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from claude_cache_bump_gateway.cli.when import At, Bump, Off, Status, WhenError, parse_when
+from claude_gateway_extensions.cli.when import At, Bump, Off, Status, WhenError, parse_when
 
 _AMS = ZoneInfo("Europe/Amsterdam")
 _NY = ZoneInfo("America/New_York")

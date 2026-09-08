@@ -4,9 +4,9 @@ Deliberately avoids ``aiohttp`` (or any event loop) so every CLI subcommand,
 the ``UserPromptSubmit`` hook and the statusline segment start instantly.
 ``docs/API.md`` is the authoritative request/response contract; this module
 encodes exactly those shapes, keyed to
-:class:`~claude_cache_bump_gateway.core.scheduler.Scheduler`'s ``status()``
+:class:`~claude_gateway_extensions.core.scheduler.Scheduler`'s ``status()``
 and ``status_all()`` output and to
-:class:`~claude_cache_bump_gateway.core.bump.BumpResult`.
+:class:`~claude_gateway_extensions.core.bump.BumpResult`.
 """
 
 from __future__ import annotations
@@ -42,7 +42,7 @@ class ApiError(Exception):
 
 
 class ControlClient:
-    """Client for the daemon's ``/ccbg/`` control API.
+    """Client for the daemon's ``/cgx/`` control API.
 
     Every method blocks synchronously via ``urllib`` and raises
     :class:`DaemonUnreachable` on a connection failure or :class:`ApiError` on
@@ -96,31 +96,31 @@ class ControlClient:
         return parsed
 
     def health(self) -> dict[str, Any]:
-        """Return the daemon's ``GET /ccbg/health`` response."""
-        result: dict[str, Any] = self._get("/ccbg/health")
+        """Return the daemon's ``GET /cgx/health`` response."""
+        result: dict[str, Any] = self._get("/cgx/health")
         return result
 
     def list_sessions(self) -> list[dict[str, Any]]:
-        """Return every session's status via ``GET /ccbg/sessions``.
+        """Return every session's status via ``GET /cgx/sessions``.
 
         The route answers with a ``{"sessions": [...]}`` envelope (see
         ``docs/API.md``); the envelope is unwrapped here so callers only ever
         deal with a list of status dicts.
         """
-        payload: Any = self._get("/ccbg/sessions")
+        payload: Any = self._get("/cgx/sessions")
         sessions = payload.get("sessions") if isinstance(payload, dict) else payload
         if not isinstance(sessions, list):
-            raise ApiError(200, f"malformed /ccbg/sessions response: {payload!r}")
+            raise ApiError(200, f"malformed /cgx/sessions response: {payload!r}")
         result: list[dict[str, Any]] = sessions
         return result
 
     def get_session(self, session_id: str) -> dict[str, Any]:
-        """Return one session's status via ``GET /ccbg/sessions/{id}``.
+        """Return one session's status via ``GET /cgx/sessions/{id}``.
 
         Raises :class:`ApiError` with ``status == 404`` if the session is
         unknown to the daemon.
         """
-        result: dict[str, Any] = self._get(f"/ccbg/sessions/{session_id}")
+        result: dict[str, Any] = self._get(f"/cgx/sessions/{session_id}")
         return result
 
     def set_session(
@@ -131,7 +131,7 @@ class ControlClient:
         max_duration_s: int | None = None,
         until: float | None = None,
     ) -> dict[str, Any]:
-        """Enable/disable bumping and optionally set overrides via ``PUT /ccbg/sessions/{id}``.
+        """Enable/disable bumping and optionally set overrides via ``PUT /cgx/sessions/{id}``.
 
         ``until`` is an absolute Unix epoch deadline that replaces the
         max-duration stop for this session; see ``docs/API.md``.
@@ -143,13 +143,13 @@ class ControlClient:
             payload["max_duration_s"] = max_duration_s
         if until is not None:
             payload["until"] = until
-        status, parsed = self._request("PUT", f"/ccbg/sessions/{session_id}", payload)
+        status, parsed = self._request("PUT", f"/cgx/sessions/{session_id}", payload)
         if not 200 <= status < 300:
             raise ApiError(status, str(parsed))
         return parsed
 
     def bump(self, session_id: str) -> dict[str, Any]:
-        """Trigger an immediate bump via ``POST /ccbg/sessions/{id}/bump``.
+        """Trigger an immediate bump via ``POST /cgx/sessions/{id}/bump``.
 
         Returns the parsed response body for a 2xx result (``outcome: "ok"``),
         a 409 (a ``BumpResult`` with any other outcome) and a 404 (the session
@@ -157,14 +157,14 @@ class ControlClient:
         ``docs/API.md``, all three are normal, non-exceptional outcomes of
         asking for a bump. Any other status raises :class:`ApiError`.
         """
-        status, parsed = self._request("POST", f"/ccbg/sessions/{session_id}/bump")
+        status, parsed = self._request("POST", f"/cgx/sessions/{session_id}/bump")
         if status in (404, 409) or 200 <= status < 300:
             return parsed
         raise ApiError(status, str(parsed))
 
     def forget(self, session_id: str) -> None:
-        """Discard a session's snapshots and state via ``DELETE /ccbg/sessions/{id}``."""
-        status, parsed = self._request("DELETE", f"/ccbg/sessions/{session_id}")
+        """Discard a session's snapshots and state via ``DELETE /cgx/sessions/{id}``."""
+        status, parsed = self._request("DELETE", f"/cgx/sessions/{session_id}")
         if not 200 <= status < 300:
             raise ApiError(status, str(parsed))
 

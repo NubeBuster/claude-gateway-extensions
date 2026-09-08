@@ -1,4 +1,4 @@
-"""Daemon configuration, parsed once from ``CCBG_*`` environment variables.
+"""Daemon configuration, parsed once from ``CGX_*`` environment variables.
 
 ``Config`` is the single source of truth for every tunable, per the
 "Environment variables only, split by process" decision in ``docs/DESIGN.md``
@@ -24,7 +24,7 @@ _FALSE_VALUES = {"false", "0", "no"}
 
 
 class ConfigError(ValueError):
-    """Raised when a ``CCBG_*`` environment variable has an invalid value."""
+    """Raised when a ``CGX_*`` environment variable has an invalid value."""
 
 
 def _default_state_dir(env: Mapping[str, str]) -> Path:
@@ -40,11 +40,11 @@ def _default_state_dir(env: Mapping[str, str]) -> Path:
     else:
         home = env.get("HOME")
         base = (Path(home) if home else Path.home()) / ".local" / "state"
-    return base / "claude-cache-bump-gateway"
+    return base / "claude-gateway-extensions"
 
 
 def _parse_bool(name: str, raw: str) -> bool:
-    """Parse a ``CCBG_*`` boolean value, accepting true/false/1/0/yes/no case-insensitively."""
+    """Parse a ``CGX_*`` boolean value, accepting true/false/1/0/yes/no case-insensitively."""
     lowered = raw.strip().lower()
     if lowered in _TRUE_VALUES:
         return True
@@ -54,7 +54,7 @@ def _parse_bool(name: str, raw: str) -> bool:
 
 
 def _parse_int(name: str, raw: str) -> int:
-    """Parse a ``CCBG_*`` integer value, raising ``ConfigError`` on failure."""
+    """Parse a ``CGX_*`` integer value, raising ``ConfigError`` on failure."""
     try:
         return int(raw)
     except ValueError as exc:
@@ -80,9 +80,9 @@ def _is_loopback_host(host: str) -> bool:
 
 
 def _parse_on_cache_write(raw: str) -> OnCacheWrite:
-    """Parse ``CCBG_ON_CACHE_WRITE``, restricting the value to the two documented literals."""
+    """Parse ``CGX_ON_CACHE_WRITE``, restricting the value to the two documented literals."""
     if raw not in ("stop", "continue"):
-        raise ConfigError(f"CCBG_ON_CACHE_WRITE: invalid value {raw!r}, expected stop or continue")
+        raise ConfigError(f"CGX_ON_CACHE_WRITE: invalid value {raw!r}, expected stop or continue")
     return raw
 
 
@@ -90,7 +90,7 @@ def _is_loopback_http_url(url: str) -> bool:
     """Return whether ``url`` is an ``http://`` URL whose host is loopback.
 
     Used to decide whether an ambient ``ANTHROPIC_BASE_URL`` (which Claude
-    Code sets for every hook/statusline invocation once ``ccbg configure`` has
+    Code sets for every hook/statusline invocation once ``cgx configure`` has
     run) is safe to treat as "this is the daemon" rather than some unrelated
     gateway.
     """
@@ -108,16 +108,16 @@ def _format_host_for_url(host: str) -> str:
 def _resolve_daemon_url(env: Mapping[str, str], host: str, port: int) -> str:
     """Resolve the URL clients (hook, statusline, CLI) use to reach the daemon.
 
-    Precedence: ``CCBG_URL`` if set, then ``ANTHROPIC_BASE_URL`` if it is a
+    Precedence: ``CGX_URL`` if set, then ``ANTHROPIC_BASE_URL`` if it is a
     loopback ``http://`` URL (Claude Code passes it to every hook/statusline
-    invocation, so this removes the need to also set ``CCBG_URL`` in the
+    invocation, so this removes the need to also set ``CGX_URL`` in the
     common case; a non-loopback ``ANTHROPIC_BASE_URL`` is ignored since it is
     not this daemon), then ``http://{host}:{port}`` built from this same
     ``Config``'s resolved host/port.
     """
-    ccbg_url = env.get("CCBG_URL")
-    if ccbg_url:
-        return ccbg_url
+    cgx_url = env.get("CGX_URL")
+    if cgx_url:
+        return cgx_url
     base_url = env.get("ANTHROPIC_BASE_URL")
     if base_url and _is_loopback_http_url(base_url):
         return base_url
@@ -129,7 +129,7 @@ class Config:
     """Immutable daemon configuration.
 
     See ``README.md``'s Configuration table for the meaning and default of
-    every field; the "Control API on ``/ccbg/``..." decision in
+    every field; the "Control API on ``/cgx/``..." decision in
     ``docs/DESIGN.md`` "Decisions" covers how ``host``/``port`` are used.
     """
 
@@ -149,7 +149,7 @@ class Config:
 
     @classmethod
     def from_env(cls, environ: Mapping[str, str] | None = None) -> Config:
-        """Build a :class:`Config` from ``CCBG_*`` variables in ``environ``.
+        """Build a :class:`Config` from ``CGX_*`` variables in ``environ``.
 
         Defaults to ``os.environ`` when ``environ`` is ``None``. Every
         variable is optional and has a default, so a user who sets nothing
@@ -158,23 +158,23 @@ class Config:
         """
         env = os.environ if environ is None else environ
 
-        host = env.get("CCBG_HOST", "127.0.0.1")
-        port = _parse_int("CCBG_PORT", env.get("CCBG_PORT", "8787"))
-        upstream = env.get("CCBG_UPSTREAM", "https://api.anthropic.com")
-        state_dir_raw = env.get("CCBG_STATE_DIR")
+        host = env.get("CGX_HOST", "127.0.0.1")
+        port = _parse_int("CGX_PORT", env.get("CGX_PORT", "8787"))
+        upstream = env.get("CGX_UPSTREAM", "https://api.anthropic.com")
+        state_dir_raw = env.get("CGX_STATE_DIR")
         state_dir = Path(state_dir_raw).expanduser() if state_dir_raw else _default_state_dir(env)
-        persist = _parse_bool("CCBG_PERSIST", env.get("CCBG_PERSIST", "true"))
+        persist = _parse_bool("CGX_PERSIST", env.get("CGX_PERSIST", "true"))
         default_enabled = _parse_bool(
-            "CCBG_DEFAULT_ENABLED", env.get("CCBG_DEFAULT_ENABLED", "false")
+            "CGX_DEFAULT_ENABLED", env.get("CGX_DEFAULT_ENABLED", "false")
         )
-        interval_1h_s = _parse_int("CCBG_INTERVAL_1H_S", env.get("CCBG_INTERVAL_1H_S", "3000"))
-        interval_5m_s = _parse_int("CCBG_INTERVAL_5M_S", env.get("CCBG_INTERVAL_5M_S", "240"))
-        max_duration_s = _parse_int("CCBG_MAX_DURATION_S", env.get("CCBG_MAX_DURATION_S", "86400"))
-        on_cache_write = _parse_on_cache_write(env.get("CCBG_ON_CACHE_WRITE", "stop"))
+        interval_1h_s = _parse_int("CGX_INTERVAL_1H_S", env.get("CGX_INTERVAL_1H_S", "3000"))
+        interval_5m_s = _parse_int("CGX_INTERVAL_5M_S", env.get("CGX_INTERVAL_5M_S", "240"))
+        max_duration_s = _parse_int("CGX_MAX_DURATION_S", env.get("CGX_MAX_DURATION_S", "86400"))
+        on_cache_write = _parse_on_cache_write(env.get("CGX_ON_CACHE_WRITE", "stop"))
         max_streams_per_session = _parse_int(
-            "CCBG_MAX_STREAMS_PER_SESSION", env.get("CCBG_MAX_STREAMS_PER_SESSION", "8")
+            "CGX_MAX_STREAMS_PER_SESSION", env.get("CGX_MAX_STREAMS_PER_SESSION", "8")
         )
-        log_level = env.get("CCBG_LOG_LEVEL", "INFO")
+        log_level = env.get("CGX_LOG_LEVEL", "INFO")
         url = _resolve_daemon_url(env, host, port)
 
         return cls(

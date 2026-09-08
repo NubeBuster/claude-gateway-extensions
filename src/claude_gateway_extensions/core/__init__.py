@@ -4,11 +4,11 @@ Re-exports the four extension-point protocols named in ``docs/DESIGN.md``
 "Extension points" (:class:`Clock`, :class:`SnapshotStore`,
 :class:`TargetSelector`, :class:`Upstream`) plus the models and functions
 most callers need, so ``server/`` and ``cli/`` can do
-``from claude_cache_bump_gateway.core import Scheduler, FileStore, ...``
+``from claude_gateway_extensions.core import Scheduler, FileStore, ...``
 instead of reaching into individual submodules.
 """
 
-from claude_cache_bump_gateway.core.bump import (
+from claude_gateway_extensions.core.bump import (
     BumpOutcome,
     BumpResult,
     build_bump_body,
@@ -16,10 +16,10 @@ from claude_cache_bump_gateway.core.bump import (
     bump_once,
     classify,
 )
-from claude_cache_bump_gateway.core.clock import Clock, FakeClock, SystemClock
-from claude_cache_bump_gateway.core.scheduler import NoSnapshot, Scheduler
-from claude_cache_bump_gateway.core.selector import LargestPrefixSelector, TargetSelector
-from claude_cache_bump_gateway.core.snapshot import (
+from claude_gateway_extensions.core.clock import Clock, FakeClock, SystemClock
+from claude_gateway_extensions.core.scheduler import NoSnapshot, Scheduler
+from claude_gateway_extensions.core.selector import LargestPrefixSelector, TargetSelector
+from claude_gateway_extensions.core.snapshot import (
     CACHE_TTL_1H_S,
     CACHE_TTL_5M_S,
     SessionState,
@@ -29,13 +29,13 @@ from claude_cache_bump_gateway.core.snapshot import (
     stream_key,
     wants_1h_ttl,
 )
-from claude_cache_bump_gateway.core.status_format import (
+from claude_gateway_extensions.core.status_format import (
     format_clock,
     format_countdown,
     format_status_times,
 )
-from claude_cache_bump_gateway.core.store import FileStore, MemoryStore, SnapshotStore
-from claude_cache_bump_gateway.core.upstream import (
+from claude_gateway_extensions.core.store import FileStore, MemoryStore, SnapshotStore
+from claude_gateway_extensions.core.upstream import (
     HOP_BY_HOP_HEADERS,
     AiohttpUpstream,
     Upstream,

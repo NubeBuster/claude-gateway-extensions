@@ -1,4 +1,4 @@
-# claude-cache-bump-gateway — agent instructions
+# claude-gateway-extensions — agent instructions
 
 ## Scope
 
@@ -14,16 +14,16 @@ is designed into that file before any code is written for it.
 - Never log request or response bodies, at any log level.
 - `BumpResult`'s cache-write check is not optional: every bump path inspects
   `cache_creation_input_tokens` via the shared classifier, not a status code.
-- The daemon listens on `127.0.0.1` by default; a non-local `CCBG_HOST` is
+- The daemon listens on `127.0.0.1` by default; a non-local `CGX_HOST` is
   the user's explicit choice and logs a warning, it is never refused.
-- `ccbg configure`/`unconfigure` write only `env.ANTHROPIC_BASE_URL`,
-  `env.CCBG_URL` (non-default port only) and `hooks.UserPromptSubmit` in the
+- `cgx configure`/`unconfigure` write only `env.ANTHROPIC_BASE_URL`,
+  `env.CGX_URL` (non-default port only) and `hooks.UserPromptSubmit` in the
   scoped settings file, plus the skill copy; `managed` is not a scope. Record
   any further key in `docs/DESIGN.md` and the README Configuration tables.
 - `configure`, `unconfigure` and `service install`/`uninstall` show a diff of
   every file they would write and apply it only on consent; `--yes` is the
   sole bypass, and a non-TTY stdin without it writes nothing.
-- One module parses a `/cache` argument, `cli/when.py`; the hook, `ccbg on
+- One module parses a `/cache` argument, `cli/when.py`; the hook, `cgx on
   --until` and any new caller go through `parse_when`.
 - Single runtime dependency: `aiohttp`. Do not add a second HTTP or web
   framework; the CLI client uses `urllib` deliberately, to stay import-light.
@@ -40,7 +40,7 @@ is designed into that file before any code is written for it.
 ## Docs
 
 - README.md's Configuration tables are the only variable reference; every
-  `CCBG_*` variable in `config.py` appears there with its real default.
+  `CGX_*` variable in `config.py` appears there with its real default.
 - `docs/DESIGN.md` records decisions and their rationale only. Do not add
   module maps, flows or tables that restate the code or the README.
 - No emojis anywhere in docs or code comments.

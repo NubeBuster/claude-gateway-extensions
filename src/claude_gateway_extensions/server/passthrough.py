@@ -5,7 +5,7 @@ A single catch-all handler forwards every method and path to
 in ``docs/DESIGN.md`` "Decisions". Only ``POST /v1/messages`` is treated
 specially: the request body is read fully
 (Claude Code sends it as one buffer anyway) and the response is tee'd as it
-streams so a :class:`~claude_cache_bump_gateway.core.snapshot.Snapshot` can be
+streams so a :class:`~claude_gateway_extensions.core.snapshot.Snapshot` can be
 captured for the session's bump scheduler. Every other request passes
 through in both directions without inspection.
 """
@@ -22,12 +22,12 @@ from typing import Any
 import aiohttp
 from aiohttp import web
 
-from claude_cache_bump_gateway.config import Config
-from claude_cache_bump_gateway.core.clock import Clock
-from claude_cache_bump_gateway.core.scheduler import Scheduler
-from claude_cache_bump_gateway.core.snapshot import Snapshot, Usage, stream_key
-from claude_cache_bump_gateway.core.upstream import decode_body, filter_headers
-from claude_cache_bump_gateway.server.keys import (
+from claude_gateway_extensions.config import Config
+from claude_gateway_extensions.core.clock import Clock
+from claude_gateway_extensions.core.scheduler import Scheduler
+from claude_gateway_extensions.core.snapshot import Snapshot, Usage, stream_key
+from claude_gateway_extensions.core.upstream import decode_body, filter_headers
+from claude_gateway_extensions.server.keys import (
     CLIENT_SESSION_KEY,
     CLOCK_KEY,
     CONFIG_KEY,
@@ -131,7 +131,7 @@ async def _forward(
         except aiohttp.ClientError as exc:
             logger.debug("upstream unreachable: %s", exc)
             return web.json_response(
-                {"error": {"type": "ccbg_upstream_unreachable", "message": str(exc)}},
+                {"error": {"type": "cgx_upstream_unreachable", "message": str(exc)}},
                 status=502,
             )
 
@@ -283,7 +283,7 @@ def _extract_credential(headers: Mapping[str, str]) -> tuple[str, str] | None:
 def register(app: web.Application) -> None:
     """Register the catch-all passthrough route.
 
-    Must be added after :func:`claude_cache_bump_gateway.server.control.register`
-    so ``/ccbg/*`` is matched first.
+    Must be added after :func:`claude_gateway_extensions.server.control.register`
+    so ``/cgx/*`` is matched first.
     """
     app.router.add_route("*", "/{tail:.*}", handle)

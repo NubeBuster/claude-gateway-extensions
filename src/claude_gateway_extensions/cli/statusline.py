@@ -1,4 +1,4 @@
-"""``ccbg statusline`` segment for a user's own Claude Code statusline command.
+"""``cgx statusline`` segment for a user's own Claude Code statusline command.
 
 Reads the statusline JSON from stdin, queries the control API with a short
 timeout, and prints one
@@ -15,9 +15,9 @@ from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import TextIO
 
-from claude_cache_bump_gateway.cli.client import ApiError, ControlClient, DaemonUnreachable
-from claude_cache_bump_gateway.config import Config
-from claude_cache_bump_gateway.core.status_format import format_clock
+from claude_gateway_extensions.cli.client import ApiError, ControlClient, DaemonUnreachable
+from claude_gateway_extensions.config import Config
+from claude_gateway_extensions.core.status_format import format_clock
 
 _TIMEOUT_S = 0.5
 

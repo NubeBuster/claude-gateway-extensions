@@ -1,4 +1,4 @@
-"""Tests for claude_cache_bump_gateway.server.control."""
+"""Tests for claude_gateway_extensions.server.control."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ _FUTURE_UNTIL = 4102444800
 
 
 async def test_health(harness: ServerHarness) -> None:
-    resp = await harness.client.get("/ccbg/health")
+    resp = await harness.client.get("/cgx/health")
     assert resp.status == 200
     data = await resp.json()
     assert data["ok"] is True
@@ -25,38 +25,38 @@ async def test_health(harness: ServerHarness) -> None:
 
 
 async def test_get_unknown_session_404(harness: ServerHarness) -> None:
-    resp = await harness.client.get("/ccbg/sessions/does-not-exist")
+    resp = await harness.client.get("/cgx/sessions/does-not-exist")
     assert resp.status == 404
     assert await resp.json() == {"error": "unknown_session"}
 
 
 async def test_get_invalid_session_id_400(harness: ServerHarness) -> None:
-    resp = await harness.client.get("/ccbg/sessions/bad$id")
+    resp = await harness.client.get("/cgx/sessions/bad$id")
     assert resp.status == 400
     assert (await resp.json())["error"] == "invalid_session_id"
 
 
 async def test_put_missing_enabled_400(harness: ServerHarness) -> None:
-    resp = await harness.client.put("/ccbg/sessions/sess-x", json={"interval_s": 60})
+    resp = await harness.client.put("/cgx/sessions/sess-x", json={"interval_s": 60})
     assert resp.status == 400
     assert (await resp.json())["error"] == "invalid_body"
 
 
 async def test_put_wrong_interval_type_400(harness: ServerHarness) -> None:
     resp = await harness.client.put(
-        "/ccbg/sessions/sess-x", json={"enabled": True, "interval_s": "60"}
+        "/cgx/sessions/sess-x", json={"enabled": True, "interval_s": "60"}
     )
     assert resp.status == 400
 
 
 async def test_put_invalid_session_id_400(harness: ServerHarness) -> None:
-    resp = await harness.client.put("/ccbg/sessions/bad$id", json={"enabled": True})
+    resp = await harness.client.put("/cgx/sessions/bad$id", json={"enabled": True})
     assert resp.status == 400
 
 
 async def test_put_creates_and_lists_session(harness: ServerHarness) -> None:
     resp = await harness.client.put(
-        "/ccbg/sessions/sess-y", json={"enabled": True, "interval_s": 60}
+        "/cgx/sessions/sess-y", json={"enabled": True, "interval_s": 60}
     )
     assert resp.status == 200
     data = await resp.json()
@@ -64,43 +64,43 @@ async def test_put_creates_and_lists_session(harness: ServerHarness) -> None:
     assert data["enabled"] is True
     assert data["interval_s"] == 60
 
-    list_resp = await harness.client.get("/ccbg/sessions")
+    list_resp = await harness.client.get("/cgx/sessions")
     assert list_resp.status == 200
     listed = await list_resp.json()
     assert any(s["session_id"] == "sess-y" for s in listed["sessions"])
 
-    health_resp = await harness.client.get("/ccbg/health")
+    health_resp = await harness.client.get("/cgx/health")
     assert (await health_resp.json())["sessions"] == 1
 
 
 async def test_bump_no_snapshot_404(harness: ServerHarness) -> None:
-    await harness.client.put("/ccbg/sessions/sess-empty", json={"enabled": True})
-    resp = await harness.client.post("/ccbg/sessions/sess-empty/bump")
+    await harness.client.put("/cgx/sessions/sess-empty", json={"enabled": True})
+    resp = await harness.client.post("/cgx/sessions/sess-empty/bump")
     assert resp.status == 404
     assert await resp.json() == {"error": "no_snapshot"}
 
 
 async def test_bump_invalid_session_id_400(harness: ServerHarness) -> None:
-    resp = await harness.client.post("/ccbg/sessions/bad$id/bump")
+    resp = await harness.client.post("/cgx/sessions/bad$id/bump")
     assert resp.status == 400
 
 
 async def test_delete_session_204_then_unknown(harness: ServerHarness) -> None:
-    await harness.client.put("/ccbg/sessions/sess-z", json={"enabled": True})
-    resp = await harness.client.delete("/ccbg/sessions/sess-z")
+    await harness.client.put("/cgx/sessions/sess-z", json={"enabled": True})
+    resp = await harness.client.delete("/cgx/sessions/sess-z")
     assert resp.status == 204
 
-    get_resp = await harness.client.get("/ccbg/sessions/sess-z")
+    get_resp = await harness.client.get("/cgx/sessions/sess-z")
     assert get_resp.status == 404
 
 
 async def test_delete_unknown_session_still_204(harness: ServerHarness) -> None:
-    resp = await harness.client.delete("/ccbg/sessions/never-seen")
+    resp = await harness.client.delete("/cgx/sessions/never-seen")
     assert resp.status == 204
 
 
 async def test_delete_invalid_session_id_400(harness: ServerHarness) -> None:
-    resp = await harness.client.delete("/ccbg/sessions/bad$id")
+    resp = await harness.client.delete("/cgx/sessions/bad$id")
     assert resp.status == 400
 
 
@@ -121,7 +121,7 @@ async def test_bump_rejected_outcome_returns_409(harness: ServerHarness) -> None
         return web.json_response({"error": {"type": "invalid_request_error"}}, status=400)
 
     harness.fake.script(reject_handler)
-    bump_resp = await harness.client.post("/ccbg/sessions/sess-rej/bump")
+    bump_resp = await harness.client.post("/cgx/sessions/sess-rej/bump")
     assert bump_resp.status == 409
     data = await bump_resp.json()
     assert data["outcome"] == "rejected"
@@ -163,13 +163,13 @@ async def test_bump_detects_a_cache_write_in_a_gzipped_response(harness: ServerH
         )
 
     harness.fake.script(gzipped_cache_write)
-    bump_resp = await harness.client.post("/ccbg/sessions/sess-gz/bump")
+    bump_resp = await harness.client.post("/cgx/sessions/sess-gz/bump")
     assert bump_resp.status == 409
     data = await bump_resp.json()
     assert data["outcome"] == "cache_write"
     assert data["usage"]["cache_creation_input_tokens"] == 4096
 
-    status = await (await harness.client.get("/ccbg/sessions/sess-gz")).json()
+    status = await (await harness.client.get("/cgx/sessions/sess-gz")).json()
     assert status["enabled"] is False
     assert status["stopped_reason"] == "cache_write"
 
@@ -181,31 +181,31 @@ async def test_put_rejects_non_positive_durations(
 ) -> None:
     """A zero interval would bump on every tick; reject it instead of spending on it."""
     resp = await harness.client.put(
-        "/ccbg/sessions/sess-interval", json={"enabled": True, field: value}
+        "/cgx/sessions/sess-interval", json={"enabled": True, field: value}
     )
     assert resp.status == 400
     assert (await resp.json())["error"] == "invalid_body"
 
     # And nothing was created for the rejected session.
-    assert (await harness.client.get("/ccbg/sessions/sess-interval")).status == 404
+    assert (await harness.client.get("/cgx/sessions/sess-interval")).status == 404
 
 
 async def test_put_accepts_until_and_reports_it_back(harness: ServerHarness) -> None:
     """A future deadline survives the round trip; this harness runs on the real clock."""
     resp = await harness.client.put(
-        "/ccbg/sessions/sess-until", json={"enabled": True, "until": _FUTURE_UNTIL}
+        "/cgx/sessions/sess-until", json={"enabled": True, "until": _FUTURE_UNTIL}
     )
     assert resp.status == 200
     data = await resp.json()
     assert data["until"] == _FUTURE_UNTIL
 
-    fetched = await harness.client.get("/ccbg/sessions/sess-until")
+    fetched = await harness.client.get("/cgx/sessions/sess-until")
     assert (await fetched.json())["until"] == _FUTURE_UNTIL
 
 
 async def test_put_rejects_non_numeric_until(harness: ServerHarness) -> None:
     resp = await harness.client.put(
-        "/ccbg/sessions/sess-until-bad", json={"enabled": True, "until": "soon"}
+        "/cgx/sessions/sess-until-bad", json={"enabled": True, "until": "soon"}
     )
     assert resp.status == 400
     assert (await resp.json())["error"] == "invalid_body"
@@ -214,7 +214,7 @@ async def test_put_rejects_non_numeric_until(harness: ServerHarness) -> None:
 async def test_put_accepts_a_past_until_unlike_max_duration(harness: ServerHarness) -> None:
     """Unlike ``interval_s``/``max_duration_s``, ``until`` is not clamped to the future."""
     resp = await harness.client.put(
-        "/ccbg/sessions/sess-until-past", json={"enabled": True, "until": 1.0}
+        "/cgx/sessions/sess-until-past", json={"enabled": True, "until": 1.0}
     )
     assert resp.status == 200
     data = await resp.json()
@@ -224,7 +224,7 @@ async def test_put_accepts_a_past_until_unlike_max_duration(harness: ServerHarne
 async def test_status_has_no_cache_expires_at_without_a_snapshot(
     harness: ServerHarness,
 ) -> None:
-    resp = await harness.client.put("/ccbg/sessions/sess-empty2", json={"enabled": True})
+    resp = await harness.client.put("/cgx/sessions/sess-empty2", json={"enabled": True})
     data = await resp.json()
     assert data["cache_expires_at"] is None
     assert data["formatted"] == {
@@ -250,7 +250,7 @@ async def test_status_cache_expires_at_present_after_a_real_request(
     )
     assert resp.status == 200
 
-    status_resp = await harness.client.get("/ccbg/sessions/sess-ttl")
+    status_resp = await harness.client.get("/cgx/sessions/sess-ttl")
     data = await status_resp.json()
     assert data["enabled"] is False
     assert isinstance(data["cache_expires_at"], int | float)
@@ -262,7 +262,7 @@ async def test_status_cache_expires_at_present_after_a_real_request(
 
 async def test_put_disabling_clears_until(harness: ServerHarness) -> None:
     """Disabling drops the deadline; re-enabling without one does not resurrect it."""
-    session = "/ccbg/sessions/sess-until-cleared"
+    session = "/cgx/sessions/sess-until-cleared"
     await harness.client.put(session, json={"enabled": True, "until": 1700006000})
 
     disabled = await harness.client.put(session, json={"enabled": False})

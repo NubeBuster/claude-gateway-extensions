@@ -1,4 +1,4 @@
-"""Tests for claude_cache_bump_gateway.core.store."""
+"""Tests for claude_gateway_extensions.core.store."""
 
 import json
 import stat
@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from claude_cache_bump_gateway.core.snapshot import SessionState, Snapshot, Usage
-from claude_cache_bump_gateway.core.store import FileStore, MemoryStore
+from claude_gateway_extensions.core.snapshot import SessionState, Snapshot, Usage
+from claude_gateway_extensions.core.store import FileStore, MemoryStore
 
 
 def _snapshot(session_id: str, stream: str, captured_at: float = 1000.0) -> Snapshot:

@@ -1,7 +1,7 @@
 """Building and classifying a cache-warming replay of a captured request.
 
 :func:`build_bump_body` and :func:`build_bump_headers` turn a
-:class:`~claude_cache_bump_gateway.core.snapshot.Snapshot` into the exact
+:class:`~claude_gateway_extensions.core.snapshot.Snapshot` into the exact
 request to replay. :func:`classify` turns the response into a
 :class:`BumpResult` per the fail-closed classification decision in
 ``docs/DESIGN.md`` "Decisions". :func:`bump_once` ties transport, building
@@ -18,8 +18,8 @@ from typing import Literal
 
 from multidict import CIMultiDict
 
-from claude_cache_bump_gateway.core.snapshot import Snapshot, Usage
-from claude_cache_bump_gateway.core.upstream import Upstream, filter_headers
+from claude_gateway_extensions.core.snapshot import Snapshot, Usage
+from claude_gateway_extensions.core.upstream import Upstream, filter_headers
 
 BumpOutcome = Literal["ok", "cache_write", "unauthorized", "rejected", "transient"]
 

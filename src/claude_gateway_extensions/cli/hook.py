@@ -8,7 +8,7 @@ matching prompt prints a single ``{"decision": "block", "reason": ...}``
 JSON line to stdout so Claude Code shows the reason without invoking the
 model. The ``/cache`` grammar itself (durations, clock times, dates, the
 fixed ``status``/``bump``/``off`` keywords) is parsed by
-:func:`~claude_cache_bump_gateway.cli.when.parse_when`; this module only
+:func:`~claude_gateway_extensions.cli.when.parse_when`; this module only
 dispatches the parsed result to the control API and formats the reply.
 """
 
@@ -19,8 +19,8 @@ from collections.abc import Mapping
 from datetime import datetime
 from typing import Any, TextIO
 
-from claude_cache_bump_gateway.cli.client import ApiError, ControlClient, DaemonUnreachable
-from claude_cache_bump_gateway.cli.when import (
+from claude_gateway_extensions.cli.client import ApiError, ControlClient, DaemonUnreachable
+from claude_gateway_extensions.cli.when import (
     At,
     Bump,
     Off,
@@ -29,8 +29,8 @@ from claude_cache_bump_gateway.cli.when import (
     local_now,
     parse_when,
 )
-from claude_cache_bump_gateway.config import Config
-from claude_cache_bump_gateway.core.status_format import format_deadline
+from claude_gateway_extensions.config import Config
+from claude_gateway_extensions.core.status_format import format_deadline
 
 _COMMAND_PREFIX = "/cache"
 
@@ -181,7 +181,7 @@ def run_user_prompt_submit(stdin: TextIO, stdout: TextIO, environ: Mapping[str, 
         try:
             reason = _handle_command(client, session_id, argument, now_dt)
         except DaemonUnreachable:
-            reason = f"cache: daemon not reachable at {config.url} (is ccbg serve running?)"
+            reason = f"cache: daemon not reachable at {config.url} (is cgx serve running?)"
         except ApiError as exc:
             reason = f"cache: daemon error ({exc.status})"
         except Exception as exc:

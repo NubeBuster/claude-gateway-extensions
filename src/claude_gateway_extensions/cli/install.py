@@ -6,11 +6,11 @@ pure fall-through" and "Environment variables only, split by process" (why
 no config file) decisions in ``docs/DESIGN.md`` "Decisions" for the
 rationale; the only ``settings.json`` keys ever written are ``env`` (one
 entry, ``ANTHROPIC_BASE_URL``) and ``hooks.UserPromptSubmit`` (one entry).
-``statusLine`` is deliberately not touched — ``ccbg statusline`` is something
+``statusLine`` is deliberately not touched — ``cgx statusline`` is something
 the user appends to their own command, per the README.
 
 The daemon (systemd user service) is a separate, per-machine concern with
-its own module, :mod:`claude_cache_bump_gateway.cli.service`: ``--scope``
+its own module, :mod:`claude_gateway_extensions.cli.service`: ``--scope``
 here only ever selects which ``settings.json`` is edited, never anything
 about the daemon.
 """
@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import urlsplit
 
-from claude_cache_bump_gateway.cli.confirm import PlannedChange
+from claude_gateway_extensions.cli.confirm import PlannedChange
 
 #: ``managed`` is deliberately absent: it is root-owned and machine-wide,
 #: which would apply the same ``ANTHROPIC_BASE_URL``/hook to every user on
@@ -36,13 +36,13 @@ Scope = Literal["user", "project", "local"]
 
 #: Command registered for the ``UserPromptSubmit`` hook; also the marker used
 #: to find and remove exactly the entry this installer added.
-HOOK_COMMAND = "ccbg hook user-prompt-submit"
+HOOK_COMMAND = "cgx hook user-prompt-submit"
 _HOOK_TIMEOUT_S = 5
 _SKILL_NAME = "cache"
 
 #: The daemon's default port and the resulting default URL (matches
-#: ``config.py``'s ``CCBG_HOST``/``CCBG_PORT`` defaults) — the port below
-#: which ``ccbg configure`` does not bother also writing ``env.CCBG_URL``.
+#: ``config.py``'s ``CGX_HOST``/``CGX_PORT`` defaults) — the port below
+#: which ``cgx configure`` does not bother also writing ``env.CGX_URL``.
 DEFAULT_PORT = 8787
 DEFAULT_URL = f"http://127.0.0.1:{DEFAULT_PORT}"
 
@@ -159,22 +159,22 @@ def remove_base_url(settings: dict[str, Any], url: str) -> None:
             del settings["env"]
 
 
-def merge_ccbg_url(settings: dict[str, Any], url: str) -> None:
-    """Set ``env.CCBG_URL`` to ``url`` in-place.
+def merge_cgx_url(settings: dict[str, Any], url: str) -> None:
+    """Set ``env.CGX_URL`` to ``url`` in-place.
 
     Only called for a non-default ``url`` (see :func:`install`): the common
     default-port case relies on the hook/statusline/CLI's ``ANTHROPIC_BASE_URL``
     fallback (``config.py``) instead of a redundant settings entry.
     """
     env = settings.setdefault("env", {})
-    env["CCBG_URL"] = url
+    env["CGX_URL"] = url
 
 
-def remove_ccbg_url(settings: dict[str, Any], url: str) -> None:
-    """Remove ``env.CCBG_URL`` if it equals ``url`` in-place (mirrors ``remove_base_url``)."""
+def remove_cgx_url(settings: dict[str, Any], url: str) -> None:
+    """Remove ``env.CGX_URL`` if it equals ``url`` in-place (mirrors ``remove_base_url``)."""
     env = settings.get("env")
-    if isinstance(env, dict) and env.get("CCBG_URL") == url:
-        del env["CCBG_URL"]
+    if isinstance(env, dict) and env.get("CGX_URL") == url:
+        del env["CGX_URL"]
         if not env:
             del settings["env"]
 
@@ -184,21 +184,21 @@ def resolve_install_port(
     environ: Mapping[str, str],
     installed_port: int | None,
 ) -> int:
-    """Resolve the daemon port ``ccbg configure`` writes into ``ANTHROPIC_BASE_URL``.
+    """Resolve the daemon port ``cgx configure`` writes into ``ANTHROPIC_BASE_URL``.
 
-    Precedence: the ``--port`` flag, then ``CCBG_PORT`` or (failing that)
-    the port embedded in ``CCBG_URL`` if either is set in ``environ``, then
+    Precedence: the ``--port`` flag, then ``CGX_PORT`` or (failing that)
+    the port embedded in ``CGX_URL`` if either is set in ``environ``, then
     ``installed_port`` (the port baked into the systemd unit, if
-    ``ccbg service install`` already ran — see
-    :func:`~claude_cache_bump_gateway.cli.service.installed_port`), then
+    ``cgx service install`` already ran — see
+    :func:`~claude_gateway_extensions.cli.service.installed_port`), then
     :data:`DEFAULT_PORT`.
     """
     if port is not None:
         return port
-    env_port = environ.get("CCBG_PORT")
+    env_port = environ.get("CGX_PORT")
     if env_port:
         return int(env_port)
-    env_url = environ.get("CCBG_URL")
+    env_url = environ.get("CGX_URL")
     if env_url:
         parsed_port = urlsplit(env_url).port
         if parsed_port is not None:
@@ -213,7 +213,7 @@ def resolve_install_url(
     environ: Mapping[str, str],
     installed_port: int | None,
 ) -> str:
-    """Return the loopback URL ``ccbg configure`` writes; see :func:`resolve_install_port`."""
+    """Return the loopback URL ``cgx configure`` writes; see :func:`resolve_install_port`."""
     return f"http://127.0.0.1:{resolve_install_port(port, environ, installed_port)}"
 
 
@@ -260,7 +260,7 @@ def skill_source_dir() -> Any:
 
     The canonical source is the repo-root ``claude/skills/cache/``; the
     wheel's ``force-include`` mapping (see ``pyproject.toml``) copies it to
-    ``claude_cache_bump_gateway/data/skills/cache/`` at build time, so an
+    ``claude_gateway_extensions/data/skills/cache/`` at build time, so an
     installed wheel resolves it via ``importlib.resources``. An editable
     install (``pip install -e .``) never runs that mapping, so this falls
     back to the repo-root path computed from this file's location.
@@ -268,7 +268,7 @@ def skill_source_dir() -> Any:
     Raises :class:`InstallError` if neither location exists.
     """
     packaged = (
-        importlib.resources.files("claude_cache_bump_gateway") / "data" / "skills" / _SKILL_NAME
+        importlib.resources.files("claude_gateway_extensions") / "data" / "skills" / _SKILL_NAME
     )
     if packaged.is_dir():
         return packaged
@@ -326,7 +326,7 @@ def install(
     settings = load_settings(path)
     merge_base_url(settings, url, force)
     if url != DEFAULT_URL:
-        merge_ccbg_url(settings, url)
+        merge_cgx_url(settings, url)
     merge_hook(settings)
     if dry_run:
         return InstallResult(path, skill_dir, settings, True)
@@ -354,7 +354,7 @@ def uninstall(
     skill_dir = skills_dir(scope, environ, cwd)
     settings = load_settings(path)
     remove_base_url(settings, url)
-    remove_ccbg_url(settings, url)
+    remove_cgx_url(settings, url)
     remove_hook(settings)
     if dry_run:
         return InstallResult(path, skill_dir, settings, True)
@@ -384,7 +384,7 @@ def plan_install(
     Nothing is written; raises :class:`InstallError` under the same
     conditions :func:`install` would (bad JSON, a conflicting
     ``ANTHROPIC_BASE_URL`` without ``force``, a missing skill source). The
-    caller (``ccbg configure``) shows each :class:`PlannedChange` as a diff
+    caller (``cgx configure``) shows each :class:`PlannedChange` as a diff
     and confirms it before calling its ``apply``.
     """
     preview = install(scope=scope, url=url, force=force, dry_run=True, environ=environ, cwd=cwd)

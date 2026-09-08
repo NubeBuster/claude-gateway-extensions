@@ -1,10 +1,10 @@
-"""Tests for claude_cache_bump_gateway.core.snapshot."""
+"""Tests for claude_gateway_extensions.core.snapshot."""
 
 import json
 
 import pytest
 
-from claude_cache_bump_gateway.core.snapshot import (
+from claude_gateway_extensions.core.snapshot import (
     SnapshotError,
     Usage,
     stream_key,

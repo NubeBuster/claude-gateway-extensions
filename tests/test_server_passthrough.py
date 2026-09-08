@@ -1,4 +1,4 @@
-"""Tests for claude_cache_bump_gateway.server.passthrough via a real fake upstream."""
+"""Tests for claude_gateway_extensions.server.passthrough via a real fake upstream."""
 
 from __future__ import annotations
 
@@ -11,8 +11,8 @@ import logging
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-from claude_cache_bump_gateway.server.app import make_app
-from claude_cache_bump_gateway.server.keys import STORE_KEY
+from claude_gateway_extensions.server.app import make_app
+from claude_gateway_extensions.server.keys import STORE_KEY
 from conftest import ServerHarness, make_config
 
 
@@ -231,7 +231,7 @@ async def test_bump_now_hits_fake_with_max_tokens_zero(harness: ServerHarness) -
     )
     assert resp.status == 200
 
-    put_resp = await harness.client.put("/ccbg/sessions/sess-bump", json={"enabled": True})
+    put_resp = await harness.client.put("/cgx/sessions/sess-bump", json={"enabled": True})
     assert put_resp.status == 200
     assert (await put_resp.json())["enabled"] is True
 
@@ -240,7 +240,7 @@ async def test_bump_now_hits_fake_with_max_tokens_zero(harness: ServerHarness) -
 
     harness.fake.script(bump_handler)
 
-    bump_resp = await harness.client.post("/ccbg/sessions/sess-bump/bump")
+    bump_resp = await harness.client.post("/cgx/sessions/sess-bump/bump")
     assert bump_resp.status == 200
     assert (await bump_resp.json())["outcome"] == "ok"
 
@@ -290,7 +290,7 @@ async def test_client_disconnect_mid_stream_logs_one_line_no_traceback(
             chunk_seen.set()
             await asyncio.Event().wait()
 
-    caplog.set_level(logging.INFO, logger="claude_cache_bump_gateway.server.passthrough")
+    caplog.set_level(logging.INFO, logger="claude_gateway_extensions.server.passthrough")
     task = asyncio.ensure_future(do_request())
     await asyncio.wait_for(chunk_seen.wait(), timeout=2)
     task.cancel()
@@ -300,7 +300,7 @@ async def test_client_disconnect_mid_stream_logs_one_line_no_traceback(
     await asyncio.sleep(0.2)
 
     records = [
-        r for r in caplog.records if r.name == "claude_cache_bump_gateway.server.passthrough"
+        r for r in caplog.records if r.name == "claude_gateway_extensions.server.passthrough"
     ]
     assert len(records) == 1
     assert records[0].levelno == logging.INFO
@@ -331,7 +331,7 @@ async def test_upstream_unreachable_returns_502(tmp_path) -> None:
         resp = await client.get("/v1/models")
         assert resp.status == 502
         data = await resp.json()
-        assert data["error"]["type"] == "ccbg_upstream_unreachable"
+        assert data["error"]["type"] == "cgx_upstream_unreachable"
     finally:
         await client.close()
 

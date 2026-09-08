@@ -1,6 +1,6 @@
 # Design decisions
 
-This file records the decisions behind claude-cache-bump-gateway and why they
+This file records the decisions behind claude-gateway-extensions and why they
 were made. It is not a description of the code; the code, `README.md` and
 `docs/API.md` own that.
 
@@ -40,7 +40,7 @@ deliberately absent from this release, not ruled out for the project.
   The deadline is sent to the daemon as `until`, an absolute epoch
   timestamp that replaces the max-duration stop for that session; the
   daemon-side max duration remains the default only when no deadline is
-  given, e.g. plain `ccbg on`.
+  given, e.g. plain `cgx on`.
 - **Waiting for the first snapshot is a bounded wait, not a stop.** A session
   enabled before its first request (`/cache 2h` as the opening prompt) has
   nothing to replay yet, so it waits for one instead of stopping and losing
@@ -48,14 +48,14 @@ deliberately absent from this release, not ruled out for the project.
   max duration measured from the moment it was enabled, whichever comes
   first: a session that never sees traffic must not stay enabled forever.
 - **Environment variables only, split by process.** Daemon settings are read
-  by `ccbg serve`; session settings by the hook and CLI, which Claude Code
+  by `cgx serve`; session settings by the hook and CLI, which Claude Code
   spawns with the scoped `settings.json` `env` block already applied, so
   user/project/local scoping comes for free. `settings.json` rejects unknown
   top-level keys and a parallel file ladder would duplicate Claude Code's.
   `managed` is deliberately not offered as a scope: it is root-owned and
   machine-wide, while the daemon it would point at is per user.
 - **Every file a user owns is diffed and confirmed before it is written.**
-  `ccbg configure`, `unconfigure` and `ccbg service install`/`uninstall`
+  `cgx configure`, `unconfigure` and `cgx service install`/`uninstall`
   compute their changes first and show each one as a colored unified diff,
   applying it only on a `y`. A bad `settings.json` edit breaks live sessions
   and a bad unit edit breaks the running daemon, so consent is per file,
@@ -63,13 +63,13 @@ deliberately absent from this release, not ruled out for the project.
   rather than choosing for the user.
 - **The port is written down, never assumed.** `serve`, `service install`
   and `configure` each take `--port`, and `configure` resolves exactly one
-  port (`--port`, then `CCBG_PORT`/`CCBG_URL`, then the installed unit, then
+  port (`--port`, then `CGX_PORT`/`CGX_URL`, then the installed unit, then
   the default) into the `ANTHROPIC_BASE_URL` it writes, so the settings
   file, the systemd unit and the running daemon cannot drift apart
-  unnoticed; `ccbg doctor` compares the three and names any that disagree.
-- **Control API on `/ccbg/`, loopback only, unauthenticated.** The prefix
+  unnoticed; `cgx doctor` compares the three and names any that disagree.
+- **Control API on `/cgx/`, loopback only, unauthenticated.** The prefix
   cannot collide with an Anthropic path. It is the integration point for
-  everything external. A non-local `CCBG_HOST` is the user's explicit choice
+  everything external. A non-local `CGX_HOST` is the user's explicit choice
   and logs a warning rather than being refused.
 - **No first-party base URL flag by default.**
   `_CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL` is undocumented and its only known
@@ -84,7 +84,12 @@ deliberately absent from this release, not ruled out for the project.
   or CLI framework.
 - **Plaintext snapshots at 0600, persistence opt-out.** Replaying the exact
   request needs the conversation and the credential. Files are 0600 in a 0700
-  directory; `CCBG_PERSIST=false` keeps everything in memory.
+  directory; `CGX_PERSIST=false` keeps everything in memory.
+- **Renamed from claude-cache-bump-gateway to claude-gateway-extensions.**
+  Cache bumping is the first feature, not the project's identity; the name
+  had to stop describing only 0.1's scope before more gateway features
+  landed. CLI `ccbg` became `cgx`, env prefix `CCBG_` became `CGX_`, and
+  the control API prefix `/ccbg/` became `/cgx/`.
 
 ## Extension points
 

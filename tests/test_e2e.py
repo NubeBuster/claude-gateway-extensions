@@ -1,7 +1,7 @@
 """End-to-end test: Claude Code -> proxy -> upstream, capture, bump, restart.
 
 Everything here runs against real sockets and the real application built by
-:func:`claude_cache_bump_gateway.server.app.make_app`: a real aiohttp client
+:func:`claude_gateway_extensions.server.app.make_app`: a real aiohttp client
 plays Claude Code, a real in-process aiohttp server plays the Anthropic API,
 and the daemon is driven through its own control API. Nothing is mocked and
 no test here reaches the network beyond loopback.
@@ -25,10 +25,10 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestServer
 
-from claude_cache_bump_gateway.cli import main
-from claude_cache_bump_gateway.cli.hook import run_user_prompt_submit
-from claude_cache_bump_gateway.server.app import make_app
-from claude_cache_bump_gateway.server.keys import STORE_KEY
+from claude_gateway_extensions.cli import main
+from claude_gateway_extensions.cli.hook import run_user_prompt_submit
+from claude_gateway_extensions.server.app import make_app
+from claude_gateway_extensions.server.keys import STORE_KEY
 from conftest import make_config
 
 SESSION_ID = "e2e-session-1"
@@ -212,7 +212,7 @@ async def test_full_lifecycle(state_dir: Path, tmp_path: Path) -> None:
         # --- 2. turn bumping on through the control API ---------------------
         async with aiohttp.ClientSession() as client:
             async with client.put(
-                f"{base}/ccbg/sessions/{SESSION_ID}", json={"enabled": True, "interval_s": 1}
+                f"{base}/cgx/sessions/{SESSION_ID}", json={"enabled": True, "interval_s": 1}
             ) as response:
                 assert response.status == 200
                 enabled_status = await response.json()
@@ -234,7 +234,7 @@ async def test_full_lifecycle(state_dir: Path, tmp_path: Path) -> None:
             assert replay.headers["authorization"] == CREDENTIAL
             assert replay.headers["anthropic-beta"] == BETA_HEADER
 
-            async with client.get(f"{base}/ccbg/sessions/{SESSION_ID}") as response:
+            async with client.get(f"{base}/cgx/sessions/{SESSION_ID}") as response:
                 after_bump = await response.json()
             assert after_bump["bump_count"] == 1
             assert after_bump["last_result"]["outcome"] == "ok"
@@ -244,7 +244,7 @@ async def test_full_lifecycle(state_dir: Path, tmp_path: Path) -> None:
             fake.bump_mode = "cache_write"
 
             async def stopped() -> bool:
-                async with client.get(f"{base}/ccbg/sessions/{SESSION_ID}") as resp:
+                async with client.get(f"{base}/cgx/sessions/{SESSION_ID}") as resp:
                     return bool((await resp.json())["stopped_reason"])
 
             deadline_ok = False
@@ -255,7 +255,7 @@ async def test_full_lifecycle(state_dir: Path, tmp_path: Path) -> None:
                 await asyncio.sleep(0.05)
             assert deadline_ok, "session kept bumping after paying a cache write"
 
-            async with client.get(f"{base}/ccbg/sessions/{SESSION_ID}") as response:
+            async with client.get(f"{base}/cgx/sessions/{SESSION_ID}") as response:
                 final = await response.json()
             assert final["enabled"] is False
             assert final["stopped_reason"] == "cache_write"
@@ -266,7 +266,7 @@ async def test_full_lifecycle(state_dir: Path, tmp_path: Path) -> None:
             payload = json.dumps({"prompt": "/cache status", "session_id": SESSION_ID})
             code = await asyncio.get_running_loop().run_in_executor(
                 None,
-                lambda: run_user_prompt_submit(io.StringIO(payload), hook_out, {"CCBG_URL": base}),
+                lambda: run_user_prompt_submit(io.StringIO(payload), hook_out, {"CGX_URL": base}),
             )
             assert code == 0
             decision = json.loads(hook_out.getvalue())
@@ -286,7 +286,7 @@ async def test_full_lifecycle(state_dir: Path, tmp_path: Path) -> None:
         restarted_base = str(restarted_server.make_url("")).rstrip("/")
         async with (
             aiohttp.ClientSession() as client,
-            client.get(f"{restarted_base}/ccbg/sessions/{SESSION_ID}") as response,
+            client.get(f"{restarted_base}/cgx/sessions/{SESSION_ID}") as response,
         ):
             assert response.status == 200
             reloaded = await response.json()
@@ -300,10 +300,10 @@ async def test_full_lifecycle(state_dir: Path, tmp_path: Path) -> None:
 
 
 def test_configure_dry_run_under_a_temp_home(tmp_path: Path) -> None:
-    """``ccbg configure --dry-run`` must print the diffs it would write, and write nothing."""
+    """``cgx configure --dry-run`` must print the diffs it would write, and write nothing."""
     home = tmp_path / "home"
     home.mkdir()
-    environ = {"HOME": str(home), "CCBG_URL": "http://127.0.0.1:8787"}
+    environ = {"HOME": str(home), "CGX_URL": "http://127.0.0.1:8787"}
     stdout = io.StringIO()
 
     code = main(
@@ -318,7 +318,7 @@ def test_configure_dry_run_under_a_temp_home(tmp_path: Path) -> None:
     out = stdout.getvalue()
     assert "will create" in out
     assert '"ANTHROPIC_BASE_URL": "http://127.0.0.1:8787"' in out
-    assert "ccbg hook user-prompt-submit" in out
+    assert "cgx hook user-prompt-submit" in out
     # HOME really was redirected, and a dry run wrote nothing under it.
     assert not (home / ".claude" / "settings.json").exists()
     assert not (home / ".claude" / "skills").exists()

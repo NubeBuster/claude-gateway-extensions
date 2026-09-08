@@ -1,10 +1,10 @@
-"""Control API routes served locally under ``/ccbg/``.
+"""Control API routes served locally under ``/cgx/``.
 
 Full request/response contract: ``docs/API.md``. Design record: the
-"Control API on ``/ccbg/``..." decision in ``docs/DESIGN.md`` "Decisions".
+"Control API on ``/cgx/``..." decision in ``docs/DESIGN.md`` "Decisions".
 These routes must be registered before
-:func:`claude_cache_bump_gateway.server.passthrough.register`'s catch-all so
-``/ccbg/*`` is served locally rather than forwarded.
+:func:`claude_gateway_extensions.server.passthrough.register`'s catch-all so
+``/cgx/*`` is served locally rather than forwarded.
 """
 
 from __future__ import annotations
@@ -15,11 +15,11 @@ from typing import Any
 
 from aiohttp import web
 
-from claude_cache_bump_gateway import __version__
-from claude_cache_bump_gateway.config import Config
-from claude_cache_bump_gateway.core.scheduler import NoSnapshot, Scheduler
-from claude_cache_bump_gateway.core.store import SESSION_ID_RE, SnapshotStore
-from claude_cache_bump_gateway.server.keys import CONFIG_KEY, SCHEDULER_KEY, STORE_KEY
+from claude_gateway_extensions import __version__
+from claude_gateway_extensions.config import Config
+from claude_gateway_extensions.core.scheduler import NoSnapshot, Scheduler
+from claude_gateway_extensions.core.store import SESSION_ID_RE, SnapshotStore
+from claude_gateway_extensions.server.keys import CONFIG_KEY, SCHEDULER_KEY, STORE_KEY
 
 
 def _invalid_session_id() -> web.Response:
@@ -31,7 +31,7 @@ def _unknown_session() -> web.Response:
 
 
 async def health(request: web.Request) -> web.Response:
-    """``GET /ccbg/health``: liveness, version, upstream target and session count."""
+    """``GET /cgx/health``: liveness, version, upstream target and session count."""
     store: SnapshotStore = request.app[STORE_KEY]
     config: Config = request.app[CONFIG_KEY]
     return web.json_response(
@@ -45,13 +45,13 @@ async def health(request: web.Request) -> web.Response:
 
 
 async def list_sessions(request: web.Request) -> web.Response:
-    """``GET /ccbg/sessions``: status dicts for every known session."""
+    """``GET /cgx/sessions``: status dicts for every known session."""
     scheduler: Scheduler = request.app[SCHEDULER_KEY]
     return web.json_response({"sessions": scheduler.status_all()})
 
 
 async def get_session(request: web.Request) -> web.Response:
-    """``GET /ccbg/sessions/{id}``: one session's status dict, or 404."""
+    """``GET /cgx/sessions/{id}``: one session's status dict, or 404."""
     session_id = request.match_info["id"]
     if not SESSION_ID_RE.match(session_id):
         return _invalid_session_id()
@@ -64,7 +64,7 @@ async def get_session(request: web.Request) -> web.Response:
 
 
 async def put_session(request: web.Request) -> web.Response:
-    """``PUT /ccbg/sessions/{id}``: set enabled/interval/max_duration/until, return status."""
+    """``PUT /cgx/sessions/{id}``: set enabled/interval/max_duration/until, return status."""
     session_id = request.match_info["id"]
     if not SESSION_ID_RE.match(session_id):
         return _invalid_session_id()
@@ -89,7 +89,7 @@ async def put_session(request: web.Request) -> web.Response:
 
 
 async def bump_session(request: web.Request) -> web.Response:
-    """``POST /ccbg/sessions/{id}/bump``: replay the session's snapshot once now."""
+    """``POST /cgx/sessions/{id}/bump``: replay the session's snapshot once now."""
     session_id = request.match_info["id"]
     if not SESSION_ID_RE.match(session_id):
         return _invalid_session_id()
@@ -104,7 +104,7 @@ async def bump_session(request: web.Request) -> web.Response:
 
 
 async def delete_session(request: web.Request) -> web.Response:
-    """``DELETE /ccbg/sessions/{id}``: forget the session's state and snapshots."""
+    """``DELETE /cgx/sessions/{id}``: forget the session's state and snapshots."""
     session_id = request.match_info["id"]
     if not SESSION_ID_RE.match(session_id):
         return _invalid_session_id()
@@ -153,10 +153,10 @@ def _is_optional_number(value: object) -> bool:
 
 
 def register(app: web.Application) -> None:
-    """Register every ``/ccbg/*`` route on ``app``."""
-    app.router.add_get("/ccbg/health", health)
-    app.router.add_get("/ccbg/sessions", list_sessions)
-    app.router.add_get("/ccbg/sessions/{id}", get_session)
-    app.router.add_put("/ccbg/sessions/{id}", put_session)
-    app.router.add_post("/ccbg/sessions/{id}/bump", bump_session)
-    app.router.add_delete("/ccbg/sessions/{id}", delete_session)
+    """Register every ``/cgx/*`` route on ``app``."""
+    app.router.add_get("/cgx/health", health)
+    app.router.add_get("/cgx/sessions", list_sessions)
+    app.router.add_get("/cgx/sessions/{id}", get_session)
+    app.router.add_put("/cgx/sessions/{id}", put_session)
+    app.router.add_post("/cgx/sessions/{id}/bump", bump_session)
+    app.router.add_delete("/cgx/sessions/{id}", delete_session)

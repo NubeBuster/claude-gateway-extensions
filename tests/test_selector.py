@@ -1,7 +1,7 @@
-"""Tests for claude_cache_bump_gateway.core.selector."""
+"""Tests for claude_gateway_extensions.core.selector."""
 
-from claude_cache_bump_gateway.core.selector import LargestPrefixSelector
-from claude_cache_bump_gateway.core.snapshot import Snapshot, Usage
+from claude_gateway_extensions.core.selector import LargestPrefixSelector
+from claude_gateway_extensions.core.snapshot import Snapshot, Usage
 
 
 def _snap(stream: str, total_input: int, captured_at: float) -> Snapshot:

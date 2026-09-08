@@ -16,8 +16,8 @@ import pytest_asyncio
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-from claude_cache_bump_gateway.config import Config
-from claude_cache_bump_gateway.server.app import make_app
+from claude_gateway_extensions.config import Config
+from claude_gateway_extensions.server.app import make_app
 
 Handler = Callable[[web.Request], Awaitable[web.StreamResponse]]
 

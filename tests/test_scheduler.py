@@ -1,4 +1,4 @@
-"""Tests for claude_cache_bump_gateway.core.scheduler."""
+"""Tests for claude_gateway_extensions.core.scheduler."""
 
 import asyncio
 import json
@@ -7,13 +7,13 @@ from pathlib import Path
 
 import pytest
 
-from claude_cache_bump_gateway.config import Config
-from claude_cache_bump_gateway.core.clock import FakeClock
-from claude_cache_bump_gateway.core.scheduler import NoSnapshot, Scheduler
-from claude_cache_bump_gateway.core.selector import LargestPrefixSelector
-from claude_cache_bump_gateway.core.snapshot import SessionState, Snapshot, Usage
-from claude_cache_bump_gateway.core.store import MemoryStore
-from claude_cache_bump_gateway.core.upstream import UpstreamResponse
+from claude_gateway_extensions.config import Config
+from claude_gateway_extensions.core.clock import FakeClock
+from claude_gateway_extensions.core.scheduler import NoSnapshot, Scheduler
+from claude_gateway_extensions.core.selector import LargestPrefixSelector
+from claude_gateway_extensions.core.snapshot import SessionState, Snapshot, Usage
+from claude_gateway_extensions.core.store import MemoryStore
+from claude_gateway_extensions.core.upstream import UpstreamResponse
 
 
 class ScriptedUpstream:

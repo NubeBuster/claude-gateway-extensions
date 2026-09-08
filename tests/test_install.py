@@ -1,4 +1,4 @@
-"""Tests for claude_cache_bump_gateway.cli.install.
+"""Tests for claude_gateway_extensions.cli.install.
 
 Every test works against a temp ``HOME``/cwd (never the real one) and
 asserts the resolved settings path actually falls inside the temp directory
@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from claude_cache_bump_gateway.cli import install
+from claude_gateway_extensions.cli import install
 
 URL = "http://127.0.0.1:8787"
 
@@ -271,15 +271,15 @@ def test_skill_source_dir_falls_back_to_repo_checkout(
 
 
 def test_resolve_install_port_prefers_explicit_flag() -> None:
-    assert install.resolve_install_port(9999, {"CCBG_PORT": "1111"}, 2222) == 9999
+    assert install.resolve_install_port(9999, {"CGX_PORT": "1111"}, 2222) == 9999
 
 
-def test_resolve_install_port_falls_back_to_ccbg_port_env() -> None:
-    assert install.resolve_install_port(None, {"CCBG_PORT": "1111"}, 2222) == 1111
+def test_resolve_install_port_falls_back_to_cgx_port_env() -> None:
+    assert install.resolve_install_port(None, {"CGX_PORT": "1111"}, 2222) == 1111
 
 
-def test_resolve_install_port_falls_back_to_ccbg_url_env() -> None:
-    assert install.resolve_install_port(None, {"CCBG_URL": "http://127.0.0.1:1111"}, 2222) == 1111
+def test_resolve_install_port_falls_back_to_cgx_url_env() -> None:
+    assert install.resolve_install_port(None, {"CGX_URL": "http://127.0.0.1:1111"}, 2222) == 1111
 
 
 def test_resolve_install_port_falls_back_to_installed_unit_port() -> None:
@@ -294,7 +294,7 @@ def test_resolve_install_url_builds_loopback_url() -> None:
     assert install.resolve_install_url(9999, {}, None) == "http://127.0.0.1:9999"
 
 
-def test_install_writes_ccbg_url_for_non_default_port(tmp_path: Path) -> None:
+def test_install_writes_cgx_url_for_non_default_port(tmp_path: Path) -> None:
     environ = {"HOME": str(tmp_path)}
     url = "http://127.0.0.1:9999"
     install.install(
@@ -302,31 +302,31 @@ def test_install_writes_ccbg_url_for_non_default_port(tmp_path: Path) -> None:
     )
     path = install.settings_path("user", environ, tmp_path)
     data = json.loads(path.read_text())
-    assert data["env"]["CCBG_URL"] == url
+    assert data["env"]["CGX_URL"] == url
 
 
-def test_install_does_not_write_ccbg_url_for_default_port(tmp_path: Path) -> None:
+def test_install_does_not_write_cgx_url_for_default_port(tmp_path: Path) -> None:
     environ = {"HOME": str(tmp_path)}
     install.install(
         scope="user", url=URL, force=False, dry_run=False, environ=environ, cwd=tmp_path
     )
     path = install.settings_path("user", environ, tmp_path)
     data = json.loads(path.read_text())
-    assert "CCBG_URL" not in data.get("env", {})
+    assert "CGX_URL" not in data.get("env", {})
 
 
-def test_uninstall_removes_ccbg_url(tmp_path: Path) -> None:
+def test_uninstall_removes_cgx_url(tmp_path: Path) -> None:
     environ = {"HOME": str(tmp_path)}
     url = "http://127.0.0.1:9999"
     install.install(
         scope="user", url=url, force=False, dry_run=False, environ=environ, cwd=tmp_path
     )
     path = install.settings_path("user", environ, tmp_path)
-    assert json.loads(path.read_text())["env"]["CCBG_URL"] == url
+    assert json.loads(path.read_text())["env"]["CGX_URL"] == url
 
     install.uninstall(scope="user", url=url, environ=environ, cwd=tmp_path)
     data = json.loads(path.read_text())
-    assert "CCBG_URL" not in data.get("env", {})
+    assert "CGX_URL" not in data.get("env", {})
 
 
 def test_skill_source_dir_raises_when_neither_location_exists(
@@ -336,7 +336,7 @@ def test_skill_source_dir_raises_when_neither_location_exists(
         install.importlib.resources, "files", lambda _pkg: Path("/nonexistent-package-dir")
     )
     fake_module_file = (
-        tmp_path / "fake-repo" / "src" / "claude_cache_bump_gateway" / "cli" / "install.py"
+        tmp_path / "fake-repo" / "src" / "claude_gateway_extensions" / "cli" / "install.py"
     )
     fake_module_file.parent.mkdir(parents=True)
     monkeypatch.setattr(install, "__file__", str(fake_module_file))

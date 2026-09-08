@@ -1,4 +1,4 @@
-"""``ccbg doctor``: a handful of environment checks with one line each.
+"""``cgx doctor``: a handful of environment checks with one line each.
 
 Every check returns ``ok``, ``warn`` or ``fail``; :func:`run_doctor` prints
 one line per check and returns exit code 1 if any check failed.
@@ -13,14 +13,14 @@ from pathlib import Path
 from typing import Literal, TextIO
 from urllib.parse import urlsplit
 
-from claude_cache_bump_gateway.cli import install, service
-from claude_cache_bump_gateway.cli.client import (
+from claude_gateway_extensions.cli import install, service
+from claude_gateway_extensions.cli.client import (
     ApiError,
     ClientFactory,
     ControlClient,
     DaemonUnreachable,
 )
-from claude_cache_bump_gateway.config import Config
+from claude_gateway_extensions.config import Config
 
 Status = Literal["ok", "warn", "fail"]
 
@@ -46,11 +46,11 @@ def _load_settings_quiet(scope: install.Scope, environ: Mapping[str, str], cwd: 
 
 
 def check_daemon(client: ControlClient, url: str) -> CheckResult:
-    """Check that the daemon answers ``GET /ccbg/health``."""
+    """Check that the daemon answers ``GET /cgx/health``."""
     try:
         client.health()
     except DaemonUnreachable:
-        return CheckResult("fail", f"daemon not reachable at {url} (is `ccbg serve` running?)")
+        return CheckResult("fail", f"daemon not reachable at {url} (is `cgx serve` running?)")
     except ApiError as exc:
         return CheckResult("fail", f"daemon at {url} returned HTTP {exc.status} for health check")
     return CheckResult("ok", f"daemon healthy at {url}")
@@ -66,8 +66,7 @@ def check_base_url(config: Config, environ: Mapping[str, str], cwd: Path) -> Che
             return CheckResult("ok", f"env.ANTHROPIC_BASE_URL set to {config.url} in {path}")
     return CheckResult(
         "warn",
-        "env.ANTHROPIC_BASE_URL is not set in user, project or local settings; "
-        "run `ccbg configure`",
+        "env.ANTHROPIC_BASE_URL is not set in user, project or local settings; run `cgx configure`",
     )
 
 
@@ -105,7 +104,7 @@ def check_port_consistency(
     if settings_port is not None:
         sources[f"{settings_scope} settings ANTHROPIC_BASE_URL"] = settings_port
     if unit_port is not None:
-        sources["systemd unit CCBG_PORT"] = unit_port
+        sources["systemd unit CGX_PORT"] = unit_port
     if daemon_port is not None:
         sources["reachable daemon (config.url)"] = daemon_port
 
@@ -119,7 +118,7 @@ def check_port_consistency(
     return CheckResult(
         "warn",
         f"ports disagree ({detail}); pick one port N and run "
-        f"`ccbg service install --port N` and `ccbg configure --port N` to realign",
+        f"`cgx service install --port N` and `cgx configure --port N` to realign",
     )
 
 
@@ -135,7 +134,7 @@ def check_hook(environ: Mapping[str, str], cwd: Path) -> CheckResult:
         ):
             path = install.settings_path(scope, environ, cwd)
             return CheckResult("ok", f"UserPromptSubmit hook registered in {path}")
-    return CheckResult("warn", "UserPromptSubmit hook is not registered; run `ccbg configure`")
+    return CheckResult("warn", "UserPromptSubmit hook is not registered; run `cgx configure`")
 
 
 def check_skill(environ: Mapping[str, str], cwd: Path) -> CheckResult:
@@ -144,7 +143,7 @@ def check_skill(environ: Mapping[str, str], cwd: Path) -> CheckResult:
         skill_dir = install.skills_dir(scope, environ, cwd)
         if (skill_dir / "SKILL.md").is_file():
             return CheckResult("ok", f"cache skill present at {skill_dir}")
-    return CheckResult("warn", "cache skill not found; run `ccbg configure`")
+    return CheckResult("warn", "cache skill not found; run `cgx configure`")
 
 
 def check_credentials(environ: Mapping[str, str], cwd: Path) -> CheckResult:
@@ -184,7 +183,7 @@ def check_service(
     """Check the systemd user unit's presence, and its enabled/active state if present."""
     status = service.service_status(environ, query)
     if not status.present:
-        return CheckResult("warn", "systemd service not installed; run `ccbg service install`")
+        return CheckResult("warn", "systemd service not installed; run `cgx service install`")
     if not status.active:
         return CheckResult(
             "warn",

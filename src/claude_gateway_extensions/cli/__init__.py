@@ -1,4 +1,4 @@
-"""``ccbg`` argparse entry point.
+"""``cgx`` argparse entry point.
 
 Wires every subcommand to the control API client (:mod:`.client`), the hook
 and statusline handlers, the installer, and doctor. Every dependency that a
@@ -25,19 +25,19 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, TextIO
 
-from claude_cache_bump_gateway.cli import confirm, install, service
-from claude_cache_bump_gateway.cli.client import (
+from claude_gateway_extensions.cli import confirm, install, service
+from claude_gateway_extensions.cli.client import (
     ApiError,
     ClientFactory,
     ControlClient,
     DaemonUnreachable,
 )
-from claude_cache_bump_gateway.cli.doctor import check_daemon, run_doctor
-from claude_cache_bump_gateway.cli.hook import run_user_prompt_submit
-from claude_cache_bump_gateway.cli.statusline import run_statusline
-from claude_cache_bump_gateway.cli.when import At, WhenError, local_now, parse_when
-from claude_cache_bump_gateway.config import Config, ConfigError
-from claude_cache_bump_gateway.core.status_format import format_deadline
+from claude_gateway_extensions.cli.doctor import check_daemon, run_doctor
+from claude_gateway_extensions.cli.hook import run_user_prompt_submit
+from claude_gateway_extensions.cli.statusline import run_statusline
+from claude_gateway_extensions.cli.when import At, WhenError, local_now, parse_when
+from claude_gateway_extensions.config import Config, ConfigError
+from claude_gateway_extensions.core.status_format import format_deadline
 
 EXIT_OK = 0
 EXIT_FAILED = 1
@@ -73,7 +73,7 @@ def _require_session(args: argparse.Namespace, ctx: _Context) -> str:
     if not session_id:
         raise _UsageError(
             "no session id given: pass --session ID or set CLAUDE_SESSION_ID "
-            "(run `ccbg status` to list known session ids, or read "
+            "(run `cgx status` to list known session ids, or read "
             "$CLAUDE_SESSION_ID from inside a Claude Code session)"
         )
     return session_id
@@ -110,7 +110,7 @@ def _cmd_serve(args: argparse.Namespace, config: Config, ctx: _Context) -> int:
     Imported lazily so every other subcommand works without ``aiohttp`` (or
     the server package, which may not exist yet during CLI-only development)
     ever being imported. ``--port``/``--host`` override whatever
-    ``CCBG_PORT``/``CCBG_HOST`` resolved to from the environment.
+    ``CGX_PORT``/``CGX_HOST`` resolved to from the environment.
     """
     if args.port is not None or args.host is not None:
         config = replace(
@@ -119,7 +119,7 @@ def _cmd_serve(args: argparse.Namespace, config: Config, ctx: _Context) -> int:
             port=args.port if args.port is not None else config.port,
         )
     try:
-        server_module = importlib.import_module("claude_cache_bump_gateway.server")
+        server_module = importlib.import_module("claude_gateway_extensions.server")
     except ModuleNotFoundError as exc:
         ctx.stderr.write(f"server module not available: {exc}\n")
         return EXIT_FAILED
@@ -250,10 +250,10 @@ def _cmd_statusline(args: argparse.Namespace, config: Config, ctx: _Context) -> 
 #: Pointer printed when a removed flag is passed; kept as one constant so the
 #: configure/unconfigure messages and their test assertions stay in sync.
 #: ``cmd`` is the (renamed) top-level command, ``service_cmd`` the unchanged
-#: ``ccbg service`` subcommand it points at (they no longer share a name).
+#: ``cgx service`` subcommand it points at (they no longer share a name).
 _SERVICE_FLAG_REMOVED = (
-    "--service was removed from `ccbg {cmd}`; the daemon is per user, not per "
-    "scope — run `ccbg service {service_cmd}` instead\n"
+    "--service was removed from `cgx {cmd}`; the daemon is per user, not per "
+    "scope — run `cgx service {service_cmd}` instead\n"
 )
 
 
@@ -261,7 +261,7 @@ def _cmd_configure(args: argparse.Namespace, config: Config, ctx: _Context) -> i
     """Plan the Claude Code integration for the chosen scope and confirm each write.
 
     The URL written to ``env.ANTHROPIC_BASE_URL`` is derived from
-    ``--port`` (falling back to ``CCBG_PORT``/``CCBG_URL`` in the
+    ``--port`` (falling back to ``CGX_PORT``/``CGX_URL`` in the
     environment, then the installed systemd unit's port, then the default),
     not from ``config.url`` — see :func:`install.resolve_install_url`. Every
     settings.json/skill-file write is planned first (:func:`install.plan_install`),
@@ -327,11 +327,11 @@ def _cmd_service_install(args: argparse.Namespace, config: Config, ctx: _Context
     """Plan the systemd user unit that runs the daemon and confirm writing it.
 
     ``--port``/``--host`` are written into the unit explicitly, overriding
-    whatever ``CCBG_PORT``/``CCBG_HOST`` happen to be set in the installing
-    shell (every other ``CCBG_*`` var is still copied through unchanged). A
+    whatever ``CGX_PORT``/``CGX_HOST`` happen to be set in the installing
+    shell (every other ``CGX_*`` var is still copied through unchanged). A
     bad unit edit breaks the live daemon, so the unit is planned first
     (:func:`service.plan_install_service`) and goes through the same
-    diff-and-confirm flow as ``ccbg configure`` (:func:`confirm.apply_changes`).
+    diff-and-confirm flow as ``cgx configure`` (:func:`confirm.apply_changes`).
     """
     del config
     runner = ctx.service_runner if ctx.service_runner is not None else service.DEFAULT_RUNNER
@@ -369,7 +369,7 @@ def _cmd_service_status(args: argparse.Namespace, config: Config, ctx: _Context)
     query = ctx.service_query if ctx.service_query is not None else service.DEFAULT_QUERY
     status = service.service_status(ctx.environ, query)
     if not status.present:
-        ctx.stdout.write("service: not installed; run `ccbg service install`\n")
+        ctx.stdout.write("service: not installed; run `cgx service install`\n")
     else:
         port = service.installed_port(ctx.environ)
         port_desc = (
@@ -386,7 +386,7 @@ def _cmd_service_status(args: argparse.Namespace, config: Config, ctx: _Context)
 
 
 def _cmd_service(args: argparse.Namespace, config: Config, ctx: _Context) -> int:
-    """Dispatch a ``ccbg service`` subcommand by name."""
+    """Dispatch a ``cgx service`` subcommand by name."""
     handler = _SERVICE_HANDLERS[args.service_command]
     return handler(args, config, ctx)
 
@@ -398,14 +398,14 @@ def _cmd_doctor(args: argparse.Namespace, config: Config, ctx: _Context) -> int:
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    """Build the ``ccbg`` argument parser with every subcommand."""
+    """Build the ``cgx`` argument parser with every subcommand."""
     parser = argparse.ArgumentParser(
-        prog="ccbg", description="Keep a Claude Code session's prompt cache warm."
+        prog="cgx", description="Keep a Claude Code session's prompt cache warm."
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    _PORT_HELP = "override CCBG_PORT (default: env or 8787)"
-    _HOST_HELP = "override CCBG_HOST (default: env or 127.0.0.1)"
+    _PORT_HELP = "override CGX_PORT (default: env or 8787)"
+    _HOST_HELP = "override CGX_HOST (default: env or 127.0.0.1)"
 
     serve_parser = subparsers.add_parser("serve", help="run the daemon")
     serve_parser.add_argument("--port", type=int, default=None, help=_PORT_HELP)
@@ -449,7 +449,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     _SCOPE_HELP = (
         "chooses which Claude Code settings.json is edited (user, project or "
-        "local); the daemon is per user, see `ccbg service`; managed is not "
+        "local); the daemon is per user, see `cgx service`; managed is not "
         "supported (root-owned, machine-wide, conflicts with per-user daemons)"
     )
     _YES_HELP = "apply every change without prompting (for scripts)"
@@ -470,7 +470,7 @@ def _build_parser() -> argparse.ArgumentParser:
         type=int,
         default=None,
         help="daemon port to point ANTHROPIC_BASE_URL at "
-        "(default: CCBG_PORT/CCBG_URL, then the installed service's port, then 8787)",
+        "(default: CGX_PORT/CGX_URL, then the installed service's port, then 8787)",
     )
     configure_parser.add_argument("--service", action="store_true", help=argparse.SUPPRESS)
 

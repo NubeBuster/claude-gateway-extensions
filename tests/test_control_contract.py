@@ -2,7 +2,7 @@
 
 Every other client test answers from a hand-written fake server, so it can
 only prove the client is self-consistent. These drive the blocking
-:class:`~claude_cache_bump_gateway.cli.client.ControlClient` (in a worker
+:class:`~claude_gateway_extensions.cli.client.ControlClient` (in a worker
 thread, since it is synchronous ``urllib``) against the actual application
 built by ``server.app.make_app`` on an ephemeral port, so a divergence
 between the client's assumptions and ``docs/API.md`` fails here.
@@ -17,12 +17,12 @@ from typing import Any, TypeVar
 import pytest
 from aiohttp import web
 
-from claude_cache_bump_gateway.cli.client import ApiError, ControlClient
+from claude_gateway_extensions.cli.client import ApiError, ControlClient
 from conftest import ServerHarness
 
 T = TypeVar("T")
 
-#: The status-dict keys ``docs/API.md`` documents for GET/PUT /ccbg/sessions[/{id}].
+#: The status-dict keys ``docs/API.md`` documents for GET/PUT /cgx/sessions[/{id}].
 STATUS_KEYS = {
     "session_id",
     "enabled",

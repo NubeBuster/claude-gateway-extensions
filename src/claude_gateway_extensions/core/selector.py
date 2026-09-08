@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Protocol
 
-from claude_cache_bump_gateway.core.snapshot import Snapshot
+from claude_gateway_extensions.core.snapshot import Snapshot
 
 
 class TargetSelector(Protocol):

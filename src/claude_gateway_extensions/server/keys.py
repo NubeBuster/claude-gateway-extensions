@@ -12,12 +12,12 @@ from __future__ import annotations
 import aiohttp
 from aiohttp import web
 
-from claude_cache_bump_gateway.config import Config
-from claude_cache_bump_gateway.core.clock import Clock
-from claude_cache_bump_gateway.core.scheduler import Scheduler
-from claude_cache_bump_gateway.core.selector import TargetSelector
-from claude_cache_bump_gateway.core.store import SnapshotStore
-from claude_cache_bump_gateway.core.upstream import Upstream
+from claude_gateway_extensions.config import Config
+from claude_gateway_extensions.core.clock import Clock
+from claude_gateway_extensions.core.scheduler import Scheduler
+from claude_gateway_extensions.core.selector import TargetSelector
+from claude_gateway_extensions.core.store import SnapshotStore
+from claude_gateway_extensions.core.upstream import Upstream
 
 CONFIG_KEY: web.AppKey[Config] = web.AppKey("config", Config)
 STORE_KEY: web.AppKey[SnapshotStore] = web.AppKey("store", SnapshotStore)

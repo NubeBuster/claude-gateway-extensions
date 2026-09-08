@@ -2,7 +2,7 @@
 
 Kept separate from any I/O or clock so every caller — the control API's
 per-request status dict (:meth:`~.scheduler.Scheduler.status`) and the CLI
-statusline segment (:mod:`claude_cache_bump_gateway.cli.statusline`) —
+statusline segment (:mod:`claude_gateway_extensions.cli.statusline`) —
 renders the exact same strings for the exact same inputs. Every function
 here takes its "now" and timezone as plain arguments rather than reading
 the clock or the host's local zone itself, so tests can pin both.

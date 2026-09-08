@@ -1,4 +1,4 @@
-"""Tests for claude_cache_bump_gateway.core.status_format."""
+"""Tests for claude_gateway_extensions.core.status_format."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from claude_cache_bump_gateway.core.status_format import (
+from claude_gateway_extensions.core.status_format import (
     format_clock,
     format_countdown,
     format_deadline,
