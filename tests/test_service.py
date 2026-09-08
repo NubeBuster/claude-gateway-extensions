@@ -116,6 +116,7 @@ def test_status_reports_disabled_inactive_unit(
     assert status.active is False
 
 
+@pytest.mark.invariant(decision="The port is written down, never assumed")
 def test_render_unit_explicit_port_overrides_shell_env(tmp_path: Path) -> None:
     """--port must win over whatever CGX_PORT happens to be in the installing shell."""
     environ = {"HOME": str(tmp_path), "CGX_PORT": "1111"}
@@ -147,6 +148,7 @@ def test_render_unit_still_passes_through_other_cgx_vars_with_explicit_port(
     assert "Environment=CGX_LOG_LEVEL=DEBUG" in text
 
 
+@pytest.mark.invariant(decision="The port is written down, never assumed")
 def test_install_service_forwards_port_and_host(
     tmp_path: Path, fake_runner: tuple[list[list[str]], service.Runner]
 ) -> None:
@@ -172,6 +174,7 @@ def test_installed_port_absent_when_unit_has_no_explicit_port(
     assert service.installed_port(environ) is None
 
 
+@pytest.mark.invariant(decision="The port is written down, never assumed")
 def test_installed_port_reads_back_the_written_port(
     tmp_path: Path, fake_runner: tuple[list[list[str]], service.Runner]
 ) -> None:

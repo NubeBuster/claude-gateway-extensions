@@ -8,6 +8,7 @@ import gzip
 import json
 import logging
 
+import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
@@ -16,6 +17,7 @@ from claude_gateway_extensions.server.keys import STORE_KEY
 from conftest import ServerHarness, make_config
 
 
+@pytest.mark.invariant(decision="Byte-transparent forwarding")
 async def test_forwards_method_path_query_and_headers(harness: ServerHarness) -> None:
     async def handler(request: web.Request) -> web.Response:
         return web.json_response({"ok": True})
@@ -43,6 +45,7 @@ async def test_forwards_method_path_query_and_headers(harness: ServerHarness) ->
     assert "connection" not in recorded.headers
 
 
+@pytest.mark.invariant(decision="Byte-transparent forwarding")
 async def test_forwards_repeated_header_without_collapsing(harness: ServerHarness) -> None:
     """A repeated request header must reach upstream with every value intact."""
     seen: list[list[str]] = []
@@ -62,6 +65,7 @@ async def test_forwards_repeated_header_without_collapsing(harness: ServerHarnes
     assert seen == [["a=1", "b=2"]]
 
 
+@pytest.mark.invariant(decision="Byte-transparent forwarding")
 async def test_forwards_body_unchanged(harness: ServerHarness) -> None:
     async def handler(request: web.Request) -> web.Response:
         return web.Response(status=201, body=b"created")
@@ -75,6 +79,7 @@ async def test_forwards_body_unchanged(harness: ServerHarness) -> None:
     assert harness.fake.requests[0].body == payload
 
 
+@pytest.mark.invariant(decision="Byte-transparent forwarding")
 async def test_upstream_error_status_and_body_relayed(harness: ServerHarness) -> None:
     async def handler(request: web.Request) -> web.Response:
         return web.json_response(
@@ -89,6 +94,7 @@ async def test_upstream_error_status_and_body_relayed(harness: ServerHarness) ->
     assert data["error"]["type"] == "not_found_error"
 
 
+@pytest.mark.invariant(decision="Byte-transparent forwarding")
 async def test_sse_streamed_incrementally(harness: ServerHarness) -> None:
     release = asyncio.Event()
 
@@ -117,6 +123,7 @@ async def test_sse_streamed_incrementally(harness: ServerHarness) -> None:
         assert resp.status == 200
 
 
+@pytest.mark.invariant(decision="Tee only the private copy")
 async def test_tee_extracts_usage_from_sse_and_snapshots(harness: ServerHarness) -> None:
     async def handler(request: web.Request) -> web.StreamResponse:
         resp = web.StreamResponse(status=200, headers={"Content-Type": "text/event-stream"})
@@ -152,6 +159,7 @@ async def test_tee_extracts_usage_from_sse_and_snapshots(harness: ServerHarness)
     assert snap.headers.get("authorization") == "Bearer tok"
 
 
+@pytest.mark.invariant(decision="Tee only the private copy")
 async def test_tee_extracts_usage_from_json(harness: ServerHarness) -> None:
     async def handler(request: web.Request) -> web.Response:
         return web.json_response(
@@ -181,6 +189,7 @@ async def test_tee_extracts_usage_from_json(harness: ServerHarness) -> None:
     assert snaps[0].usage.cache_creation_input_tokens == 5
 
 
+@pytest.mark.invariant(decision="Session identity is x-claude-code-session-id")
 async def test_no_snapshot_without_session_header(harness: ServerHarness) -> None:
     async def handler(request: web.Request) -> web.Response:
         return web.json_response({"usage": {"input_tokens": 1}})
@@ -195,6 +204,7 @@ async def test_no_snapshot_without_session_header(harness: ServerHarness) -> Non
     assert store.list_sessions() == []
 
 
+@pytest.mark.invariant(decision="Tee only the private copy")
 async def test_non_messages_path_never_snapshotted(harness: ServerHarness) -> None:
     async def handler(request: web.Request) -> web.Response:
         return web.json_response({"usage": {"input_tokens": 1}})
@@ -213,6 +223,7 @@ async def test_non_messages_path_never_snapshotted(harness: ServerHarness) -> No
     assert store.get_snapshots("sess-c") == []
 
 
+@pytest.mark.invariant(decision="Byte-transparent forwarding")
 async def test_bump_now_hits_fake_with_max_tokens_zero(harness: ServerHarness) -> None:
     async def capture_handler(request: web.Request) -> web.Response:
         return web.json_response({"usage": {"input_tokens": 5}})
@@ -336,6 +347,7 @@ async def test_upstream_unreachable_returns_502(tmp_path) -> None:
         await client.close()
 
 
+@pytest.mark.invariant(decision="Tee only the private copy")
 async def test_capture_reads_usage_from_a_gzipped_response(harness: ServerHarness) -> None:
     """A compressed /v1/messages response must still be forwarded verbatim and captured.
 
@@ -367,3 +379,45 @@ async def test_capture_reads_usage_from_a_gzipped_response(harness: ServerHarnes
     assert len(snapshots) == 1
     assert snapshots[0].usage.cache_read_input_tokens == 4096
     assert snapshots[0].usage.total_input == 4107
+
+
+@pytest.mark.invariant(decision="Byte-transparent forwarding")
+async def test_no_request_or_response_body_reaches_any_log_record(
+    harness: ServerHarness, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Request and response bodies must never appear in a log record, at any level.
+
+    The daemon sits in the request path permanently and sees whole
+    conversations plus the credential. Body content is therefore logged
+    nowhere, not even behind DEBUG, so turning logging up can never turn the
+    daemon into a transcript recorder.
+    """
+    request_marker = "REQUEST-BODY-MARKER-3f9a"
+    response_marker = "RESPONSE-BODY-MARKER-7c1b"
+
+    async def handler(request: web.Request) -> web.Response:
+        return web.json_response({"usage": {"input_tokens": 1}, "note": response_marker})
+
+    harness.fake.script(handler)
+    caplog.set_level(logging.DEBUG)
+
+    body = json.dumps(
+        {
+            "model": "claude-x",
+            "max_tokens": 10,
+            "messages": [{"role": "user", "content": request_marker}],
+        }
+    ).encode()
+    resp = await harness.client.post(
+        "/v1/messages",
+        data=body,
+        headers={"x-claude-code-session-id": "sess-log", "authorization": "Bearer sk-secret"},
+    )
+    assert resp.status == 200
+    assert response_marker in (await resp.text())  # the client still gets the body
+
+    logged = "\n".join(record.getMessage() for record in caplog.records)
+    assert caplog.records, "nothing was logged at all; the assertions below would be vacuous"
+    assert request_marker not in logged
+    assert response_marker not in logged
+    assert "sk-secret" not in logged

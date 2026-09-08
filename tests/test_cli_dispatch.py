@@ -208,6 +208,7 @@ def test_on_explicit_session_and_duration() -> None:
     assert client.calls == [("set_session", ("s1", True, 60, 7200, None))]
 
 
+@pytest.mark.invariant(decision="Absolute deadline, not an open-ended toggle")
 def test_on_with_until_flag_reuses_parse_when() -> None:
     client = _FakeClient("http://x")
     code, out, _ = _run(["on", "--session", "s1", "--until", "2h"], client)
@@ -219,6 +220,7 @@ def test_on_with_until_flag_reuses_parse_when() -> None:
     assert isinstance(until, float)
 
 
+@pytest.mark.invariant(decision="Absolute deadline, not an open-ended toggle")
 def test_on_with_until_status_word_is_a_usage_error() -> None:
     client = _FakeClient("http://x")
     code, _, err = _run(["on", "--session", "s1", "--until", "status"], client)
@@ -352,6 +354,9 @@ def test_service_status_reports_installed_unit_port(tmp_path: Path) -> None:
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="cgx service is Linux-only")
+@pytest.mark.invariant(
+    decision="Every file a user owns is diffed and confirmed before it is written"
+)
 def test_service_install_dry_run_prints_diff_and_writes_nothing(tmp_path: Path) -> None:
     client = _FakeClient("http://x")
     environ = {"HOME": str(tmp_path)}
@@ -365,6 +370,9 @@ def test_service_install_dry_run_prints_diff_and_writes_nothing(tmp_path: Path) 
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="cgx service is Linux-only")
+@pytest.mark.invariant(
+    decision="Every file a user owns is diffed and confirmed before it is written"
+)
 def test_service_install_non_tty_stdin_without_yes_aborts(tmp_path: Path) -> None:
     client = _FakeClient("http://x")
     environ = {"HOME": str(tmp_path)}
@@ -441,6 +449,9 @@ def test_service_uninstall_with_nothing_installed_is_no_changes(tmp_path: Path) 
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="cgx service is Linux-only")
+@pytest.mark.invariant(
+    decision="Every file a user owns is diffed and confirmed before it is written"
+)
 def test_service_uninstall_non_tty_stdin_without_yes_aborts(tmp_path: Path) -> None:
     client = _FakeClient("http://x")
     environ = {"HOME": str(tmp_path)}
@@ -459,6 +470,7 @@ def test_service_uninstall_non_tty_stdin_without_yes_aborts(tmp_path: Path) -> N
     assert unit_path.is_file()
 
 
+@pytest.mark.invariant(decision="The port is written down, never assumed")
 def test_configure_writes_url_for_explicit_port(tmp_path: Path) -> None:
     client = _FakeClient("http://x")
     code, out, _ = _run(
@@ -474,6 +486,7 @@ def test_configure_writes_url_for_explicit_port(tmp_path: Path) -> None:
     assert data["env"]["CGX_URL"] == "http://127.0.0.1:9999"
 
 
+@pytest.mark.invariant(decision="The port is written down, never assumed")
 def test_configure_port_falls_back_to_installed_service_port(tmp_path: Path) -> None:
     client = _FakeClient("http://x")
     environ = {"HOME": str(tmp_path)}
@@ -490,6 +503,9 @@ def test_configure_port_falls_back_to_installed_service_port(tmp_path: Path) -> 
     assert "daemon URL: http://127.0.0.1:9999" in out
 
 
+@pytest.mark.invariant(
+    decision="Every file a user owns is diffed and confirmed before it is written"
+)
 def test_configure_dry_run_prints_diffs_and_writes_nothing(tmp_path: Path) -> None:
     client = _FakeClient("http://x")
     environ = {"HOME": str(tmp_path)}
@@ -499,6 +515,9 @@ def test_configure_dry_run_prints_diffs_and_writes_nothing(tmp_path: Path) -> No
     assert not (tmp_path / ".claude" / "settings.json").exists()
 
 
+@pytest.mark.invariant(
+    decision="Every file a user owns is diffed and confirmed before it is written"
+)
 def test_configure_non_tty_stdin_without_yes_aborts(tmp_path: Path) -> None:
     """Non-interactive stdin (the common case under a test harness) must never silently write."""
     client = _FakeClient("http://x")
@@ -510,6 +529,9 @@ def test_configure_non_tty_stdin_without_yes_aborts(tmp_path: Path) -> None:
     assert not (tmp_path / ".claude" / "settings.json").exists()
 
 
+@pytest.mark.invariant(
+    decision="Every file a user owns is diffed and confirmed before it is written"
+)
 def test_configure_interactive_y_confirms_each_file(tmp_path: Path) -> None:
     client = _FakeClient("http://x")
     environ = {"HOME": str(tmp_path)}
@@ -523,6 +545,9 @@ def test_configure_interactive_y_confirms_each_file(tmp_path: Path) -> None:
     assert (tmp_path / ".claude" / "skills" / "cache" / "SKILL.md").exists()
 
 
+@pytest.mark.invariant(
+    decision="Every file a user owns is diffed and confirmed before it is written"
+)
 def test_configure_interactive_partial_acceptance(tmp_path: Path) -> None:
     """Rejecting the skill file must still apply the accepted settings.json change."""
     client = _FakeClient("http://x")
@@ -537,6 +562,9 @@ def test_configure_interactive_partial_acceptance(tmp_path: Path) -> None:
     assert not (tmp_path / ".claude" / "skills" / "cache" / "SKILL.md").exists()
 
 
+@pytest.mark.invariant(
+    decision="Every file a user owns is diffed and confirmed before it is written"
+)
 def test_configure_interactive_reject_all_is_a_failure(tmp_path: Path) -> None:
     client = _FakeClient("http://x")
     environ = {"HOME": str(tmp_path)}
@@ -575,6 +603,7 @@ def test_configure_scope_local_writes_settings_local_json(tmp_path: Path) -> Non
     assert "daemon URL" in out
 
 
+@pytest.mark.invariant(decision="Environment variables only, split by process")
 def test_configure_scope_managed_is_rejected_by_argparse() -> None:
     """argparse itself rejects an unsupported ``--scope`` choice (writes to real stderr)."""
     client = _FakeClient("http://x")
@@ -606,6 +635,9 @@ def test_unconfigure_with_nothing_installed_is_no_changes(tmp_path: Path) -> Non
     assert not (tmp_path / ".claude" / "settings.json").exists()
 
 
+@pytest.mark.invariant(
+    decision="Every file a user owns is diffed and confirmed before it is written"
+)
 def test_unconfigure_non_tty_stdin_without_yes_aborts(tmp_path: Path) -> None:
     client = _FakeClient("http://x")
     environ = {"HOME": str(tmp_path)}
@@ -657,6 +689,7 @@ def test_serve_imports_server_module_lazily(monkeypatch: pytest.MonkeyPatch) -> 
     assert len(calls) == 1
 
 
+@pytest.mark.invariant(decision="The port is written down, never assumed")
 def test_serve_port_flag_overrides_env(monkeypatch: pytest.MonkeyPatch) -> None:
     import types
 

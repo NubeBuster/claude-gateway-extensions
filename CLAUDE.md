@@ -2,10 +2,9 @@
 
 ## Scope
 
-The shipped scope is whatever `docs/DESIGN.md` "Scope of 0.1" says it is:
-keeping a session's prompt cache warm by replaying its last request with
-`max_tokens: 0` before the TTL expires. Everything under DESIGN.md "Roadmap"
-is designed into that file before any code is written for it.
+The shipped scope is whatever `docs/DESIGN.md` "Scope of 0.1" says it is.
+Everything under DESIGN.md "Roadmap" is designed into that file before any
+code is written for it.
 
 ## Invariants
 
@@ -28,8 +27,7 @@ is designed into that file before any code is written for it.
 - Single runtime dependency: `aiohttp`, plus `tzdata` on Windows (`zoneinfo`
   needs it there). Do not add a second HTTP or web framework; the CLI
   client uses `urllib` deliberately, to stay import-light.
-- CLI is `argparse`, not `typer` (overrides the root Scripts CLAUDE.md's
-  Typer preference — that rule is for `~/Scripts`, not this repo).
+- CLI is `argparse`, not `typer`; the root Scripts Typer rule is not ours.
 
 ## Tests
 
@@ -37,6 +35,9 @@ is designed into that file before any code is written for it.
   Never call the real Anthropic API from a test.
 - Any test that redirects `HOME`, `XDG_STATE_HOME`, or another path env var
   must assert the redirect actually took effect before relying on it.
+- `@pytest.mark.invariant(decision="...")` marks a test guarding a decision
+  in `docs/DESIGN.md`; a failure means the code contradicts that decision, so
+  fix the code. Weakening one needs an amendment and the user's consent.
 
 ## Docs
 
@@ -54,7 +55,5 @@ is designed into that file before any code is written for it.
 - Verification is `make check`, run once before a commit; never chain
   `ruff`/`pyright`/`pytest` by hand. Use `make fix` for formatting.
 
-## Commits
-
-Conventional commits: `type(scope): topic: specifics`, subject at most 72
-characters, body bullets wrapped at 72.
+- Conventional commits: `type(scope): topic: specifics`, subject at most 72
+  characters, body bullets wrapped at 72.

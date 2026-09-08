@@ -155,6 +155,7 @@ def state_dir(tmp_path: Path) -> Path:
     return path
 
 
+@pytest.mark.invariant(decision="Byte-transparent forwarding")
 async def test_full_lifecycle(state_dir: Path, tmp_path: Path) -> None:
     """Capture, bump, stop-on-cache-write and reload, end to end over real sockets."""
     fake = FakeAnthropic()

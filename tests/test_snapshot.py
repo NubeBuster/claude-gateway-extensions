@@ -16,11 +16,13 @@ def _body(**kwargs: object) -> bytes:
     return json.dumps(kwargs).encode("utf-8")
 
 
+@pytest.mark.invariant(decision="Streams keyed by model + system + tools, largest prefix wins")
 def test_stream_key_stable_for_identical_input() -> None:
     body = _body(model="claude-x", system="you are helpful", tools=[{"name": "bash"}])
     assert stream_key(body) == stream_key(body)
 
 
+@pytest.mark.invariant(decision="Streams keyed by model + system + tools, largest prefix wins")
 def test_stream_key_ignores_messages_and_max_tokens() -> None:
     a = _body(model="claude-x", system="s", tools=[], messages=[{"role": "user"}], max_tokens=1)
     b = _body(
@@ -29,12 +31,14 @@ def test_stream_key_ignores_messages_and_max_tokens() -> None:
     assert stream_key(a) == stream_key(b)
 
 
+@pytest.mark.invariant(decision="Streams keyed by model + system + tools, largest prefix wins")
 def test_stream_key_differs_on_model() -> None:
     a = _body(model="claude-x", system="s", tools=[])
     b = _body(model="claude-y", system="s", tools=[])
     assert stream_key(a) != stream_key(b)
 
 
+@pytest.mark.invariant(decision="Streams keyed by model + system + tools, largest prefix wins")
 def test_stream_key_treats_missing_fields_as_null() -> None:
     a = _body(model="claude-x")
     b = _body(model="claude-x", system=None, tools=None)
@@ -51,6 +55,7 @@ def test_stream_key_non_object_raises() -> None:
         stream_key(b"[1, 2, 3]")
 
 
+@pytest.mark.invariant(decision="Interval derived from the snapshot's TTL")
 def test_wants_1h_ttl_true_when_present_nested() -> None:
     body = _body(
         model="m",
@@ -59,11 +64,13 @@ def test_wants_1h_ttl_true_when_present_nested() -> None:
     assert wants_1h_ttl(body) is True
 
 
+@pytest.mark.invariant(decision="Interval derived from the snapshot's TTL")
 def test_wants_1h_ttl_false_when_absent() -> None:
     body = _body(model="m", system="s")
     assert wants_1h_ttl(body) is False
 
 
+@pytest.mark.invariant(decision="Interval derived from the snapshot's TTL")
 def test_wants_1h_ttl_false_when_ttl_is_5m() -> None:
     body = _body(
         model="m",

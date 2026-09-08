@@ -80,6 +80,7 @@ def _run(prompt_payload: dict[str, object], environ: dict[str, str]) -> tuple[in
     return code, stdout.getvalue()
 
 
+@pytest.mark.invariant(decision="Skill as pure fall-through, hook does the work")
 def test_non_matching_prompt_prints_nothing() -> None:
     code, out = _run({"session_id": "s1", "prompt": "hello there"}, {})
     assert code == 0
@@ -98,6 +99,7 @@ def test_old_cache_bump_spelling_does_not_match() -> None:
     assert out == ""
 
 
+@pytest.mark.invariant(decision="Skill as pure fall-through, hook does the work")
 def test_invalid_json_exits_silently() -> None:
     stdin = io.StringIO("{not json")
     stdout = io.StringIO()
@@ -106,6 +108,7 @@ def test_invalid_json_exits_silently() -> None:
     assert stdout.getvalue() == ""
 
 
+@pytest.mark.invariant(decision="Absolute deadline, not an open-ended toggle")
 def test_duration_enables_with_an_absolute_deadline(fake_daemon: tuple[str, dict, list]) -> None:
     base_url, routes, calls = fake_daemon
     routes[("PUT", "/cgx/sessions/s1")] = (
@@ -177,6 +180,7 @@ def test_bump_reports_tokens(fake_daemon: tuple[str, dict, list]) -> None:
     assert "48213 tokens read from cache" in decision["reason"]
 
 
+@pytest.mark.invariant(decision="The port is written down, never assumed")
 def test_falls_back_to_loopback_anthropic_base_url(fake_daemon: tuple[str, dict, list]) -> None:
     """No CGX_URL set: a loopback ANTHROPIC_BASE_URL (what Claude Code passes to hooks) works."""
     base_url, routes, _calls = fake_daemon
@@ -187,6 +191,7 @@ def test_falls_back_to_loopback_anthropic_base_url(fake_daemon: tuple[str, dict,
     assert decision["reason"] == "cache: off"
 
 
+@pytest.mark.invariant(decision="Control API on /cgx/, loopback only, unauthenticated")
 def test_non_loopback_anthropic_base_url_is_ignored() -> None:
     """A non-loopback ANTHROPIC_BASE_URL is not this daemon; the hook must not try to reach it.
 
@@ -202,6 +207,7 @@ def test_non_loopback_anthropic_base_url_is_ignored() -> None:
     assert "daemon not reachable at http://127.0.0.1:18787" in decision["reason"]
 
 
+@pytest.mark.invariant(decision="Absolute deadline, not an open-ended toggle")
 def test_on_is_removed_and_gives_the_unparseable_hint(
     fake_daemon: tuple[str, dict, list],
 ) -> None:
@@ -240,6 +246,7 @@ def test_unsupported_date_format_hints_iso(fake_daemon: tuple[str, dict, list]) 
     assert calls == []
 
 
+@pytest.mark.invariant(decision="Skill as pure fall-through, hook does the work")
 def test_daemon_unreachable_prints_helpful_reason_and_exits_zero() -> None:
     code, out = _run(
         {"session_id": "s1", "prompt": "/cache status"},
@@ -252,6 +259,7 @@ def test_daemon_unreachable_prints_helpful_reason_and_exits_zero() -> None:
     assert "127.0.0.1:1" in decision["reason"]
 
 
+@pytest.mark.invariant(decision="Skill as pure fall-through, hook does the work")
 def test_default_status_action(fake_daemon: tuple[str, dict, list]) -> None:
     base_url, routes, _calls = fake_daemon
     routes[("GET", "/cgx/sessions/s1")] = (

@@ -82,3 +82,6 @@ reportMissingImports = true
 testpaths = ["tests"]
 asyncio_mode = "auto"
 addopts = "-q"
+markers = [
+  "invariant(decision): guards a decision recorded in docs/DESIGN.md; see tests/conftest.py",
+]

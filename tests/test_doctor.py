@@ -146,6 +146,7 @@ def test_api_key_helper_in_settings_is_detected(tmp_path: Path) -> None:
     assert "apiKeyHelper" in stdout.getvalue()
 
 
+@pytest.mark.invariant(decision="The port is written down, never assumed")
 def test_port_consistency_ok_when_only_one_source_known(tmp_path: Path) -> None:
     environ = {"HOME": str(tmp_path)}
     config = Config.from_env({"CGX_URL": URL})
@@ -153,6 +154,7 @@ def test_port_consistency_ok_when_only_one_source_known(tmp_path: Path) -> None:
     assert check.status == "ok"
 
 
+@pytest.mark.invariant(decision="The port is written down, never assumed")
 def test_port_consistency_ok_when_settings_and_daemon_agree(tmp_path: Path) -> None:
     environ = {"HOME": str(tmp_path)}
     install.install(
@@ -163,6 +165,7 @@ def test_port_consistency_ok_when_settings_and_daemon_agree(tmp_path: Path) -> N
     assert check.status == "ok"
 
 
+@pytest.mark.invariant(decision="The port is written down, never assumed")
 def test_port_consistency_warns_on_settings_daemon_port_mismatch(tmp_path: Path) -> None:
     environ = {"HOME": str(tmp_path)}
     install.install(
@@ -181,6 +184,7 @@ def test_port_consistency_warns_on_settings_daemon_port_mismatch(tmp_path: Path)
     assert "--port" in check.message
 
 
+@pytest.mark.invariant(decision="The port is written down, never assumed")
 def test_port_consistency_warns_on_unit_daemon_port_mismatch(tmp_path: Path) -> None:
     environ = {"HOME": str(tmp_path)}
     service.install_service(environ, runner=lambda args: None, port=9999)
@@ -190,6 +194,7 @@ def test_port_consistency_warns_on_unit_daemon_port_mismatch(tmp_path: Path) -> 
     assert "9999" in check.message
 
 
+@pytest.mark.invariant(decision="The port is written down, never assumed")
 def test_port_consistency_ignores_daemon_port_when_unreachable(tmp_path: Path) -> None:
     """A daemon that failed the reachability check must not also produce a port mismatch."""
     environ = {"HOME": str(tmp_path)}

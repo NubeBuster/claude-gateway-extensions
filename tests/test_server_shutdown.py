@@ -110,6 +110,7 @@ async def test_handlers_are_removed_after_serve_returns(tmp_path: Path) -> None:
         remove_shutdown_handlers(loop)
 
 
+@pytest.mark.invariant(decision="Control API on /cgx/, loopback only, unauthenticated")
 async def test_non_local_host_logs_a_warning_but_still_starts(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:

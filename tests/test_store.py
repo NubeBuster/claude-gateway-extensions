@@ -59,6 +59,7 @@ def test_memory_store_prune() -> None:
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX chmod bits do not apply on Windows")
+@pytest.mark.invariant(decision="Plaintext snapshots at 0600, persistence opt-out")
 def test_file_store_permissions_and_round_trip(tmp_path: Path) -> None:
     root = tmp_path / "state"
     store = FileStore(root, max_streams_per_session=8)
@@ -164,6 +165,7 @@ def test_file_store_delete_session(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize("bad_id", ["../escape", "a/b", "", "x" * 129, "sp ace"])
+@pytest.mark.invariant(decision="Plaintext snapshots at 0600, persistence opt-out")
 def test_file_store_rejects_invalid_session_id(tmp_path: Path, bad_id: str) -> None:
     store = FileStore(tmp_path / "state", max_streams_per_session=8)
     with pytest.raises(ValueError):

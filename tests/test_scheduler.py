@@ -162,6 +162,32 @@ async def test_real_request_resets_timer(
     await scheduler.stop()
 
 
+@pytest.mark.invariant(decision="Interval derived from the snapshot's TTL")
+async def test_interval_comes_from_the_captured_body_not_a_fixed_default(
+    tmp_path: Path, clock: FakeClock, store: MemoryStore
+) -> None:
+    """A 1 h TTL body is bumped at ``interval_1h_s``, anything else at ``interval_5m_s``.
+
+    The captured request is the only thing authoritative about the TTL, so
+    the schedule must follow it rather than one configured default.
+    """
+    upstream = ScriptedUpstream([])
+    config = _config(tmp_path, interval_1h_s=3000, interval_5m_s=240)
+    scheduler = Scheduler(config, store, LargestPrefixSelector(), upstream, clock)
+
+    scheduler.note_request("sess-1h", _snapshot_1h("sess-1h"), ("authorization", "Bearer a"))
+    scheduler.set_enabled("sess-1h", True)
+    scheduler.note_request("sess-5m", _snapshot("sess-5m"), ("authorization", "Bearer a"))
+    scheduler.set_enabled("sess-5m", True)
+
+    assert scheduler.status("sess-1h")["next_bump_at"] == pytest.approx(1000.0 + 3000.0)
+    assert scheduler.status("sess-5m")["next_bump_at"] == pytest.approx(1000.0 + 240.0)
+    assert upstream.calls == []
+
+    await scheduler.stop()
+
+
+@pytest.mark.invariant(decision="Fail-closed bump classification")
 async def test_cache_write_stops_with_reason(
     tmp_path: Path, clock: FakeClock, store: MemoryStore
 ) -> None:
@@ -182,6 +208,7 @@ async def test_cache_write_stops_with_reason(
     await scheduler.stop()
 
 
+@pytest.mark.invariant(decision="Fail-closed bump classification")
 async def test_cache_write_continues_when_configured(
     tmp_path: Path, clock: FakeClock, store: MemoryStore
 ) -> None:
@@ -206,6 +233,7 @@ async def test_cache_write_continues_when_configured(
     await scheduler.stop()
 
 
+@pytest.mark.invariant(decision="Fail-closed bump classification")
 async def test_transient_retries_thrice_then_stops(
     tmp_path: Path, clock: FakeClock, store: MemoryStore
 ) -> None:
@@ -228,6 +256,7 @@ async def test_transient_retries_thrice_then_stops(
     await scheduler.stop()
 
 
+@pytest.mark.invariant(decision="Absolute deadline, not an open-ended toggle")
 async def test_max_duration_stops(tmp_path: Path, clock: FakeClock, store: MemoryStore) -> None:
     upstream = ScriptedUpstream([])
     scheduler = Scheduler(_config(tmp_path), store, LargestPrefixSelector(), upstream, clock)
@@ -246,6 +275,7 @@ async def test_max_duration_stops(tmp_path: Path, clock: FakeClock, store: Memor
     await scheduler.stop()
 
 
+@pytest.mark.invariant(decision="Absolute deadline, not an open-ended toggle")
 async def test_deadline_stops_at_absolute_time(
     tmp_path: Path, clock: FakeClock, store: MemoryStore
 ) -> None:
@@ -267,6 +297,7 @@ async def test_deadline_stops_at_absolute_time(
     await scheduler.stop()
 
 
+@pytest.mark.invariant(decision="Absolute deadline, not an open-ended toggle")
 async def test_auto_stop_clears_the_deadline_so_re_enabling_runs_again(
     tmp_path: Path, clock: FakeClock, store: MemoryStore
 ) -> None:
@@ -295,6 +326,7 @@ async def test_auto_stop_clears_the_deadline_so_re_enabling_runs_again(
     await scheduler.stop()
 
 
+@pytest.mark.invariant(decision="Waiting for the first snapshot is a bounded wait, not a stop")
 async def test_enabled_before_any_request_waits_for_the_first_snapshot(
     tmp_path: Path, clock: FakeClock, store: MemoryStore
 ) -> None:
@@ -325,6 +357,7 @@ async def test_enabled_before_any_request_waits_for_the_first_snapshot(
     await scheduler.stop()
 
 
+@pytest.mark.invariant(decision="Waiting for the first snapshot is a bounded wait, not a stop")
 async def test_waiting_session_keeps_the_deadline_it_was_enabled_with(
     tmp_path: Path, clock: FakeClock, store: MemoryStore
 ) -> None:
@@ -349,6 +382,7 @@ async def test_waiting_session_keeps_the_deadline_it_was_enabled_with(
     await scheduler.stop()
 
 
+@pytest.mark.invariant(decision="Waiting for the first snapshot is a bounded wait, not a stop")
 async def test_waiting_session_stops_at_max_duration_from_enabling(
     tmp_path: Path, clock: FakeClock, store: MemoryStore
 ) -> None:
@@ -378,6 +412,7 @@ async def test_waiting_session_stops_at_max_duration_from_enabling(
     await scheduler.stop()
 
 
+@pytest.mark.invariant(decision="Waiting for the first snapshot is a bounded wait, not a stop")
 async def test_snapshot_before_the_waiting_bound_starts_bumping(
     tmp_path: Path, clock: FakeClock, store: MemoryStore
 ) -> None:
@@ -401,6 +436,7 @@ async def test_snapshot_before_the_waiting_bound_starts_bumping(
     await scheduler.stop()
 
 
+@pytest.mark.invariant(decision="Absolute deadline, not an open-ended toggle")
 async def test_deadline_takes_precedence_over_max_duration(
     tmp_path: Path, clock: FakeClock, store: MemoryStore
 ) -> None:
@@ -421,6 +457,7 @@ async def test_deadline_takes_precedence_over_max_duration(
     await scheduler.stop()
 
 
+@pytest.mark.invariant(decision="Absolute deadline, not an open-ended toggle")
 async def test_past_deadline_stops_immediately(
     tmp_path: Path, clock: FakeClock, store: MemoryStore
 ) -> None:
@@ -440,6 +477,7 @@ async def test_past_deadline_stops_immediately(
     await scheduler.stop()
 
 
+@pytest.mark.invariant(decision="Absolute deadline, not an open-ended toggle")
 async def test_disabling_clears_the_deadline(
     tmp_path: Path, clock: FakeClock, store: MemoryStore
 ) -> None:

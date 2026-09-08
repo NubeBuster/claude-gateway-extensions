@@ -5,7 +5,14 @@ from __future__ import annotations
 import io
 from pathlib import Path
 
+import pytest
+
 from claude_gateway_extensions.cli.confirm import PlannedChange, apply_changes, render_change
+
+#: Every test in this file guards one recorded decision; see tests/conftest.py.
+pytestmark = pytest.mark.invariant(
+    decision="Every file a user owns is diffed and confirmed before it is written"
+)
 
 
 class _TtyStdin(io.StringIO):

@@ -1,8 +1,12 @@
 """Tests for claude_gateway_extensions.core.upstream."""
 
+import pytest
 from multidict import CIMultiDict
 
 from claude_gateway_extensions.core.upstream import filter_headers
+
+#: Every test in this file guards one recorded decision; see tests/conftest.py.
+pytestmark = pytest.mark.invariant(decision="Byte-transparent forwarding")
 
 
 def test_filter_headers_preserves_repeated_header_values() -> None:

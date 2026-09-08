@@ -127,6 +127,7 @@ async def test_bump_rejected_outcome_returns_409(harness: ServerHarness) -> None
     assert data["outcome"] == "rejected"
 
 
+@pytest.mark.invariant(decision="Fail-closed bump classification")
 async def test_bump_detects_a_cache_write_in_a_gzipped_response(harness: ServerHarness) -> None:
     """The app's client session does not auto-decompress; the bump path must decode anyway.
 
@@ -176,6 +177,7 @@ async def test_bump_detects_a_cache_write_in_a_gzipped_response(harness: ServerH
 
 @pytest.mark.parametrize("value", [0, -1])
 @pytest.mark.parametrize("field", ["interval_s", "max_duration_s"])
+@pytest.mark.invariant(decision="Absolute deadline, not an open-ended toggle")
 async def test_put_rejects_non_positive_durations(
     harness: ServerHarness, field: str, value: int
 ) -> None:
@@ -260,6 +262,7 @@ async def test_status_cache_expires_at_present_after_a_real_request(
     assert data["formatted"]["next_bump_at"] is None
 
 
+@pytest.mark.invariant(decision="Absolute deadline, not an open-ended toggle")
 async def test_put_disabling_clears_until(harness: ServerHarness) -> None:
     """Disabling drops the deadline; re-enabling without one does not resurrect it."""
     session = "/cgx/sessions/sess-until-cleared"

@@ -64,6 +64,7 @@ def test_skills_dir_local_scope_matches_project_scope(tmp_path: Path) -> None:
     assert install.skills_dir("local", {}, cwd) == install.skills_dir("project", {}, cwd)
 
 
+@pytest.mark.invariant(decision="Environment variables only, split by process")
 def test_install_creates_settings_with_only_documented_keys(tmp_path: Path) -> None:
     environ = {"HOME": str(tmp_path)}
     path = install.settings_path("user", environ, tmp_path)
@@ -88,6 +89,7 @@ def test_install_creates_settings_with_only_documented_keys(tmp_path: Path) -> N
     assert (result.skill_dir / "SKILL.md").is_file()
 
 
+@pytest.mark.invariant(decision="Environment variables only, split by process")
 def test_install_preserves_unrelated_keys(tmp_path: Path) -> None:
     environ = {"HOME": str(tmp_path)}
     path = install.settings_path("user", environ, tmp_path)
@@ -154,6 +156,9 @@ def test_install_is_idempotent(tmp_path: Path) -> None:
     assert len(data["hooks"]["UserPromptSubmit"]) == 1
 
 
+@pytest.mark.invariant(
+    decision="Every file a user owns is diffed and confirmed before it is written"
+)
 def test_install_refuses_conflicting_base_url(tmp_path: Path) -> None:
     environ = {"HOME": str(tmp_path)}
     path = install.settings_path("user", environ, tmp_path)
@@ -230,6 +235,9 @@ def test_uninstall_round_trip(tmp_path: Path) -> None:
     assert not skill_dir.exists()
 
 
+@pytest.mark.invariant(
+    decision="Every file a user owns is diffed and confirmed before it is written"
+)
 def test_uninstall_only_removes_our_base_url(tmp_path: Path) -> None:
     environ = {"HOME": str(tmp_path)}
     path = install.settings_path("user", environ, tmp_path)
@@ -241,6 +249,9 @@ def test_uninstall_only_removes_our_base_url(tmp_path: Path) -> None:
     assert data["env"]["ANTHROPIC_BASE_URL"] == "https://not-ours.example"
 
 
+@pytest.mark.invariant(
+    decision="Every file a user owns is diffed and confirmed before it is written"
+)
 def test_uninstall_without_settings_creates_nothing(tmp_path: Path) -> None:
     """Uninstalling on a machine that never had a settings.json must not create one."""
     environ = {"HOME": str(tmp_path)}
@@ -283,22 +294,27 @@ def test_skill_source_dir_falls_back_to_repo_checkout(
     assert source.parts[-3:] == ("claude", "skills", "cache")
 
 
+@pytest.mark.invariant(decision="The port is written down, never assumed")
 def test_resolve_install_port_prefers_explicit_flag() -> None:
     assert install.resolve_install_port(9999, {"CGX_PORT": "1111"}, 2222) == 9999
 
 
+@pytest.mark.invariant(decision="The port is written down, never assumed")
 def test_resolve_install_port_falls_back_to_cgx_port_env() -> None:
     assert install.resolve_install_port(None, {"CGX_PORT": "1111"}, 2222) == 1111
 
 
+@pytest.mark.invariant(decision="The port is written down, never assumed")
 def test_resolve_install_port_falls_back_to_cgx_url_env() -> None:
     assert install.resolve_install_port(None, {"CGX_URL": "http://127.0.0.1:1111"}, 2222) == 1111
 
 
+@pytest.mark.invariant(decision="The port is written down, never assumed")
 def test_resolve_install_port_falls_back_to_installed_unit_port() -> None:
     assert install.resolve_install_port(None, {}, 2222) == 2222
 
 
+@pytest.mark.invariant(decision="The port is written down, never assumed")
 def test_resolve_install_port_falls_back_to_default() -> None:
     assert install.resolve_install_port(None, {}, None) == install.DEFAULT_PORT
 
@@ -307,6 +323,7 @@ def test_resolve_install_url_builds_loopback_url() -> None:
     assert install.resolve_install_url(9999, {}, None) == "http://127.0.0.1:9999"
 
 
+@pytest.mark.invariant(decision="The port is written down, never assumed")
 def test_install_writes_cgx_url_for_non_default_port(tmp_path: Path) -> None:
     environ = {"HOME": str(tmp_path)}
     url = "http://127.0.0.1:9999"
@@ -318,6 +335,7 @@ def test_install_writes_cgx_url_for_non_default_port(tmp_path: Path) -> None:
     assert data["env"]["CGX_URL"] == url
 
 
+@pytest.mark.invariant(decision="The port is written down, never assumed")
 def test_install_does_not_write_cgx_url_for_default_port(tmp_path: Path) -> None:
     environ = {"HOME": str(tmp_path)}
     install.install(
@@ -427,3 +445,29 @@ def test_plan_uninstall_apply_removes_settings_entries_and_skill(tmp_path: Path)
     assert "env" not in data or "ANTHROPIC_BASE_URL" not in data.get("env", {})
     skill_dir = install.skills_dir("user", environ, tmp_path)
     assert not skill_dir.exists()
+
+
+@pytest.mark.invariant(decision="No first-party base URL flag by default")
+def test_configure_writes_no_env_key_beyond_the_documented_two(tmp_path: Path) -> None:
+    """The ``env`` block gets exactly ``ANTHROPIC_BASE_URL`` and ``CGX_URL``, nothing else.
+
+    ``_CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL`` in particular is an
+    undocumented opt-in whose only known effect is 1M-context verification
+    behind a custom URL; it is never written on the user's behalf. Any
+    further key belongs in docs/DESIGN.md and the README tables first.
+    """
+    environ = {"HOME": str(tmp_path)}
+    path = install.settings_path("user", environ, tmp_path)
+    _assert_inside(path, tmp_path)
+
+    install.install(
+        scope="user",
+        url="http://127.0.0.1:9999",
+        force=False,
+        dry_run=False,
+        environ=environ,
+        cwd=tmp_path,
+    )
+
+    env = json.loads(path.read_text())["env"]
+    assert set(env) == {"ANTHROPIC_BASE_URL", "CGX_URL"}

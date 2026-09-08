@@ -1,7 +1,14 @@
 """Tests for claude_gateway_extensions.core.selector."""
 
+import pytest
+
 from claude_gateway_extensions.core.selector import LargestPrefixSelector
 from claude_gateway_extensions.core.snapshot import Snapshot, Usage
+
+#: Every test in this file guards one recorded decision; see tests/conftest.py.
+pytestmark = pytest.mark.invariant(
+    decision="Streams keyed by model + system + tools, largest prefix wins"
+)
 
 
 def _snap(stream: str, total_input: int, captured_at: float) -> Snapshot:

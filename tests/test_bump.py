@@ -4,6 +4,8 @@ import gzip
 import json
 import zlib
 
+import pytest
+
 from claude_gateway_extensions.core.bump import (
     build_bump_body,
     build_bump_headers,
@@ -12,6 +14,7 @@ from claude_gateway_extensions.core.bump import (
 from claude_gateway_extensions.core.upstream import decode_body
 
 
+@pytest.mark.invariant(decision="Byte-transparent forwarding")
 def test_build_bump_body_sets_max_tokens_zero_and_stream_false() -> None:
     original = {
         "model": "claude-x",
@@ -44,6 +47,7 @@ def test_build_bump_body_sets_max_tokens_zero_and_stream_false() -> None:
     assert "世界" in bumped.decode("utf-8")
 
 
+@pytest.mark.invariant(decision="Byte-transparent forwarding")
 def test_build_bump_body_no_stream_key_stays_absent() -> None:
     body = json.dumps({"model": "m", "max_tokens": 10}).encode("utf-8")
     data = json.loads(build_bump_body(body))
@@ -51,6 +55,7 @@ def test_build_bump_body_no_stream_key_stays_absent() -> None:
     assert data["max_tokens"] == 0
 
 
+@pytest.mark.invariant(decision="Byte-transparent forwarding")
 def test_build_bump_headers_strips_hop_by_hop_and_sets_content_type() -> None:
     headers = {
         "Authorization": "Bearer old",
@@ -66,6 +71,7 @@ def test_build_bump_headers_strips_hop_by_hop_and_sets_content_type() -> None:
     assert result["content-type"] == "application/json"
 
 
+@pytest.mark.invariant(decision="Byte-transparent forwarding")
 def test_build_bump_headers_replaces_credential() -> None:
     headers = {"authorization": "Bearer old", "content-type": "application/json"}
     result = build_bump_headers(headers, credential=("authorization", "Bearer new"))
@@ -73,6 +79,7 @@ def test_build_bump_headers_replaces_credential() -> None:
     assert result["content-type"] == "application/json"
 
 
+@pytest.mark.invariant(decision="Fail-closed bump classification")
 def test_classify_ok() -> None:
     body = json.dumps({"usage": {"cache_creation_input_tokens": 0, "input_tokens": 5}}).encode()
     result = classify(200, body)
@@ -81,12 +88,14 @@ def test_classify_ok() -> None:
     assert result.usage.input_tokens == 5
 
 
+@pytest.mark.invariant(decision="Fail-closed bump classification")
 def test_classify_cache_write() -> None:
     body = json.dumps({"usage": {"cache_creation_input_tokens": 100}}).encode()
     result = classify(200, body)
     assert result.outcome == "cache_write"
 
 
+@pytest.mark.invariant(decision="Fail-closed bump classification")
 def test_classify_unauthorized() -> None:
     assert classify(401, b"{}").outcome == "unauthorized"
     assert classify(403, b"{}").outcome == "unauthorized"
@@ -105,11 +114,13 @@ def test_classify_rejected_excerpt_capped_at_500_chars() -> None:
     assert len(result.detail) == 500
 
 
+@pytest.mark.invariant(decision="Fail-closed bump classification")
 def test_classify_transient_on_5xx() -> None:
     assert classify(500, b"boom").outcome == "transient"
     assert classify(503, b"boom").outcome == "transient"
 
 
+@pytest.mark.invariant(decision="Fail-closed bump classification")
 def test_build_bump_headers_pins_a_decodable_accept_encoding() -> None:
     """A replay must not ask for an encoding this code cannot decode (br, zstd)."""
     headers = build_bump_headers({"accept-encoding": "br, zstd", "content-type": "text/x"}, None)
@@ -117,6 +128,7 @@ def test_build_bump_headers_pins_a_decodable_accept_encoding() -> None:
     assert headers["content-type"] == "text/x"
 
 
+@pytest.mark.invariant(decision="Byte-transparent forwarding")
 def test_decode_body_handles_gzip_deflate_and_passes_others_through() -> None:
     payload = b'{"usage": {"cache_creation_input_tokens": 7}}'
     assert decode_body(gzip.compress(payload), "gzip") == payload
@@ -128,6 +140,7 @@ def test_decode_body_handles_gzip_deflate_and_passes_others_through() -> None:
     assert decode_body(b"not gzip", "gzip") == b"not gzip"
 
 
+@pytest.mark.invariant(decision="Fail-closed bump classification")
 def test_classify_reads_usage_from_a_gzipped_body_via_decode() -> None:
     """The cache_write safety valve must survive a compressed upstream response."""
     payload = json.dumps({"usage": {"cache_creation_input_tokens": 12}}).encode()
@@ -135,6 +148,7 @@ def test_classify_reads_usage_from_a_gzipped_body_via_decode() -> None:
     assert classify(200, decoded).outcome == "cache_write"
 
 
+@pytest.mark.invariant(decision="Fail-closed bump classification")
 def test_classify_survives_a_body_it_cannot_decode() -> None:
     """An undecodable 200 body must not raise, and must fail closed as transient.
 
@@ -146,6 +160,7 @@ def test_classify_survives_a_body_it_cannot_decode() -> None:
     assert result.usage is None
 
 
+@pytest.mark.invariant(decision="Fail-closed bump classification")
 def test_classify_transient_when_usage_missing_from_200_body() -> None:
     """A 200 body with no usage block must fail closed rather than reset the timer."""
     result = classify(200, b'{"id": "msg_1"}')
@@ -153,6 +168,7 @@ def test_classify_transient_when_usage_missing_from_200_body() -> None:
     assert result.usage is None
 
 
+@pytest.mark.invariant(decision="Fail-closed bump classification")
 def test_classify_transient_when_usage_is_null() -> None:
     """An explicit ``usage: null`` is just as unreadable as a missing key."""
     result = classify(200, b'{"usage": null}')

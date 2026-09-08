@@ -1,9 +1,14 @@
-"""Shared pytest fixtures for server tests: a fake upstream and app harness.
+"""Shared pytest fixtures for server tests, and the ``invariant`` marker report hook.
 
 The fake upstream is a real in-process aiohttp server (via ``aiohttp.test_utils``)
 that records every request it receives and answers with scripted handlers, so
 tests exercise the proxy's actual HTTP behaviour rather than a mocked
 transport. No test in this suite talks to the real Anthropic API.
+
+A test marked ``@pytest.mark.invariant(decision="...")`` guards a decision
+recorded in ``docs/DESIGN.md``. When such a test fails, this module appends
+:data:`_INVARIANT_NOTE` to the failure report so the reader knows the failure
+is a contradicted decision rather than a broken test.
 """
 
 from __future__ import annotations
@@ -11,7 +16,9 @@ from __future__ import annotations
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
+import pytest
 import pytest_asyncio
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
@@ -20,6 +27,33 @@ from claude_gateway_extensions.config import Config
 from claude_gateway_extensions.server.app import make_app
 
 Handler = Callable[[web.Request], Awaitable[web.StreamResponse]]
+
+_INVARIANT_NOTE = """\
+This test guards a recorded design decision:
+
+    {decision}
+
+It is written down in docs/DESIGN.md, under "Decisions". The failure above
+means the code no longer behaves the way that decision describes.
+
+Do not adjust, weaken, skip, xfail or delete this test to make it pass, and
+do not change the behaviour it pins. Either fix the code so the decision
+holds again, or stop: changing the decision itself requires an amendment to
+docs/DESIGN.md and the user's explicit consent, in that order.
+"""
+
+
+@pytest.hookimpl(wrapper=True)
+def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[None]) -> Any:
+    """Append :data:`_INVARIANT_NOTE` to the report of a failing ``invariant`` test."""
+    report: pytest.TestReport = yield
+    marker = item.get_closest_marker("invariant")
+    if report.failed and marker is not None:
+        decision = marker.kwargs.get("decision") or (marker.args[0] if marker.args else "unnamed")
+        report.sections.append(
+            ("Contradicted design decision", _INVARIANT_NOTE.format(decision=decision))
+        )
+    return report
 
 
 @dataclass

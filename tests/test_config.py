@@ -7,6 +7,7 @@ import pytest
 from claude_gateway_extensions.config import Config, ConfigError
 
 
+@pytest.mark.invariant(decision="Environment variables only, split by process")
 def test_defaults() -> None:
     config = Config.from_env({})
     assert config.host == "127.0.0.1"
@@ -93,6 +94,7 @@ def test_on_cache_write_continue_accepted() -> None:
 
 
 @pytest.mark.parametrize("host", ["127.0.0.1", "::1", "localhost"])
+@pytest.mark.invariant(decision="Control API on /cgx/, loopback only, unauthenticated")
 def test_loopback_hosts_accepted(host: str) -> None:
     config = Config.from_env({"CGX_HOST": host})
     assert config.host == host
@@ -100,6 +102,7 @@ def test_loopback_hosts_accepted(host: str) -> None:
 
 
 @pytest.mark.parametrize("host", ["127.0.0.2", "127.255.255.254", "[::1]"])
+@pytest.mark.invariant(decision="Control API on /cgx/, loopback only, unauthenticated")
 def test_any_loopback_ip_literal_is_local(host: str) -> None:
     config = Config.from_env({"CGX_HOST": host})
     assert config.host == host
@@ -107,6 +110,7 @@ def test_any_loopback_ip_literal_is_local(host: str) -> None:
 
 
 @pytest.mark.parametrize("host", ["0.0.0.0", "192.168.1.10", "myhost"])
+@pytest.mark.invariant(decision="Control API on /cgx/, loopback only, unauthenticated")
 def test_non_local_hosts_are_accepted_but_not_local(host: str) -> None:
     """A non-local CGX_HOST is the user's explicit choice; it is never refused."""
     config = Config.from_env({"CGX_HOST": host})
@@ -144,6 +148,7 @@ def test_url_falls_back_to_loopback_anthropic_base_url() -> None:
         "http://example.com:9001",  # not loopback
     ],
 )
+@pytest.mark.invariant(decision="The port is written down, never assumed")
 def test_url_ignores_non_loopback_or_non_http_anthropic_base_url(base_url: str) -> None:
     """A non-loopback (or non-http) ANTHROPIC_BASE_URL is not this daemon; ignore it."""
     config = Config.from_env({"ANTHROPIC_BASE_URL": base_url})
