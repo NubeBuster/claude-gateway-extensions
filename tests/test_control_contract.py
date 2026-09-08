@@ -28,6 +28,7 @@ STATUS_KEYS = {
     "enabled",
     "interval_s",
     "max_duration_s",
+    "until",
     "last_request_at",
     "last_bump_at",
     "bump_count",

@@ -165,6 +165,7 @@ def _state_to_json(state: SessionState) -> dict[str, object]:
         "enabled": state.enabled,
         "interval_s": state.interval_s,
         "max_duration_s": state.max_duration_s,
+        "until": state.until,
         "last_request_at": state.last_request_at,
         "last_bump_at": state.last_bump_at,
         "bump_count": state.bump_count,
@@ -181,6 +182,7 @@ def _state_from_json(data: dict[str, object]) -> SessionState:
         enabled=bool(data["enabled"]),
         interval_s=data["interval_s"],  # type: ignore[arg-type]
         max_duration_s=data["max_duration_s"],  # type: ignore[arg-type]
+        until=data.get("until"),  # type: ignore[arg-type]
         last_request_at=data["last_request_at"],  # type: ignore[arg-type]
         last_bump_at=data["last_bump_at"],  # type: ignore[arg-type]
         bump_count=int(data["bump_count"]),  # type: ignore[arg-type]

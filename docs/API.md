@@ -29,7 +29,7 @@ Response `200`:
 
 ```json
 {"sessions": [{"session_id": "abc123", "enabled": true, "interval_s": null,
-  "max_duration_s": null, "last_request_at": 1700000000.0,
+  "max_duration_s": null, "until": null, "last_request_at": 1700000000.0,
   "last_bump_at": 1700003000.0, "bump_count": 3, "stopped_reason": null,
   "next_bump_at": 1700006000.0, "streams": 2, "last_result": null}]}
 ```
@@ -49,7 +49,7 @@ or max duration. Creates the session's state if it did not already exist.
 Request body:
 
 ```json
-{"enabled": true, "interval_s": 300, "max_duration_s": 86400}
+{"enabled": true, "interval_s": 300, "max_duration_s": 86400, "until": 1700006000}
 ```
 
 `enabled` is required and must be a boolean. `interval_s` and
@@ -58,6 +58,16 @@ pass `null` to leave a previously set value untouched, or to fall back to the
 config default if none was ever set. Zero and negative values are rejected
 rather than clamped — an `interval_s` of `0` would make the daemon bump on
 every scheduler tick, spending a cache read per second.
+
+`until` is an optional number (Unix epoch seconds, fractional allowed).
+When set, it replaces the `max_duration_s` stop for this session with an
+absolute deadline: the scheduler stops the session (`stopped_reason:
+"deadline"`) once the clock reaches `until`, regardless of `max_duration_s`.
+Omit or pass `null` to leave a previously set deadline untouched, or to fall
+back to `max_duration_s` if none was ever set — the daemon's `max_duration_s`
+default only applies when `until` is never given, e.g. plain `ccbg on`. A
+past `until` is accepted (not rejected as `interval_s`/`max_duration_s`
+would be): the session simply stops on its next scheduler tick.
 
 Response: the session's updated status dict (same shape as `GET
 /ccbg/sessions/{id}`).

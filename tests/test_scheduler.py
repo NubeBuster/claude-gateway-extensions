@@ -224,6 +224,66 @@ async def test_max_duration_stops(tmp_path: Path, clock: FakeClock, store: Memor
     await scheduler.stop()
 
 
+async def test_deadline_stops_at_absolute_time(
+    tmp_path: Path, clock: FakeClock, store: MemoryStore
+) -> None:
+    upstream = ScriptedUpstream([])
+    scheduler = Scheduler(_config(tmp_path), store, LargestPrefixSelector(), upstream, clock)
+
+    scheduler.note_request("sess-1", _snapshot(), ("authorization", "Bearer a"))
+    scheduler.set_enabled("sess-1", True, interval_s=1000, until=1005.0)
+
+    await _pump_until(lambda: store.get_state("sess-1").stopped_reason is not None)  # type: ignore[union-attr]
+
+    state = store.get_state("sess-1")
+    assert state is not None
+    assert state.stopped_reason == "deadline"
+    assert state.bump_count == 0
+    assert upstream.calls == []
+    assert clock.now() == pytest.approx(1005.0)
+
+    await scheduler.stop()
+
+
+async def test_deadline_takes_precedence_over_max_duration(
+    tmp_path: Path, clock: FakeClock, store: MemoryStore
+) -> None:
+    """A generous ``until`` must not be cut short by a smaller ``max_duration_s``."""
+    upstream = ScriptedUpstream([_ok_response()])
+    scheduler = Scheduler(_config(tmp_path), store, LargestPrefixSelector(), upstream, clock)
+
+    scheduler.note_request("sess-1", _snapshot(), ("authorization", "Bearer a"))
+    scheduler.set_enabled("sess-1", True, interval_s=5, max_duration_s=2, until=1000.0 + 3600.0)
+
+    await _pump_until(lambda: store.get_state("sess-1").bump_count == 1)  # type: ignore[union-attr]
+
+    state = store.get_state("sess-1")
+    assert state is not None
+    assert state.stopped_reason is None
+    assert state.enabled is True
+
+    await scheduler.stop()
+
+
+async def test_past_deadline_stops_immediately(
+    tmp_path: Path, clock: FakeClock, store: MemoryStore
+) -> None:
+    upstream = ScriptedUpstream([])
+    scheduler = Scheduler(_config(tmp_path), store, LargestPrefixSelector(), upstream, clock)
+
+    scheduler.note_request("sess-1", _snapshot(), ("authorization", "Bearer a"))
+    scheduler.set_enabled("sess-1", True, interval_s=1000, until=500.0)
+
+    await _pump_until(lambda: store.get_state("sess-1").stopped_reason is not None)  # type: ignore[union-attr]
+
+    state = store.get_state("sess-1")
+    assert state is not None
+    assert state.stopped_reason == "deadline"
+    assert upstream.calls == []
+
+    await scheduler.stop()
+
+
 async def test_in_flight_request_defers_bump(
     tmp_path: Path, clock: FakeClock, store: MemoryStore
 ) -> None:

@@ -120,8 +120,15 @@ class Scheduler:
         enabled: bool,
         interval_s: int | None = None,
         max_duration_s: int | None = None,
+        until: float | None = None,
     ) -> SessionState:
-        """Enable or disable bumping for a session, optionally overriding interval/max duration."""
+        """Enable or disable bumping for a session, optionally overriding interval/max duration.
+
+        ``until`` is an absolute epoch deadline that, once set, replaces the
+        max-duration stop for this session (see :meth:`_run_session`); omit
+        or pass ``None`` to leave a previously set deadline untouched, same
+        as ``interval_s``/``max_duration_s``.
+        """
         state = self._store.get_state(session_id)
         if state is None:
             state = SessionState(session_id=session_id, enabled=enabled)
@@ -130,6 +137,8 @@ class Scheduler:
             state = dataclasses.replace(state, interval_s=interval_s)
         if max_duration_s is not None:
             state = dataclasses.replace(state, max_duration_s=max_duration_s)
+        if until is not None:
+            state = dataclasses.replace(state, until=until)
         if enabled:
             state = dataclasses.replace(state, stopped_reason=None)
         self._store.put_state(state)
@@ -194,6 +203,7 @@ class Scheduler:
             "enabled": state.enabled,
             "interval_s": state.interval_s,
             "max_duration_s": state.max_duration_s,
+            "until": state.until,
             "last_request_at": state.last_request_at,
             "last_bump_at": state.last_bump_at,
             "bump_count": state.bump_count,
@@ -295,19 +305,24 @@ class Scheduler:
                 if snapshot is None:
                     self._persist_stop(session_id, "no_snapshot")
                     return
-                max_duration = (
-                    state.max_duration_s
-                    if state.max_duration_s is not None
-                    else self._config.max_duration_s
-                )
-                last_request_at = (
-                    state.last_request_at
-                    if state.last_request_at is not None
-                    else self._clock.now()
-                )
-                if self._clock.now() - last_request_at >= max_duration:
-                    self._persist_stop(session_id, "max_duration")
-                    return
+                if state.until is not None:
+                    if self._clock.now() >= state.until:
+                        self._persist_stop(session_id, "deadline")
+                        return
+                else:
+                    max_duration = (
+                        state.max_duration_s
+                        if state.max_duration_s is not None
+                        else self._config.max_duration_s
+                    )
+                    last_request_at = (
+                        state.last_request_at
+                        if state.last_request_at is not None
+                        else self._clock.now()
+                    )
+                    if self._clock.now() - last_request_at >= max_duration:
+                        self._persist_stop(session_id, "max_duration")
+                        return
                 next_bump_at = self._next_bump_at(state, snapshot)
                 assert next_bump_at is not None
                 remaining = next_bump_at - self._clock.now()

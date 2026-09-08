@@ -64,7 +64,7 @@ async def get_session(request: web.Request) -> web.Response:
 
 
 async def put_session(request: web.Request) -> web.Response:
-    """``PUT /ccbg/sessions/{id}``: set enabled/interval/max_duration, return status."""
+    """``PUT /ccbg/sessions/{id}``: set enabled/interval/max_duration/until, return status."""
     session_id = request.match_info["id"]
     if not SESSION_ID_RE.match(session_id):
         return _invalid_session_id()
@@ -79,9 +79,12 @@ async def put_session(request: web.Request) -> web.Response:
     max_duration_s = body.get("max_duration_s")
     if not _is_optional_positive_int(max_duration_s):
         return web.json_response({"error": "invalid_body"}, status=400)
+    until = body.get("until")
+    if not _is_optional_number(until):
+        return web.json_response({"error": "invalid_body"}, status=400)
 
     scheduler: Scheduler = request.app[SCHEDULER_KEY]
-    scheduler.set_enabled(session_id, body["enabled"], interval_s, max_duration_s)
+    scheduler.set_enabled(session_id, body["enabled"], interval_s, max_duration_s, until)
     return web.json_response(scheduler.status(session_id))
 
 
@@ -133,6 +136,20 @@ def _is_optional_positive_int(value: object) -> bool:
     if value is None:
         return True
     return isinstance(value, int) and not isinstance(value, bool) and value > 0
+
+
+def _is_optional_number(value: object) -> bool:
+    """Return ``True`` if ``value`` is ``None`` or a plain ``int``/``float`` (not ``bool``).
+
+    Used for ``until``, an absolute Unix epoch timestamp: unlike
+    ``interval_s``/``max_duration_s`` it is not a duration, so zero or a
+    past value is not rejected here — a deadline already in the past just
+    stops the session on its next scheduler tick, which is a normal (if
+    immediate) outcome, not a client error.
+    """
+    if value is None:
+        return True
+    return isinstance(value, int | float) and not isinstance(value, bool)
 
 
 def register(app: web.Application) -> None:

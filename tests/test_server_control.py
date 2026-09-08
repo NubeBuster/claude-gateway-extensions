@@ -184,3 +184,33 @@ async def test_put_rejects_non_positive_durations(
 
     # And nothing was created for the rejected session.
     assert (await harness.client.get("/ccbg/sessions/sess-interval")).status == 404
+
+
+async def test_put_accepts_until_and_reports_it_back(harness: ServerHarness) -> None:
+    resp = await harness.client.put(
+        "/ccbg/sessions/sess-until", json={"enabled": True, "until": 1700006000}
+    )
+    assert resp.status == 200
+    data = await resp.json()
+    assert data["until"] == 1700006000
+
+    fetched = await harness.client.get("/ccbg/sessions/sess-until")
+    assert (await fetched.json())["until"] == 1700006000
+
+
+async def test_put_rejects_non_numeric_until(harness: ServerHarness) -> None:
+    resp = await harness.client.put(
+        "/ccbg/sessions/sess-until-bad", json={"enabled": True, "until": "soon"}
+    )
+    assert resp.status == 400
+    assert (await resp.json())["error"] == "invalid_body"
+
+
+async def test_put_accepts_a_past_until_unlike_max_duration(harness: ServerHarness) -> None:
+    """Unlike ``interval_s``/``max_duration_s``, ``until`` is not clamped to the future."""
+    resp = await harness.client.put(
+        "/ccbg/sessions/sess-until-past", json={"enabled": True, "until": 1.0}
+    )
+    assert resp.status == 200
+    data = await resp.json()
+    assert data["until"] == 1.0

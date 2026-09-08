@@ -66,6 +66,7 @@ class SessionState:
     enabled: bool = False
     interval_s: int | None = None
     max_duration_s: int | None = None
+    until: float | None = None
     last_request_at: float | None = None
     last_bump_at: float | None = None
     bump_count: int = 0

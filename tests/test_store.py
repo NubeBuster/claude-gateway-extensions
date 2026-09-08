@@ -1,5 +1,6 @@
 """Tests for claude_cache_bump_gateway.core.store."""
 
+import json
 import stat
 from pathlib import Path
 
@@ -79,6 +80,42 @@ def test_file_store_permissions_and_round_trip(tmp_path: Path) -> None:
     assert got_snapshots[0].body == snap.body
     got_state = reloaded.get_state("sess-1")
     assert got_state == state
+
+
+def test_file_store_round_trips_until(tmp_path: Path) -> None:
+    root = tmp_path / "state"
+    store = FileStore(root, max_streams_per_session=8)
+    state = SessionState(session_id="sess-1", enabled=True, until=1700006000.0)
+    store.put_state(state)
+
+    reloaded = FileStore(root, max_streams_per_session=8)
+    got_state = reloaded.get_state("sess-1")
+    assert got_state == state
+    assert got_state.until == 1700006000.0  # type: ignore[union-attr]
+
+
+def test_file_store_loads_state_without_until_key(tmp_path: Path) -> None:
+    """A ``state.json`` written before ``until`` existed must still load, with ``until=None``."""
+    root = tmp_path / "state"
+    session_dir = root / "sess-1"
+    session_dir.mkdir(parents=True)
+    legacy = {
+        "session_id": "sess-1",
+        "enabled": True,
+        "interval_s": None,
+        "max_duration_s": None,
+        "last_request_at": None,
+        "last_bump_at": None,
+        "bump_count": 0,
+        "stopped_reason": None,
+        "last_credential": None,
+    }
+    (session_dir / "state.json").write_bytes(json.dumps(legacy).encode("utf-8"))
+
+    store = FileStore(root, max_streams_per_session=8)
+    state = store.get_state("sess-1")
+    assert state is not None
+    assert state.until is None
 
 
 def test_file_store_lru_cap(tmp_path: Path) -> None:
