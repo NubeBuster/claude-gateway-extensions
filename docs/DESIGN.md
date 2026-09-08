@@ -126,7 +126,6 @@ Candidate features for later releases, in no particular order:
 - SessionStart hook that registers a session with its project's policy, so
   default-enabled becomes per-project.
 - Cache-miss gate: hold or refuse a request whose prefix is no longer cached.
-- Fork review: inspect a session's captured request before acting on it.
 - Named checkpoints: label a captured snapshot and return to it later.
 - TTL and placement policy: rewrite `cache_control` ttl and block placement.
 - Credit accounting: track what bumping and normal traffic cost.
@@ -160,3 +159,94 @@ loopback-only control API.
 - The hook relies on `UserPromptSubmit` receiving the raw prompt before skill
   expansion. If that order changes, the skill body still explains the situation
   to the user.
+
+## Shadow review fork
+
+A shadow review fork ("microfork") asks one question about a live session
+without that session ever learning it was asked. At a hook, or any other
+trigger that can reach the control API, the daemon replays the session's
+captured snapshot with a single review turn appended, reads a verdict out
+of the reply and discards the twin. The parent pays a cache read plus the
+twin's output tokens, and its context grows by the verdict text or by
+nothing at all — cheaper than blocking it to rethink, and cheaper than a
+standing instruction every turn re-reads. This supersedes the "Fork
+review" roadmap line; no part of it ships in 1.0.
+
+- **A fork is one replay, never a session.** It is the bump request with
+  `max_tokens` restored and one message appended, sent through the same
+  `Upstream`: a twin that could take a second turn would need
+  conversation state the daemon has no business owning.
+- **The snapshot is chosen by the same `TargetSelector` as bumping.** The
+  stream worth keeping warm is the stream worth reviewing — the main
+  conversation — and a second selection rule would silently drift from
+  the first.
+- **The appended turn is one user message: the rendered prompt, then the
+  hook payload as a fenced JSON block.** Keeping the data verbatim and
+  clearly delimited means a template author writes instructions, not an
+  escaping scheme.
+- **`tools` are stripped from the fork body.** A twin with tools could
+  edit files or spawn agents on the parent's behalf while the parent
+  believes it is merely thinking, and the review needs none of them.
+- **`stream` is false and `max_tokens` is capped per fork** (request
+  field, else `CGX_FORK_MAX_TOKENS`, default 512). A verdict is a
+  sentence and a label, so a runaway twin is a bug, not a use case, and a
+  non-streamed reply is one body to parse.
+- **The verdict is strict JSON: `{"verdict": "ok" | "intervene",
+  "reason": str, "mutation": object | null}`.** A fixed contract is what
+  lets one hook CLI serve every template without each one inventing its
+  own reply format.
+- **Anything unparseable is `ok`, with a warning logged and never the
+  text itself.** A broken prompt, a truncated reply or a chatty model
+  must never block the user's work, so the fail-open direction is an
+  invariant of the parser rather than a fallback bolted on to it.
+- **Every fork is expected to be a cache read.**
+  `cache_creation_input_tokens > 0` means the prefix drifted, which costs
+  a full write; the verdict is still returned (the answer was paid for
+  already) but flagged `paid_write: true` so a caller or a statusline can
+  see a fork that is quietly costing real money.
+- **Forks are rate limited per session** (`CGX_FORK_MAX_PER_MIN`, default
+  6; over the limit answers `ok` with reason `rate_limited`). A hook on a
+  hot event can fire dozens of times a minute, and a cheap fork times
+  fifty is not cheap.
+- **No snapshot is `ok` with reason `no_snapshot`, not an error.** A
+  session whose first request has not landed yet cannot be reviewed, and
+  a hook failure there would break a session that has done nothing wrong.
+- **`POST /cgx/sessions/{id}/fork`**, body `{prompt, hook_event, payload,
+  max_tokens?}`, answering `200 {verdict, reason, mutation, usage,
+  paid_write}` — including for the `ok` degradations above, since a
+  non-200 would push fail-open logic into every client.
+- **`cgx fork-review --template <name>` is the only hook-side entry
+  point.** It reads the hook JSON on stdin, renders the named template,
+  calls the API and maps the verdict to the output shape of whichever
+  event the payload names; it is top-level rather than a `cgx hook
+  <event>` entry point because one implementation serves every event.
+- **The verdict-to-hook mapping is fixed per event, and the template
+  picks only the intervention style.** `PreToolUse` gets
+  `hookSpecificOutput.permissionDecision` (`deny` by default, `ask` or a
+  plain `additionalContext` advisory when the template says so),
+  `UserPromptSubmit` and the `Post*` events get top-level `decision:
+  "block"` with the reason, and `ok` always exits 0 with no output.
+- **`mutation` is honoured only where the hook API has a slot for it.**
+  At `PreToolUse` it becomes `updatedInput` (whole object, per the hook
+  contract); anywhere else it is logged as ignored rather than
+  approximated with injected text.
+- **Templates are plain text files in the user's config directory**
+  (`CGX_TEMPLATE_DIR`, default `$XDG_CONFIG_HOME/cgx/templates`),
+  `{placeholder}` substituted from the hook payload's top-level fields,
+  unknown placeholders left literal. Two ship as examples — task
+  assignment review at `PreToolUse` `TaskCreate`, and a permission
+  classifier at `PreToolUse` `Bash` — because the feature's value is
+  entirely in prompts the user is expected to edit.
+- **`/btw <question>` is a `UserPromptSubmit` template that always
+  intervenes.** The answer comes back as the block reason, so the
+  question and its answer are shown to the user and never enter the
+  parent's context — which is the whole point of asking it on the side.
+- **The fork replays the parent's credential and logs neither prompt nor
+  verdict in full.** Both rules already hold for bumping, and a review
+  turn is exactly the kind of content the no-body-logging invariant
+  exists to keep out of logs.
+- **Non-goals for the first cut: no multi-turn twins, no tool use by the
+  twin, no fork of one session against another's snapshot, no persistence
+  of a fork's reply.** Each of these turns a stateless one-shot into a
+  thing with a lifecycle, and none is needed by the four use cases that
+  motivated the feature.
