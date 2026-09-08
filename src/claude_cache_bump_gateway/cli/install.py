@@ -316,14 +316,20 @@ def uninstall(
     cwd: Path,
     runner: Runner = _default_runner,
 ) -> InstallResult:
-    """Reverse exactly what :func:`install` added for ``scope``."""
+    """Reverse exactly what :func:`install` added for ``scope``.
+
+    A ``settings.json`` that does not exist is left absent rather than
+    created empty: uninstalling must never leave behind a file the user
+    never had.
+    """
     path = settings_path(scope, environ, cwd)
     skill_dir = skills_dir(scope, environ, cwd)
     settings = load_settings(path)
     remove_base_url(settings, url)
     remove_hook(settings)
-    backup_settings(path)
-    _atomic_write_json(path, settings)
+    if path.is_file():
+        backup_settings(path)
+        _atomic_write_json(path, settings)
     remove_skill(skill_dir)
     if service:
         uninstall_service(environ, runner)

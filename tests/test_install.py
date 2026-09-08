@@ -23,6 +23,10 @@ def _assert_inside(path: Path, root: Path) -> None:
     assert root.resolve() in path.resolve().parents or path.resolve() == root.resolve()
 
 
+def _recording_runner(args: Sequence[str]) -> None:
+    """A systemd runner for tests that must never touch the real systemd."""
+
+
 @pytest.fixture
 def fake_runner() -> tuple[list[list[str]], install.Runner]:
     """A systemd runner that records calls instead of touching the real systemd."""
@@ -271,3 +275,23 @@ def test_render_unit_passes_through_ccbg_env_vars(tmp_path: Path) -> None:
     assert "ExecStart=/usr/local/bin/ccbg serve" in text
     assert "Environment=CCBG_PORT=9999" in text
     assert "UNRELATED" not in text
+
+
+def test_uninstall_without_settings_creates_nothing(tmp_path: Path) -> None:
+    """Uninstalling on a machine that never had a settings.json must not create one."""
+    environ = {"HOME": str(tmp_path)}
+    path = install.settings_path("user", environ, tmp_path)
+    _assert_inside(path, tmp_path)
+    assert not path.exists()
+
+    install.uninstall(
+        scope="user",
+        url="http://127.0.0.1:8787",
+        service=False,
+        environ=environ,
+        cwd=tmp_path,
+        runner=_recording_runner,
+    )
+
+    assert not path.exists()
+    assert not path.with_name(path.name + ".bak").exists()
