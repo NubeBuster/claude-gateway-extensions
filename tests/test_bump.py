@@ -136,7 +136,25 @@ def test_classify_reads_usage_from_a_gzipped_body_via_decode() -> None:
 
 
 def test_classify_survives_a_body_it_cannot_decode() -> None:
-    """An undecodable 200 body must not raise out of classify and kill the session task."""
+    """An undecodable 200 body must not raise, and must fail closed as transient.
+
+    An unconfirmed bump must never reset the timer as though the cache read
+    succeeded, so a body this code cannot parse is transient, not ok.
+    """
     result = classify(200, gzip.compress(b'{"usage": {}}'))
-    assert result.outcome == "ok"
+    assert result.outcome == "transient"
+    assert result.usage is None
+
+
+def test_classify_transient_when_usage_missing_from_200_body() -> None:
+    """A 200 body with no usage block must fail closed rather than reset the timer."""
+    result = classify(200, b'{"id": "msg_1"}')
+    assert result.outcome == "transient"
+    assert result.usage is None
+
+
+def test_classify_transient_when_usage_is_null() -> None:
+    """An explicit ``usage: null`` is just as unreadable as a missing key."""
+    result = classify(200, b'{"usage": null}')
+    assert result.outcome == "transient"
     assert result.usage is None

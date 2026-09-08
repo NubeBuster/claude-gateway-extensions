@@ -80,18 +80,35 @@ def _excerpt(body: bytes) -> str:
 
 
 def classify(status: int, body_bytes: bytes) -> BumpResult:
-    """Classify a bump response per ``docs/DESIGN.md`` "Bump protocol"."""
+    """Classify a bump response per ``docs/DESIGN.md`` "Bump protocol".
+
+    A 200 response is only trusted as a confirmed cache read when its
+    ``usage`` block was actually readable. A body this code cannot read (an
+    encoding it could not decode, binary junk) or a body with no ``usage``
+    block must never be treated as ``ok`` — an unconfirmed bump must never
+    count as a warm cache, since that would reset the bump timer on a read
+    nobody actually verified. Failing closed as ``transient`` means the
+    scheduler's existing retry-with-backoff applies and, if the body is
+    never readable, the session stops after the retry cap with a recorded
+    reason instead of silently going quiet.
+    """
     if status == 200:
-        usage = None
         try:
             data = json.loads(body_bytes)
         except (json.JSONDecodeError, UnicodeDecodeError):
-            # A body this code cannot read (an encoding it could not decode,
-            # binary junk) must never take the session's task down with it.
             data = None
-        if isinstance(data, dict):
-            usage = Usage.from_dict(data.get("usage"))
-        if usage is not None and usage.cache_creation_input_tokens > 0:
+        raw_usage = data.get("usage") if isinstance(data, dict) else None
+        if not isinstance(raw_usage, dict):
+            return BumpResult(
+                outcome="transient",
+                status=status,
+                usage=None,
+                detail="200 response usage could not be read",
+                stream_key=None,
+                model=None,
+            )
+        usage = Usage.from_dict(raw_usage)
+        if usage.cache_creation_input_tokens > 0:
             return BumpResult(
                 outcome="cache_write",
                 status=status,

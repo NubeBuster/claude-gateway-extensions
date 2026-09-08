@@ -137,6 +137,7 @@ Outcome classification (`BumpResult`):
 |---|---|---|
 | 200 and `usage.cache_creation_input_tokens == 0` | `ok` | timer reset |
 | 200 and `cache_creation_input_tokens > 0` | `cache_write` | the cache was already gone and a write was paid; per `on_cache_write`, default `stop` |
+| 200 and `usage` missing, not an object, or the body unparseable | `transient` | the cache read could not be confirmed; retry with backoff, then stop — never reset the timer on an unconfirmed bump |
 | 401 or 403 | `unauthorized` | stop session |
 | other 4xx | `rejected` | stop session, record body excerpt |
 | 5xx or network error | `transient` | retry with exponential backoff (1 s, 4 s, 16 s), then stop |
