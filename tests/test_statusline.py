@@ -67,19 +67,38 @@ def _run(payload: dict[str, object], environ: dict[str, str]) -> str:
     return stdout.getvalue()
 
 
-def test_on_with_next_bump(fake_daemon: tuple[str, dict]) -> None:
+def _pin_now(monkeypatch: pytest.MonkeyPatch) -> float:
+    """Pin ``time.time()`` (both the test's and ``run_statusline``'s) to local noon today.
+
+    ``run_statusline`` reads the wall clock itself (``time.time()`` at format
+    time), so a test that builds a deadline from ``time.time() + N minutes``
+    and expects a same-day/another-day format is flaky whenever that offset
+    crosses a real midnight — the exact failure this pins away. Local noon
+    keeps every offset these tests use (minutes to a few days) clear of any
+    day boundary regardless of the host's timezone.
+    """
+    noon = datetime.now().astimezone().replace(hour=12, minute=0, second=0, microsecond=0)
+    fixed_now = noon.timestamp()
+    monkeypatch.setattr(time, "time", lambda: fixed_now)
+    return fixed_now
+
+
+def test_on_with_next_bump(fake_daemon: tuple[str, dict], monkeypatch: pytest.MonkeyPatch) -> None:
     base_url, routes = fake_daemon
+    now = _pin_now(monkeypatch)
     routes[("GET", "/ccbg/sessions/s1")] = (
         200,
-        {"session_id": "s1", "enabled": True, "next_bump_at": time.time() + 47 * 60},
+        {"session_id": "s1", "enabled": True, "next_bump_at": now + 47 * 60},
     )
     out = _run({"session_id": "s1"}, {"CCBG_URL": base_url})
     assert out.strip() == "cache: on, next in 47m"
 
 
-def test_on_with_deadline_today(fake_daemon: tuple[str, dict]) -> None:
+def test_on_with_deadline_today(
+    fake_daemon: tuple[str, dict], monkeypatch: pytest.MonkeyPatch
+) -> None:
     base_url, routes = fake_daemon
-    now = time.time()
+    now = _pin_now(monkeypatch)
     until = now + 47 * 60
     routes[("GET", "/ccbg/sessions/s1")] = (
         200,
@@ -90,9 +109,11 @@ def test_on_with_deadline_today(fake_daemon: tuple[str, dict]) -> None:
     assert out.strip() == f"cache: on, until {expected}"
 
 
-def test_on_with_deadline_another_day(fake_daemon: tuple[str, dict]) -> None:
+def test_on_with_deadline_another_day(
+    fake_daemon: tuple[str, dict], monkeypatch: pytest.MonkeyPatch
+) -> None:
     base_url, routes = fake_daemon
-    now = time.time()
+    now = _pin_now(monkeypatch)
     until = now + 3 * 86400
     routes[("GET", "/ccbg/sessions/s1")] = (
         200,
