@@ -1,6 +1,9 @@
 # Orchestration notes, never published
 .notes/
 
+# IDE local-history snapshots
+.history/
+
 # Agent git worktrees live inside the repo
 .claude/worktrees/
 
