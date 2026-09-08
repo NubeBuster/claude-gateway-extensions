@@ -43,6 +43,25 @@ async def test_forwards_method_path_query_and_headers(harness: ServerHarness) ->
     assert "connection" not in recorded.headers
 
 
+async def test_forwards_repeated_header_without_collapsing(harness: ServerHarness) -> None:
+    """A repeated request header must reach upstream with every value intact."""
+    seen: list[list[str]] = []
+
+    async def handler(request: web.Request) -> web.Response:
+        seen.append(request.headers.getall("cookie"))
+        return web.json_response({"ok": True})
+
+    harness.fake.script(handler)
+
+    async with harness.client.get(
+        "/v1/models",
+        headers=(("cookie", "a=1"), ("cookie", "b=2")),
+    ) as resp:
+        assert resp.status == 200
+
+    assert seen == [["a=1", "b=2"]]
+
+
 async def test_forwards_body_unchanged(harness: ServerHarness) -> None:
     async def handler(request: web.Request) -> web.Response:
         return web.Response(status=201, body=b"created")

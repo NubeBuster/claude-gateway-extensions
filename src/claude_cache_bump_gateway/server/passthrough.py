@@ -49,7 +49,7 @@ async def handle(request: web.Request) -> web.StreamResponse:
     clock: Clock = request.app[CLOCK_KEY]
 
     target_url = config.upstream.rstrip("/") + request.path_qs
-    outbound_headers = filter_headers(dict(request.headers))
+    outbound_headers = filter_headers(request.headers)
     is_messages = request.method == "POST" and request.path == _MESSAGES_PATH
     session_id = request.headers.get(SESSION_ID_HEADER)
 
@@ -103,7 +103,7 @@ async def _forward(
     scheduler: Scheduler,
     clock: Clock,
     target_url: str,
-    headers: dict[str, str],
+    headers: Mapping[str, str],
     data: bytes | aiohttp.StreamReader,
     is_messages: bool,
     session_id: str | None,
@@ -136,7 +136,7 @@ async def _forward(
 
         resp = web.StreamResponse(
             status=upstream_resp.status,
-            headers=filter_headers(dict(upstream_resp.headers)),
+            headers=filter_headers(upstream_resp.headers),
         )
         await resp.prepare(request)
 

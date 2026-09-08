@@ -16,6 +16,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Literal
 
+from multidict import CIMultiDict
+
 from claude_cache_bump_gateway.core.snapshot import Snapshot, Usage
 from claude_cache_bump_gateway.core.upstream import Upstream, filter_headers
 
@@ -41,7 +43,7 @@ def build_bump_body(body: bytes) -> bytes:
 
 def build_bump_headers(
     snapshot_headers: Mapping[str, str], credential: tuple[str, str] | None
-) -> dict[str, str]:
+) -> CIMultiDict[str]:
     """Return replay headers: hop-by-hop stripped, credential swapped, content-type ensured.
 
     ``accept-encoding`` is forced to ``gzip`` rather than replayed. The

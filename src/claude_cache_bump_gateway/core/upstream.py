@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 import aiohttp
+from multidict import CIMultiDict
 
 logger = logging.getLogger(__name__)
 
@@ -37,13 +38,23 @@ HOP_BY_HOP_HEADERS: frozenset[str] = frozenset(
 )
 
 
-def filter_headers(headers: Mapping[str, str]) -> dict[str, str]:
-    """Return ``headers`` lower-cased with hop-by-hop headers removed."""
-    return {
-        key.lower(): value
-        for key, value in headers.items()
-        if key.lower() not in HOP_BY_HOP_HEADERS
-    }
+def filter_headers(headers: Mapping[str, str]) -> CIMultiDict[str]:
+    """Return ``headers`` lower-cased with hop-by-hop headers removed, repeats preserved.
+
+    Accepts anything exposing ``.items()``, including a multidict whose
+    ``.items()`` yields every value for a repeated header name (as
+    ``aiohttp``'s request and response headers do). Building a plain
+    ``dict`` from that would silently collapse repeats to the last value;
+    a ``CIMultiDict`` keeps every one, and is itself accepted directly by
+    ``aiohttp`` wherever these headers are forwarded, so repeats survive
+    the whole trip.
+    """
+    result: CIMultiDict[str] = CIMultiDict()
+    for key, value in headers.items():
+        lowered = key.lower()
+        if lowered not in HOP_BY_HOP_HEADERS:
+            result.add(lowered, value)
+    return result
 
 
 def decode_body(body: bytes, content_encoding: str | None) -> bytes:
@@ -104,9 +115,13 @@ class AiohttpUpstream:
         The body is decompressed per its ``content-encoding`` (see
         :func:`decode_body`) and that header dropped, because every caller
         parses this body rather than forwarding it.
+
+        ``headers`` is passed straight through rather than rebuilt into a
+        plain ``dict``: a plain ``dict`` cannot represent a repeated header
+        name, and ``aiohttp`` accepts a multidict directly.
         """
         async with self._session.request(
-            method, url, headers=dict(headers), data=body, allow_redirects=False
+            method, url, headers=headers, data=body, allow_redirects=False
         ) as response:
             raw = await response.read()
             response_headers = {key.lower(): value for key, value in response.headers.items()}
