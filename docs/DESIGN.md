@@ -188,6 +188,7 @@ frozen `Config` dataclass:
 | `CCBG_MAX_STREAMS_PER_SESSION` | `8` | snapshots retained per session |
 | `CCBG_LOG_LEVEL` | `INFO` | Python logging level |
 | `CCBG_URL` | `http://127.0.0.1:8787` | where CLI subcommands find the daemon |
+| `CCBG_ALLOW_NON_LOOPBACK` | `false` | allow `CCBG_HOST` to bind a non-loopback address |
 
 Why no configuration file: Claude Code already has a scoped configuration
 ladder (managed, user, project, local) whose `env` block is inherited by the
