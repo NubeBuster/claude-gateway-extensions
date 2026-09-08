@@ -27,7 +27,12 @@ from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import urlsplit
 
-Scope = Literal["user", "project"]
+from claude_cache_bump_gateway.cli.confirm import PlannedChange
+
+#: ``managed`` is deliberately absent: it is root-owned and machine-wide,
+#: which would apply the same ``ANTHROPIC_BASE_URL``/hook to every user on
+#: the machine and conflicts with per-user daemons (see ``--scope`` help).
+Scope = Literal["user", "project", "local"]
 
 #: Command registered for the ``UserPromptSubmit`` hook; also the marker used
 #: to find and remove exactly the entry this installer added.
@@ -37,7 +42,7 @@ _SKILL_NAME = "cache"
 
 #: The daemon's default port and the resulting default URL (matches
 #: ``config.py``'s ``CCBG_HOST``/``CCBG_PORT`` defaults) — the port below
-#: which ``ccbg install`` does not bother also writing ``env.CCBG_URL``.
+#: which ``ccbg configure`` does not bother also writing ``env.CCBG_URL``.
 DEFAULT_PORT = 8787
 DEFAULT_URL = f"http://127.0.0.1:{DEFAULT_PORT}"
 
@@ -53,14 +58,25 @@ def user_home(environ: Mapping[str, str]) -> Path:
 
 
 def settings_path(scope: Scope, environ: Mapping[str, str], cwd: Path) -> Path:
-    """Return the ``settings.json`` path for ``scope`` (``user`` or ``project``)."""
+    """Return the settings path for ``scope`` (``user``, ``project`` or ``local``).
+
+    ``local`` is Claude Code's gitignored per-developer overlay on top of a
+    project: same directory as ``project``, different filename
+    (``settings.local.json``).
+    """
     if scope == "user":
         return user_home(environ) / ".claude" / "settings.json"
+    if scope == "local":
+        return cwd / ".claude" / "settings.local.json"
     return cwd / ".claude" / "settings.json"
 
 
 def skills_dir(scope: Scope, environ: Mapping[str, str], cwd: Path) -> Path:
-    """Return the destination directory for the ``cache`` skill for ``scope``."""
+    """Return the destination directory for the ``cache`` skill for ``scope``.
+
+    ``local`` shares ``project``'s skill directory: Claude Code does not
+    scope skills per local/project, only ``settings.json`` differs.
+    """
     if scope == "user":
         return user_home(environ) / ".claude" / "skills" / _SKILL_NAME
     return cwd / ".claude" / "skills" / _SKILL_NAME
@@ -104,6 +120,18 @@ def _atomic_write_json(path: Path, data: dict[str, Any]) -> None:
     tmp_path = path.with_name(f".{path.name}.tmp")
     tmp_path.write_text(text)
     os.replace(tmp_path, path)
+
+
+def write_settings(path: Path, settings: dict[str, Any]) -> None:
+    """Back up ``path`` if present, then atomically write ``settings`` as JSON.
+
+    The single primitive :func:`plan_install`/:func:`plan_uninstall`'s
+    planned changes call to actually apply a settings.json edit, kept
+    separate from computing the new content so the CLI's confirm flow can
+    show the diff first and only call this on confirmation.
+    """
+    backup_settings(path)
+    _atomic_write_json(path, settings)
 
 
 def merge_base_url(settings: dict[str, Any], url: str, force: bool) -> None:
@@ -156,7 +184,7 @@ def resolve_install_port(
     environ: Mapping[str, str],
     installed_port: int | None,
 ) -> int:
-    """Resolve the daemon port ``ccbg install`` writes into ``ANTHROPIC_BASE_URL``.
+    """Resolve the daemon port ``ccbg configure`` writes into ``ANTHROPIC_BASE_URL``.
 
     Precedence: the ``--port`` flag, then ``CCBG_PORT`` or (failing that)
     the port embedded in ``CCBG_URL`` if either is set in ``environ``, then
@@ -185,7 +213,7 @@ def resolve_install_url(
     environ: Mapping[str, str],
     installed_port: int | None,
 ) -> str:
-    """Return the loopback URL ``ccbg install`` writes; see :func:`resolve_install_port`."""
+    """Return the loopback URL ``ccbg configure`` writes; see :func:`resolve_install_port`."""
     return f"http://127.0.0.1:{resolve_install_port(port, environ, installed_port)}"
 
 
@@ -302,8 +330,7 @@ def install(
     merge_hook(settings)
     if dry_run:
         return InstallResult(path, skill_dir, settings, True)
-    backup_settings(path)
-    _atomic_write_json(path, settings)
+    write_settings(path, settings)
     copy_skill(skill_dir)
     return InstallResult(path, skill_dir, settings, False)
 
@@ -314,12 +341,14 @@ def uninstall(
     url: str,
     environ: Mapping[str, str],
     cwd: Path,
+    dry_run: bool = False,
 ) -> InstallResult:
     """Reverse exactly what :func:`install` added for ``scope``.
 
     A ``settings.json`` that does not exist is left absent rather than
     created empty: uninstalling must never leave behind a file the user
-    never had.
+    never had. With ``dry_run=True``, computes and returns the resulting
+    settings without writing or removing anything (mirrors :func:`install`).
     """
     path = settings_path(scope, environ, cwd)
     skill_dir = skills_dir(scope, environ, cwd)
@@ -327,11 +356,94 @@ def uninstall(
     remove_base_url(settings, url)
     remove_ccbg_url(settings, url)
     remove_hook(settings)
+    if dry_run:
+        return InstallResult(path, skill_dir, settings, True)
     if path.is_file():
-        backup_settings(path)
-        _atomic_write_json(path, settings)
+        write_settings(path, settings)
     remove_skill(skill_dir)
     return InstallResult(path, skill_dir, settings, False)
+
+
+def _read_skill_source() -> str:
+    """Return the packaged ``cache`` skill's ``SKILL.md`` content."""
+    source = skill_source_dir() / "SKILL.md"
+    with importlib.resources.as_file(source) as source_path:
+        return source_path.read_text()
+
+
+def plan_install(
+    *,
+    scope: Scope,
+    url: str,
+    force: bool,
+    environ: Mapping[str, str],
+    cwd: Path,
+) -> list[PlannedChange]:
+    """Compute the settings.json and skill-file changes :func:`install` would make.
+
+    Nothing is written; raises :class:`InstallError` under the same
+    conditions :func:`install` would (bad JSON, a conflicting
+    ``ANTHROPIC_BASE_URL`` without ``force``, a missing skill source). The
+    caller (``ccbg configure``) shows each :class:`PlannedChange` as a diff
+    and confirms it before calling its ``apply``.
+    """
+    preview = install(scope=scope, url=url, force=force, dry_run=True, environ=environ, cwd=cwd)
+    settings_old = preview.settings_path.read_text() if preview.settings_path.is_file() else None
+    settings_new = json.dumps(preview.settings, indent=2) + "\n"
+    changes = [
+        PlannedChange(
+            preview.settings_path,
+            settings_old,
+            settings_new,
+            lambda: write_settings(preview.settings_path, preview.settings),
+        )
+    ]
+    skill_file = preview.skill_dir / "SKILL.md"
+    skill_old = skill_file.read_text() if skill_file.is_file() else None
+    skill_new = _read_skill_source()
+    changes.append(
+        PlannedChange(skill_file, skill_old, skill_new, lambda: copy_skill(preview.skill_dir))
+    )
+    return changes
+
+
+def plan_uninstall(
+    *,
+    scope: Scope,
+    url: str,
+    environ: Mapping[str, str],
+    cwd: Path,
+) -> list[PlannedChange]:
+    """Compute the settings.json and skill-file changes :func:`uninstall` would make.
+
+    Nothing is written. Unlike :func:`plan_install`, a file that does not
+    already exist is simply omitted (never planned as "will create"):
+    uninstalling must never bring a file into existence.
+    """
+    preview = uninstall(scope=scope, url=url, environ=environ, cwd=cwd, dry_run=True)
+    changes: list[PlannedChange] = []
+    if preview.settings_path.is_file():
+        settings_old = preview.settings_path.read_text()
+        settings_new = json.dumps(preview.settings, indent=2) + "\n"
+        changes.append(
+            PlannedChange(
+                preview.settings_path,
+                settings_old,
+                settings_new,
+                lambda: write_settings(preview.settings_path, preview.settings),
+            )
+        )
+    skill_file = preview.skill_dir / "SKILL.md"
+    if skill_file.is_file():
+        changes.append(
+            PlannedChange(
+                skill_file,
+                skill_file.read_text(),
+                None,
+                lambda: remove_skill(preview.skill_dir),
+            )
+        )
+    return changes
 
 
 __all__ = [
@@ -343,9 +455,12 @@ __all__ = [
     "Scope",
     "hook_entry_has_command",
     "install",
+    "plan_install",
+    "plan_uninstall",
     "resolve_install_port",
     "resolve_install_url",
     "settings_path",
     "skills_dir",
     "uninstall",
+    "write_settings",
 ]

@@ -25,7 +25,7 @@ from claude_cache_bump_gateway.config import Config
 Status = Literal["ok", "warn", "fail"]
 
 _CREDENTIAL_ENV_VARS = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")
-_SCOPES: tuple[install.Scope, ...] = ("user", "project")
+_SCOPES: tuple[install.Scope, ...] = ("user", "project", "local")
 
 
 @dataclass
@@ -65,7 +65,9 @@ def check_base_url(config: Config, environ: Mapping[str, str], cwd: Path) -> Che
             path = install.settings_path(scope, environ, cwd)
             return CheckResult("ok", f"env.ANTHROPIC_BASE_URL set to {config.url} in {path}")
     return CheckResult(
-        "warn", "env.ANTHROPIC_BASE_URL is not set in user or project settings; run `ccbg install`"
+        "warn",
+        "env.ANTHROPIC_BASE_URL is not set in user, project or local settings; "
+        "run `ccbg configure`",
     )
 
 
@@ -117,7 +119,7 @@ def check_port_consistency(
     return CheckResult(
         "warn",
         f"ports disagree ({detail}); pick one port N and run "
-        f"`ccbg service install --port N` and `ccbg install --port N` to realign",
+        f"`ccbg service install --port N` and `ccbg configure --port N` to realign",
     )
 
 
@@ -133,7 +135,7 @@ def check_hook(environ: Mapping[str, str], cwd: Path) -> CheckResult:
         ):
             path = install.settings_path(scope, environ, cwd)
             return CheckResult("ok", f"UserPromptSubmit hook registered in {path}")
-    return CheckResult("warn", "UserPromptSubmit hook is not registered; run `ccbg install`")
+    return CheckResult("warn", "UserPromptSubmit hook is not registered; run `ccbg configure`")
 
 
 def check_skill(environ: Mapping[str, str], cwd: Path) -> CheckResult:
@@ -142,7 +144,7 @@ def check_skill(environ: Mapping[str, str], cwd: Path) -> CheckResult:
         skill_dir = install.skills_dir(scope, environ, cwd)
         if (skill_dir / "SKILL.md").is_file():
             return CheckResult("ok", f"cache skill present at {skill_dir}")
-    return CheckResult("warn", "cache skill not found; run `ccbg install`")
+    return CheckResult("warn", "cache skill not found; run `ccbg configure`")
 
 
 def check_credentials(environ: Mapping[str, str], cwd: Path) -> CheckResult:

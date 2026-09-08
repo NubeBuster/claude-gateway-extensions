@@ -37,6 +37,20 @@ def test_settings_path_project_scope_is_inside_tmp_cwd(tmp_path: Path) -> None:
     assert path == cwd / ".claude" / "settings.json"
 
 
+def test_settings_path_local_scope_is_inside_tmp_cwd(tmp_path: Path) -> None:
+    cwd = tmp_path / "project"
+    cwd.mkdir()
+    path = install.settings_path("local", {}, cwd)
+    _assert_inside(path, cwd)
+    assert path == cwd / ".claude" / "settings.local.json"
+
+
+def test_skills_dir_local_scope_matches_project_scope(tmp_path: Path) -> None:
+    cwd = tmp_path / "project"
+    cwd.mkdir()
+    assert install.skills_dir("local", {}, cwd) == install.skills_dir("project", {}, cwd)
+
+
 def test_install_creates_settings_with_only_documented_keys(tmp_path: Path) -> None:
     environ = {"HOME": str(tmp_path)}
     path = install.settings_path("user", environ, tmp_path)
@@ -329,3 +343,74 @@ def test_skill_source_dir_raises_when_neither_location_exists(
 
     with pytest.raises(install.InstallError):
         install.skill_source_dir()
+
+
+def test_plan_install_on_a_fresh_scope_shows_two_creates(tmp_path: Path) -> None:
+    environ = {"HOME": str(tmp_path)}
+    changes = install.plan_install(
+        scope="user", url=URL, force=False, environ=environ, cwd=tmp_path
+    )
+    assert [c.old_content for c in changes] == [None, None]
+    settings_change, skill_change = changes
+    assert URL in (settings_change.new_content or "")
+    assert settings_change.path == install.settings_path("user", environ, tmp_path)
+    assert skill_change.path == install.skills_dir("user", environ, tmp_path) / "SKILL.md"
+    assert skill_change.new_content
+
+
+def test_plan_install_after_a_real_install_shows_no_changes(tmp_path: Path) -> None:
+    environ = {"HOME": str(tmp_path)}
+    install.install(
+        scope="user", url=URL, force=False, dry_run=False, environ=environ, cwd=tmp_path
+    )
+    changes = install.plan_install(
+        scope="user", url=URL, force=False, environ=environ, cwd=tmp_path
+    )
+    assert all(c.old_content == c.new_content for c in changes)
+
+
+def test_plan_install_apply_writes_settings_and_skill(tmp_path: Path) -> None:
+    environ = {"HOME": str(tmp_path)}
+    changes = install.plan_install(
+        scope="user", url=URL, force=False, environ=environ, cwd=tmp_path
+    )
+    for change in changes:
+        change.apply()
+    settings_path = install.settings_path("user", environ, tmp_path)
+    assert json.loads(settings_path.read_text())["env"]["ANTHROPIC_BASE_URL"] == URL
+    skill_dir = install.skills_dir("user", environ, tmp_path)
+    assert (skill_dir / "SKILL.md").is_file()
+
+
+def test_plan_uninstall_omits_files_that_do_not_exist(tmp_path: Path) -> None:
+    environ = {"HOME": str(tmp_path)}
+    changes = install.plan_uninstall(scope="user", url=URL, environ=environ, cwd=tmp_path)
+    assert changes == []
+
+
+def test_plan_uninstall_after_install_reports_removal(tmp_path: Path) -> None:
+    environ = {"HOME": str(tmp_path)}
+    install.install(
+        scope="user", url=URL, force=False, dry_run=False, environ=environ, cwd=tmp_path
+    )
+    changes = install.plan_uninstall(scope="user", url=URL, environ=environ, cwd=tmp_path)
+    settings_change, skill_change = changes
+    assert settings_change.old_content is not None
+    assert URL not in (settings_change.new_content or "")
+    assert skill_change.new_content is None
+    assert skill_change.old_content
+
+
+def test_plan_uninstall_apply_removes_settings_entries_and_skill(tmp_path: Path) -> None:
+    environ = {"HOME": str(tmp_path)}
+    install.install(
+        scope="user", url=URL, force=False, dry_run=False, environ=environ, cwd=tmp_path
+    )
+    changes = install.plan_uninstall(scope="user", url=URL, environ=environ, cwd=tmp_path)
+    for change in changes:
+        change.apply()
+    settings_path = install.settings_path("user", environ, tmp_path)
+    data = json.loads(settings_path.read_text())
+    assert "env" not in data or "ANTHROPIC_BASE_URL" not in data.get("env", {})
+    skill_dir = install.skills_dir("user", environ, tmp_path)
+    assert not skill_dir.exists()

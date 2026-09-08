@@ -90,7 +90,7 @@ def _is_loopback_http_url(url: str) -> bool:
     """Return whether ``url`` is an ``http://`` URL whose host is loopback.
 
     Used to decide whether an ambient ``ANTHROPIC_BASE_URL`` (which Claude
-    Code sets for every hook/statusline invocation once ``ccbg install`` has
+    Code sets for every hook/statusline invocation once ``ccbg configure`` has
     run) is safe to treat as "this is the daemon" rather than some unrelated
     gateway.
     """

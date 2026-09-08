@@ -1,11 +1,18 @@
 """Manage the systemd user unit that runs the daemon (``ccbg serve``).
 
 One daemon serves every project on a machine, so this is deliberately
-separate from ``ccbg install``'s per-scope ``settings.json`` edits (see
+separate from ``ccbg configure``'s per-scope ``settings.json`` edits (see
 ``cli/install.py``'s module docstring and ``docs/DESIGN.md`` "Claude Code
 integration"). :func:`install_service`/:func:`uninstall_service` write and
 remove exactly the unit file this module renders; :func:`service_status`
 reports its present/enabled/active state without touching ``settings.json``.
+
+A bad unit edit breaks the live daemon just as surely as a bad
+``settings.json`` edit breaks a live session, so ``ccbg service
+install``/``uninstall`` plan the unit change first
+(:func:`plan_install_service`/:func:`plan_uninstall_service`) and go
+through the same colored-diff-and-confirm flow as ``ccbg
+configure``/``unconfigure`` — see :mod:`claude_cache_bump_gateway.cli.confirm`.
 """
 
 from __future__ import annotations
@@ -17,6 +24,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from claude_cache_bump_gateway.cli.confirm import PlannedChange
 from claude_cache_bump_gateway.cli.install import user_home
 
 _UNIT_NAME = "claude-cache-bump-gateway.service"
@@ -144,6 +152,46 @@ def uninstall_service(environ: Mapping[str, str], runner: Runner = _default_runn
     runner(["systemctl", "--user", "daemon-reload"])
 
 
+def plan_install_service(
+    environ: Mapping[str, str],
+    runner: Runner = _default_runner,
+    *,
+    port: int | None = None,
+    host: str | None = None,
+) -> PlannedChange:
+    """Compute the systemd unit change :func:`install_service` would make.
+
+    Nothing is written; ``apply`` calls :func:`install_service` for real
+    (write, then ``daemon-reload`` and ``enable --now``) on confirmation.
+    The caller (``ccbg service install``) shows the returned
+    :class:`PlannedChange` as a diff and confirms it before calling ``apply``.
+    """
+    executable = _ccbg_executable()
+    path = unit_path(environ)
+    new_content = render_unit(executable, environ, port=port, host=host)
+    old_content = path.read_text() if path.is_file() else None
+
+    def _apply() -> None:
+        install_service(environ, runner, port=port, host=host)
+
+    return PlannedChange(path, old_content, new_content, _apply)
+
+
+def plan_uninstall_service(
+    environ: Mapping[str, str], runner: Runner = _default_runner
+) -> list[PlannedChange]:
+    """Compute the systemd unit removal :func:`uninstall_service` would make.
+
+    Omitted entirely (empty list) if no unit is installed: uninstalling
+    must never write anything. ``apply`` calls :func:`uninstall_service`
+    for real on confirmation.
+    """
+    path = unit_path(environ)
+    if not path.is_file():
+        return []
+    return [PlannedChange(path, path.read_text(), None, lambda: uninstall_service(environ, runner))]
+
+
 @dataclass
 class ServiceStatus:
     """Present/enabled/active state of the systemd user unit.
@@ -196,6 +244,8 @@ __all__ = [
     "ServiceStatus",
     "install_service",
     "installed_port",
+    "plan_install_service",
+    "plan_uninstall_service",
     "render_unit",
     "service_status",
     "uninstall_service",

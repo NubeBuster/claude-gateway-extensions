@@ -25,7 +25,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, TextIO
 
-from claude_cache_bump_gateway.cli import install, service
+from claude_cache_bump_gateway.cli import confirm, install, service
 from claude_cache_bump_gateway.cli.client import (
     ApiError,
     ClientFactory,
@@ -248,55 +248,62 @@ def _cmd_statusline(args: argparse.Namespace, config: Config, ctx: _Context) -> 
 
 
 #: Pointer printed when a removed flag is passed; kept as one constant so the
-#: install/uninstall messages and their test assertions stay in sync.
+#: configure/unconfigure messages and their test assertions stay in sync.
+#: ``cmd`` is the (renamed) top-level command, ``service_cmd`` the unchanged
+#: ``ccbg service`` subcommand it points at (they no longer share a name).
 _SERVICE_FLAG_REMOVED = (
     "--service was removed from `ccbg {cmd}`; the daemon is per user, not per "
-    "scope — run `ccbg service {cmd}` instead\n"
+    "scope — run `ccbg service {service_cmd}` instead\n"
 )
 
 
-def _cmd_install(args: argparse.Namespace, config: Config, ctx: _Context) -> int:
-    """Install the Claude Code integration for the chosen scope.
+def _cmd_configure(args: argparse.Namespace, config: Config, ctx: _Context) -> int:
+    """Plan the Claude Code integration for the chosen scope and confirm each write.
 
     The URL written to ``env.ANTHROPIC_BASE_URL`` is derived from
     ``--port`` (falling back to ``CCBG_PORT``/``CCBG_URL`` in the
     environment, then the installed systemd unit's port, then the default),
-    not from ``config.url`` — see :func:`install.resolve_install_url`.
+    not from ``config.url`` — see :func:`install.resolve_install_url`. Every
+    settings.json/skill-file write is planned first (:func:`install.plan_install`),
+    then shown as a colored diff and confirmed per file
+    (:func:`confirm.apply_changes`) before anything touches disk.
     """
     del config
     if args.service:
-        ctx.stderr.write(_SERVICE_FLAG_REMOVED.format(cmd="install"))
+        ctx.stderr.write(_SERVICE_FLAG_REMOVED.format(cmd="configure", service_cmd="install"))
         return EXIT_USAGE
     installed_port = service.installed_port(ctx.environ)
     url = install.resolve_install_url(args.port, ctx.environ, installed_port)
     try:
-        result = install.install(
+        changes = install.plan_install(
             scope=args.scope,
             url=url,
             force=args.force,
-            dry_run=args.dry_run,
             environ=ctx.environ,
             cwd=ctx.cwd,
         )
     except install.InstallError as exc:
         ctx.stderr.write(f"{exc}\n")
         return EXIT_FAILED
-    if result.dry_run:
-        ctx.stdout.write(json.dumps(result.settings, indent=2) + "\n")
-        return EXIT_OK
-    ctx.stdout.write(f"wrote {result.settings_path}\n")
-    ctx.stdout.write(f"installed skill at {result.skill_dir}\n")
     ctx.stdout.write(f"daemon URL: {url}\n")
-    return EXIT_OK
+    return confirm.apply_changes(
+        changes,
+        yes=args.yes,
+        dry_run=args.dry_run,
+        stdin=ctx.stdin,
+        stdout=ctx.stdout,
+        stderr=ctx.stderr,
+        environ=ctx.environ,
+    )
 
 
-def _cmd_uninstall(args: argparse.Namespace, config: Config, ctx: _Context) -> int:
-    """Remove the Claude Code integration for the chosen scope."""
+def _cmd_unconfigure(args: argparse.Namespace, config: Config, ctx: _Context) -> int:
+    """Plan removal of the Claude Code integration for the chosen scope and confirm each write."""
     if args.service:
-        ctx.stderr.write(_SERVICE_FLAG_REMOVED.format(cmd="uninstall"))
+        ctx.stderr.write(_SERVICE_FLAG_REMOVED.format(cmd="unconfigure", service_cmd="uninstall"))
         return EXIT_USAGE
     try:
-        result = install.uninstall(
+        changes = install.plan_uninstall(
             scope=args.scope,
             url=config.url,
             environ=ctx.environ,
@@ -305,31 +312,55 @@ def _cmd_uninstall(args: argparse.Namespace, config: Config, ctx: _Context) -> i
     except install.InstallError as exc:
         ctx.stderr.write(f"{exc}\n")
         return EXIT_FAILED
-    ctx.stdout.write(f"removed integration from {result.settings_path}\n")
-    return EXIT_OK
+    return confirm.apply_changes(
+        changes,
+        yes=args.yes,
+        dry_run=args.dry_run,
+        stdin=ctx.stdin,
+        stdout=ctx.stdout,
+        stderr=ctx.stderr,
+        environ=ctx.environ,
+    )
 
 
 def _cmd_service_install(args: argparse.Namespace, config: Config, ctx: _Context) -> int:
-    """Write and enable the systemd user unit that runs the daemon.
+    """Plan the systemd user unit that runs the daemon and confirm writing it.
 
     ``--port``/``--host`` are written into the unit explicitly, overriding
     whatever ``CCBG_PORT``/``CCBG_HOST`` happen to be set in the installing
-    shell (every other ``CCBG_*`` var is still copied through unchanged).
+    shell (every other ``CCBG_*`` var is still copied through unchanged). A
+    bad unit edit breaks the live daemon, so the unit is planned first
+    (:func:`service.plan_install_service`) and goes through the same
+    diff-and-confirm flow as ``ccbg configure`` (:func:`confirm.apply_changes`).
     """
     del config
     runner = ctx.service_runner if ctx.service_runner is not None else service.DEFAULT_RUNNER
-    path = service.install_service(ctx.environ, runner, port=args.port, host=args.host)
-    ctx.stdout.write(f"installed and started claude-cache-bump-gateway.service ({path})\n")
-    return EXIT_OK
+    change = service.plan_install_service(ctx.environ, runner, port=args.port, host=args.host)
+    return confirm.apply_changes(
+        [change],
+        yes=args.yes,
+        dry_run=args.dry_run,
+        stdin=ctx.stdin,
+        stdout=ctx.stdout,
+        stderr=ctx.stderr,
+        environ=ctx.environ,
+    )
 
 
 def _cmd_service_uninstall(args: argparse.Namespace, config: Config, ctx: _Context) -> int:
-    """Disable and remove the systemd user unit, reversing exactly what install wrote."""
-    del args, config
+    """Plan removing the systemd user unit and confirm it, reversing exactly what install wrote."""
+    del config
     runner = ctx.service_runner if ctx.service_runner is not None else service.DEFAULT_RUNNER
-    service.uninstall_service(ctx.environ, runner)
-    ctx.stdout.write("removed claude-cache-bump-gateway.service\n")
-    return EXIT_OK
+    changes = service.plan_uninstall_service(ctx.environ, runner)
+    return confirm.apply_changes(
+        changes,
+        yes=args.yes,
+        dry_run=args.dry_run,
+        stdin=ctx.stdin,
+        stdout=ctx.stdout,
+        stderr=ctx.stderr,
+        environ=ctx.environ,
+    )
 
 
 def _cmd_service_status(args: argparse.Namespace, config: Config, ctx: _Context) -> int:
@@ -417,32 +448,41 @@ def _build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("statusline", help="print a statusline segment")
 
     _SCOPE_HELP = (
-        "chooses which Claude Code settings.json is edited (user or project); "
-        "the daemon is per user, see `ccbg service`"
+        "chooses which Claude Code settings.json is edited (user, project or "
+        "local); the daemon is per user, see `ccbg service`; managed is not "
+        "supported (root-owned, machine-wide, conflicts with per-user daemons)"
     )
+    _YES_HELP = "apply every change without prompting (for scripts)"
 
-    install_parser = subparsers.add_parser("install", help="install the Claude Code integration")
-    install_parser.add_argument(
-        "--scope", choices=["user", "project"], default="user", help=_SCOPE_HELP
+    configure_parser = subparsers.add_parser(
+        "configure", help="write the Claude Code integration, confirming each file"
     )
-    install_parser.add_argument("--dry-run", action="store_true", dest="dry_run")
-    install_parser.add_argument(
+    configure_parser.add_argument(
+        "--scope", choices=["user", "project", "local"], default="user", help=_SCOPE_HELP
+    )
+    configure_parser.add_argument("--dry-run", action="store_true", dest="dry_run")
+    configure_parser.add_argument("--yes", "-y", action="store_true", help=_YES_HELP)
+    configure_parser.add_argument(
         "--force", action="store_true", help="override a conflicting ANTHROPIC_BASE_URL"
     )
-    install_parser.add_argument(
+    configure_parser.add_argument(
         "--port",
         type=int,
         default=None,
         help="daemon port to point ANTHROPIC_BASE_URL at "
         "(default: CCBG_PORT/CCBG_URL, then the installed service's port, then 8787)",
     )
-    install_parser.add_argument("--service", action="store_true", help=argparse.SUPPRESS)
+    configure_parser.add_argument("--service", action="store_true", help=argparse.SUPPRESS)
 
-    uninstall_parser = subparsers.add_parser("uninstall", help="remove the Claude Code integration")
-    uninstall_parser.add_argument(
-        "--scope", choices=["user", "project"], default="user", help=_SCOPE_HELP
+    unconfigure_parser = subparsers.add_parser(
+        "unconfigure", help="remove the Claude Code integration, confirming each file"
     )
-    uninstall_parser.add_argument("--service", action="store_true", help=argparse.SUPPRESS)
+    unconfigure_parser.add_argument(
+        "--scope", choices=["user", "project", "local"], default="user", help=_SCOPE_HELP
+    )
+    unconfigure_parser.add_argument("--dry-run", action="store_true", dest="dry_run")
+    unconfigure_parser.add_argument("--yes", "-y", action="store_true", help=_YES_HELP)
+    unconfigure_parser.add_argument("--service", action="store_true", help=argparse.SUPPRESS)
 
     subparsers.add_parser("doctor", help="check the environment")
 
@@ -451,11 +491,17 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     service_subparsers = service_parser.add_subparsers(dest="service_command", required=True)
     service_install_parser = service_subparsers.add_parser(
-        "install", help="write and enable the systemd user unit"
+        "install", help="write and enable the systemd user unit, confirming the diff"
     )
     service_install_parser.add_argument("--port", type=int, default=None, help=_PORT_HELP)
     service_install_parser.add_argument("--host", default=None, help=_HOST_HELP)
-    service_subparsers.add_parser("uninstall", help="disable and remove the systemd user unit")
+    service_install_parser.add_argument("--dry-run", action="store_true", dest="dry_run")
+    service_install_parser.add_argument("--yes", "-y", action="store_true", help=_YES_HELP)
+    service_uninstall_parser = service_subparsers.add_parser(
+        "uninstall", help="disable and remove the systemd user unit, confirming the diff"
+    )
+    service_uninstall_parser.add_argument("--dry-run", action="store_true", dest="dry_run")
+    service_uninstall_parser.add_argument("--yes", "-y", action="store_true", help=_YES_HELP)
     service_subparsers.add_parser("status", help="show the unit state and daemon health")
 
     return parser
@@ -470,8 +516,8 @@ _HANDLERS: dict[str, Callable[[argparse.Namespace, Config, _Context], int]] = {
     "forget": _cmd_forget,
     "hook": _cmd_hook,
     "statusline": _cmd_statusline,
-    "install": _cmd_install,
-    "uninstall": _cmd_uninstall,
+    "configure": _cmd_configure,
+    "unconfigure": _cmd_unconfigure,
     "doctor": _cmd_doctor,
     "service": _cmd_service,
 }

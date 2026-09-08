@@ -94,6 +94,13 @@ class _FakeClient:
         self.sessions.pop(session_id, None)
 
 
+class _TtyStdin(io.StringIO):
+    """A stdin fake that reports itself as a TTY, for the interactive y/N flow."""
+
+    def isatty(self) -> bool:
+        return True
+
+
 def _run(argv: list[str], client: _FakeClient, **kwargs: Any) -> tuple[int, str, str]:
     stdout, stderr = io.StringIO(), io.StringIO()
     code = main(
@@ -260,17 +267,19 @@ def test_forget() -> None:
     assert "s1" not in client.sessions
 
 
-def test_install_service_flag_errors_with_pointer_to_service_install() -> None:
+def test_configure_service_flag_errors_with_pointer_to_service_install() -> None:
     client = _FakeClient("http://x")
-    code, _, err = _run(["install", "--service"], client, environ={"HOME": "/nonexistent-home"})
+    code, _, err = _run(["configure", "--service"], client, environ={"HOME": "/nonexistent-home"})
     assert code == EXIT_USAGE
+    assert "ccbg configure" in err
     assert "ccbg service install" in err
 
 
-def test_uninstall_service_flag_errors_with_pointer_to_service_uninstall() -> None:
+def test_unconfigure_service_flag_errors_with_pointer_to_service_uninstall() -> None:
     client = _FakeClient("http://x")
-    code, _, err = _run(["uninstall", "--service"], client, environ={"HOME": "/nonexistent-home"})
+    code, _, err = _run(["unconfigure", "--service"], client, environ={"HOME": "/nonexistent-home"})
     assert code == EXIT_USAGE
+    assert "ccbg unconfigure" in err
     assert "ccbg service uninstall" in err
 
 
@@ -282,7 +291,7 @@ def test_service_install_uses_injected_runner(tmp_path: Path) -> None:
         calls.append(list(args))
 
     code, out, _ = _run(
-        ["service", "install"],
+        ["service", "install", "--yes"],
         client,
         environ={"HOME": str(tmp_path)},
         service_runner=runner,
@@ -306,7 +315,7 @@ def test_service_install_port_and_host_flags(tmp_path: Path) -> None:
         calls.append(list(args))
 
     code, out, _ = _run(
-        ["service", "install", "--port", "9999", "--host", "0.0.0.0"],
+        ["service", "install", "--port", "9999", "--host", "0.0.0.0", "--yes"],
         client,
         environ={"HOME": str(tmp_path)},
         service_runner=runner,
@@ -316,13 +325,13 @@ def test_service_install_port_and_host_flags(tmp_path: Path) -> None:
     text = unit_path.read_text()
     assert "Environment=CCBG_PORT=9999" in text
     assert "Environment=CCBG_HOST=0.0.0.0" in text
-    assert "installed and started" in out
+    assert "applied:" in out
 
 
 def test_service_status_reports_installed_unit_port(tmp_path: Path) -> None:
     client = _FakeClient("http://x")
     code, out, _ = _run(
-        ["service", "install", "--port", "9999"],
+        ["service", "install", "--port", "9999", "--yes"],
         client,
         environ={"HOME": str(tmp_path)},
         service_runner=lambda args: None,
@@ -339,10 +348,111 @@ def test_service_status_reports_installed_unit_port(tmp_path: Path) -> None:
     assert "port=9999" in out
 
 
-def test_install_writes_url_for_explicit_port(tmp_path: Path) -> None:
+def test_service_install_dry_run_prints_diff_and_writes_nothing(tmp_path: Path) -> None:
+    client = _FakeClient("http://x")
+    environ = {"HOME": str(tmp_path)}
+    code, out, _ = _run(
+        ["service", "install", "--dry-run"], client, environ=environ, service_runner=lambda a: None
+    )
+    assert code == EXIT_OK
+    assert "will create" in out
+    unit_path = tmp_path / ".config" / "systemd" / "user" / "claude-cache-bump-gateway.service"
+    assert not unit_path.exists()
+
+
+def test_service_install_non_tty_stdin_without_yes_aborts(tmp_path: Path) -> None:
+    client = _FakeClient("http://x")
+    environ = {"HOME": str(tmp_path)}
+    code, out, err = _run(
+        ["service", "install"], client, environ=environ, service_runner=lambda a: None
+    )
+    assert code == EXIT_USAGE
+    assert "will create" in out
+    assert "--yes" in err
+    unit_path = tmp_path / ".config" / "systemd" / "user" / "claude-cache-bump-gateway.service"
+    assert not unit_path.exists()
+
+
+def test_service_install_interactive_y_applies(tmp_path: Path) -> None:
+    client = _FakeClient("http://x")
+    environ = {"HOME": str(tmp_path)}
+    code, out, _ = _run(
+        ["service", "install"],
+        client,
+        environ=environ,
+        service_runner=lambda a: None,
+        stdin=_TtyStdin("y\n"),
+    )
+    assert code == EXIT_OK
+    assert "Apply this change to" in out
+    unit_path = tmp_path / ".config" / "systemd" / "user" / "claude-cache-bump-gateway.service"
+    assert unit_path.is_file()
+
+
+def test_service_install_is_idempotent_on_a_second_run(tmp_path: Path) -> None:
+    client = _FakeClient("http://x")
+    environ = {"HOME": str(tmp_path)}
+    code, _, _ = _run(
+        ["service", "install", "--yes"], client, environ=environ, service_runner=lambda a: None
+    )
+    assert code == EXIT_OK
+
+    code, out, _ = _run(
+        ["service", "install", "--yes"], client, environ=environ, service_runner=lambda a: None
+    )
+    assert code == EXIT_OK
+    assert out == "no changes\n"
+
+
+def test_service_uninstall_round_trip_with_yes(tmp_path: Path) -> None:
+    client = _FakeClient("http://x")
+    environ = {"HOME": str(tmp_path)}
+    code, _, _ = _run(
+        ["service", "install", "--yes"], client, environ=environ, service_runner=lambda a: None
+    )
+    assert code == EXIT_OK
+
+    code, out, _ = _run(
+        ["service", "uninstall", "--yes"], client, environ=environ, service_runner=lambda a: None
+    )
+    assert code == EXIT_OK
+    assert "applied:" in out
+    unit_path = tmp_path / ".config" / "systemd" / "user" / "claude-cache-bump-gateway.service"
+    assert not unit_path.exists()
+
+
+def test_service_uninstall_with_nothing_installed_is_no_changes(tmp_path: Path) -> None:
+    client = _FakeClient("http://x")
+    environ = {"HOME": str(tmp_path)}
+    code, out, _ = _run(
+        ["service", "uninstall", "--yes"], client, environ=environ, service_runner=lambda a: None
+    )
+    assert code == EXIT_OK
+    assert out == "no changes\n"
+
+
+def test_service_uninstall_non_tty_stdin_without_yes_aborts(tmp_path: Path) -> None:
+    client = _FakeClient("http://x")
+    environ = {"HOME": str(tmp_path)}
+    code, _, _ = _run(
+        ["service", "install", "--yes"], client, environ=environ, service_runner=lambda a: None
+    )
+    assert code == EXIT_OK
+
+    code, out, err = _run(
+        ["service", "uninstall"], client, environ=environ, service_runner=lambda a: None
+    )
+    assert code == EXIT_USAGE
+    assert "will remove" in out
+    assert "--yes" in err
+    unit_path = tmp_path / ".config" / "systemd" / "user" / "claude-cache-bump-gateway.service"
+    assert unit_path.is_file()
+
+
+def test_configure_writes_url_for_explicit_port(tmp_path: Path) -> None:
     client = _FakeClient("http://x")
     code, out, _ = _run(
-        ["install", "--scope", "user", "--port", "9999"],
+        ["configure", "--scope", "user", "--port", "9999", "--yes"],
         client,
         environ={"HOME": str(tmp_path)},
     )
@@ -354,20 +464,149 @@ def test_install_writes_url_for_explicit_port(tmp_path: Path) -> None:
     assert data["env"]["CCBG_URL"] == "http://127.0.0.1:9999"
 
 
-def test_install_port_falls_back_to_installed_service_port(tmp_path: Path) -> None:
+def test_configure_port_falls_back_to_installed_service_port(tmp_path: Path) -> None:
     client = _FakeClient("http://x")
     environ = {"HOME": str(tmp_path)}
     code, _, _ = _run(
-        ["service", "install", "--port", "9999"],
+        ["service", "install", "--port", "9999", "--yes"],
         client,
         environ=environ,
         service_runner=lambda a: None,
     )
     assert code == EXIT_OK
 
-    code, out, _ = _run(["install", "--scope", "user"], client, environ=environ)
+    code, out, _ = _run(["configure", "--scope", "user", "--yes"], client, environ=environ)
     assert code == EXIT_OK
     assert "daemon URL: http://127.0.0.1:9999" in out
+
+
+def test_configure_dry_run_prints_diffs_and_writes_nothing(tmp_path: Path) -> None:
+    client = _FakeClient("http://x")
+    environ = {"HOME": str(tmp_path)}
+    code, out, _ = _run(["configure", "--scope", "user", "--dry-run"], client, environ=environ)
+    assert code == EXIT_OK
+    assert "will create" in out
+    assert not (tmp_path / ".claude" / "settings.json").exists()
+
+
+def test_configure_non_tty_stdin_without_yes_aborts(tmp_path: Path) -> None:
+    """Non-interactive stdin (the common case under a test harness) must never silently write."""
+    client = _FakeClient("http://x")
+    environ = {"HOME": str(tmp_path)}
+    code, out, err = _run(["configure", "--scope", "user"], client, environ=environ)
+    assert code == EXIT_USAGE
+    assert "will create" in out
+    assert "--yes" in err
+    assert not (tmp_path / ".claude" / "settings.json").exists()
+
+
+def test_configure_interactive_y_confirms_each_file(tmp_path: Path) -> None:
+    client = _FakeClient("http://x")
+    environ = {"HOME": str(tmp_path)}
+    code, out, _ = _run(
+        ["configure", "--scope", "user"], client, environ=environ, stdin=_TtyStdin("y\ny\n")
+    )
+    assert code == EXIT_OK
+    assert "Apply this change to" in out
+    assert "applied:" in out
+    assert (tmp_path / ".claude" / "settings.json").exists()
+    assert (tmp_path / ".claude" / "skills" / "cache" / "SKILL.md").exists()
+
+
+def test_configure_interactive_partial_acceptance(tmp_path: Path) -> None:
+    """Rejecting the skill file must still apply the accepted settings.json change."""
+    client = _FakeClient("http://x")
+    environ = {"HOME": str(tmp_path)}
+    code, out, _ = _run(
+        ["configure", "--scope", "user"], client, environ=environ, stdin=_TtyStdin("y\nn\n")
+    )
+    assert code == EXIT_OK
+    assert "applied:" in out
+    assert "skipped:" in out
+    assert (tmp_path / ".claude" / "settings.json").exists()
+    assert not (tmp_path / ".claude" / "skills" / "cache" / "SKILL.md").exists()
+
+
+def test_configure_interactive_reject_all_is_a_failure(tmp_path: Path) -> None:
+    client = _FakeClient("http://x")
+    environ = {"HOME": str(tmp_path)}
+    code, out, _ = _run(
+        ["configure", "--scope", "user"], client, environ=environ, stdin=_TtyStdin("n\nn\n")
+    )
+    assert code == EXIT_FAILED
+    assert "skipped:" in out
+    assert not (tmp_path / ".claude" / "settings.json").exists()
+
+
+def test_configure_is_idempotent_on_a_second_run(tmp_path: Path) -> None:
+    client = _FakeClient("http://x")
+    environ = {"HOME": str(tmp_path)}
+    code, _, _ = _run(["configure", "--scope", "user", "--yes"], client, environ=environ)
+    assert code == EXIT_OK
+
+    code, out, _ = _run(["configure", "--scope", "user", "--yes"], client, environ=environ)
+    assert code == EXIT_OK
+    assert out == "daemon URL: http://127.0.0.1:8787\nno changes\n"
+
+
+def test_configure_scope_local_writes_settings_local_json(tmp_path: Path) -> None:
+    client = _FakeClient("http://x")
+    project = tmp_path / "project"
+    project.mkdir()
+    environ = {"HOME": str(tmp_path / "home")}
+    code, out, _ = _run(
+        ["configure", "--scope", "local", "--yes"], client, environ=environ, cwd=project
+    )
+    assert code == EXIT_OK
+    assert (project / ".claude" / "settings.local.json").is_file()
+    assert not (project / ".claude" / "settings.json").exists()
+    # local shares project's skill directory.
+    assert (project / ".claude" / "skills" / "cache" / "SKILL.md").is_file()
+    assert "daemon URL" in out
+
+
+def test_configure_scope_managed_is_rejected_by_argparse() -> None:
+    """argparse itself rejects an unsupported ``--scope`` choice (writes to real stderr)."""
+    client = _FakeClient("http://x")
+    code, _, _ = _run(["configure", "--scope", "managed"], client)
+    assert code == EXIT_USAGE
+
+
+def test_unconfigure_round_trip_with_yes(tmp_path: Path) -> None:
+    client = _FakeClient("http://x")
+    environ = {"HOME": str(tmp_path)}
+    code, _, _ = _run(["configure", "--scope", "user", "--yes"], client, environ=environ)
+    assert code == EXIT_OK
+
+    code, out, _ = _run(["unconfigure", "--scope", "user", "--yes"], client, environ=environ)
+    assert code == EXIT_OK
+    assert "applied:" in out
+    settings_path = tmp_path / ".claude" / "settings.json"
+    data = json.loads(settings_path.read_text())
+    assert "env" not in data or "ANTHROPIC_BASE_URL" not in data.get("env", {})
+    assert not (tmp_path / ".claude" / "skills" / "cache").exists()
+
+
+def test_unconfigure_with_nothing_installed_is_no_changes(tmp_path: Path) -> None:
+    client = _FakeClient("http://x")
+    environ = {"HOME": str(tmp_path)}
+    code, out, _ = _run(["unconfigure", "--scope", "user", "--yes"], client, environ=environ)
+    assert code == EXIT_OK
+    assert out == "no changes\n"
+    assert not (tmp_path / ".claude" / "settings.json").exists()
+
+
+def test_unconfigure_non_tty_stdin_without_yes_aborts(tmp_path: Path) -> None:
+    client = _FakeClient("http://x")
+    environ = {"HOME": str(tmp_path)}
+    code, _, _ = _run(["configure", "--scope", "user", "--yes"], client, environ=environ)
+    assert code == EXIT_OK
+
+    code, out, err = _run(["unconfigure", "--scope", "user"], client, environ=environ)
+    assert code == EXIT_USAGE
+    assert "will remove" in out or "ANTHROPIC_BASE_URL" in out
+    assert "--yes" in err
+    assert (tmp_path / ".claude" / "settings.json").exists()
 
 
 def test_service_status_reports_not_installed_and_daemon_health() -> None:

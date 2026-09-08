@@ -24,7 +24,7 @@ a read (see "How it works").
 - Linux or macOS. `ccbg service install` (the systemd user unit) is Linux
   only; on macOS run `ccbg serve` yourself (a shell, `tmux`, or a `launchd`
   agent you write). Running without systemd: `ccbg serve --port 8787` in any
-  process manager or terminal, then `ccbg install --port 8787`.
+  process manager or terminal, then `ccbg configure --port 8787`.
 
 ## Installation
 
@@ -49,7 +49,7 @@ ccbg service install
 
 The service install requires no root, but reserves a port system wide. For concurrent proxies on the same machine, separate ports must be assigned.
 
-Both `ccbg service install` and `ccbg install` accept `--port N` to pick a
+Both `ccbg service install` and `ccbg configure` accept `--port N` to pick a
 non-default port; keep the two in sync (see "Running without systemd"
 above).
 
@@ -263,12 +263,12 @@ daemon and does not go through a settings.json variable.
 
 | Variable   | Default                 | What it does                                               |
 | ---------- | ----------------------- | ---------------------------------------------------------- |
-| `CCBG_URL` | `http://127.0.0.1:8787` | where the hook, the CLI and the statusline find the daemon; falls back to a loopback `ANTHROPIC_BASE_URL` (which `ccbg install` sets) when unset |
+| `CCBG_URL` | `http://127.0.0.1:8787` | where the hook, the CLI and the statusline find the daemon; falls back to a loopback `ANTHROPIC_BASE_URL` (which `ccbg configure` sets) when unset |
 
 #### Claude Code Hook
 
 You do not need to configure anything. Put this in `~/.claude/settings.json`,
-or let `ccbg install` do it:
+or let `ccbg configure` do it:
 
 ```json
 {
@@ -356,10 +356,10 @@ curl -s -X POST "http://127.0.0.1:8787/ccbg/sessions/$SESSION_ID/bump"
 - `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` or an `apiKeyHelper` all
   replace the forwarded subscription credential and change what gets billed;
   `ccbg doctor` flags any of them being set.
-- To uninstall: `ccbg uninstall --scope user` (match whatever scope you
-  installed with) and, if you also ran `ccbg service install`,
-  `ccbg service uninstall`. `ccbg uninstall` reverses exactly the
-  settings.json edits `ccbg install` made and deletes the installed skill
+- To uninstall: `ccbg unconfigure --scope user` (match whatever scope you
+  configured with) and, if you also ran `ccbg service install`,
+  `ccbg service uninstall`. `ccbg unconfigure` reverses exactly the
+  settings.json edits `ccbg configure` made and deletes the installed skill
   directory outright, including any local edits you made to its
   `SKILL.md`; `ccbg service uninstall` disables and removes the systemd
   unit.
@@ -393,8 +393,8 @@ make fix     # ruff format, ruff check --fix
 ```
 
 The `cache` skill lives at `claude/skills/cache/SKILL.md` in the repo root;
-`ccbg install` copies it into the target `skills/` directory. Cloned instead
-of installed and want it without running `ccbg install`? Copy
+`ccbg configure` copies it into the target `skills/` directory. Cloned
+instead of installed and want it without running `ccbg configure`? Copy
 `claude/skills/cache/` into `~/.claude/skills/` (or a project's
 `.claude/skills/`) yourself.
 

@@ -17,7 +17,7 @@ e.g. `/cache 2h`, `/cache 9PM`, `/cache tomorrow 10AM`, `/cache fri 9AM`, or
 Tell the user this directly, and ask them to run:
 
 - `ccbg doctor` to see what is missing
-- `ccbg install` to register the hook (and `ccbg serve` or
+- `ccbg configure` to register the hook (and `ccbg serve` or
   `ccbg service install` to run the daemon, if it is not already running)
 
 Do not attempt to toggle cache bumping yourself, guess at its status, or

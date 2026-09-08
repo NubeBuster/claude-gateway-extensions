@@ -299,15 +299,15 @@ async def test_full_lifecycle(state_dir: Path, tmp_path: Path) -> None:
         await restarted_server.close()
 
 
-def test_install_dry_run_under_a_temp_home(tmp_path: Path) -> None:
-    """``ccbg install --dry-run`` must print the settings it would write, and write nothing."""
+def test_configure_dry_run_under_a_temp_home(tmp_path: Path) -> None:
+    """``ccbg configure --dry-run`` must print the diffs it would write, and write nothing."""
     home = tmp_path / "home"
     home.mkdir()
     environ = {"HOME": str(home), "CCBG_URL": "http://127.0.0.1:8787"}
     stdout = io.StringIO()
 
     code = main(
-        ["install", "--scope", "user", "--dry-run"],
+        ["configure", "--scope", "user", "--dry-run"],
         environ=environ,
         stdout=stdout,
         stderr=io.StringIO(),
@@ -315,14 +315,10 @@ def test_install_dry_run_under_a_temp_home(tmp_path: Path) -> None:
     )
 
     assert code == 0
-    settings = json.loads(stdout.getvalue())
-    assert settings["env"]["ANTHROPIC_BASE_URL"] == "http://127.0.0.1:8787"
-    entries = settings["hooks"]["UserPromptSubmit"]
-    assert any(
-        hook.get("command") == "ccbg hook user-prompt-submit"
-        for entry in entries
-        for hook in entry["hooks"]
-    )
+    out = stdout.getvalue()
+    assert "will create" in out
+    assert '"ANTHROPIC_BASE_URL": "http://127.0.0.1:8787"' in out
+    assert "ccbg hook user-prompt-submit" in out
     # HOME really was redirected, and a dry run wrote nothing under it.
     assert not (home / ".claude" / "settings.json").exists()
     assert not (home / ".claude" / "skills").exists()

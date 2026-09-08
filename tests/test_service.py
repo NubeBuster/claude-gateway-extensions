@@ -179,3 +179,66 @@ def test_installed_port_reads_back_the_written_port(
     environ = {"HOME": str(tmp_path)}
     service.install_service(environ, runner, port=9999)
     assert service.installed_port(environ) == 9999
+
+
+def test_plan_install_service_on_a_fresh_machine_shows_a_create(
+    tmp_path: Path, fake_runner: tuple[list[list[str]], service.Runner]
+) -> None:
+    _, runner = fake_runner
+    environ = {"HOME": str(tmp_path)}
+    change = service.plan_install_service(environ, runner)
+    assert change.old_content is None
+    assert change.path == service.unit_path(environ)
+    assert "ExecStart=" in (change.new_content or "")
+
+
+def test_plan_install_service_after_a_real_install_shows_no_changes(
+    tmp_path: Path, fake_runner: tuple[list[list[str]], service.Runner]
+) -> None:
+    _, runner = fake_runner
+    environ = {"HOME": str(tmp_path)}
+    service.install_service(environ, runner, port=9999)
+    change = service.plan_install_service(environ, runner, port=9999)
+    assert change.old_content == change.new_content
+
+
+def test_plan_install_service_apply_writes_and_enables(
+    tmp_path: Path, fake_runner: tuple[list[list[str]], service.Runner]
+) -> None:
+    calls, runner = fake_runner
+    environ = {"HOME": str(tmp_path)}
+    change = service.plan_install_service(environ, runner)
+    assert calls == []  # planning must not touch systemd
+    change.apply()
+    assert change.path.is_file()
+    assert ["systemctl", "--user", "daemon-reload"] in calls
+    assert ["systemctl", "--user", "enable", "--now", "claude-cache-bump-gateway.service"] in calls
+
+
+def test_plan_uninstall_service_omits_change_when_nothing_installed(tmp_path: Path) -> None:
+    environ = {"HOME": str(tmp_path)}
+    assert service.plan_uninstall_service(environ) == []
+
+
+def test_plan_uninstall_service_after_install_shows_a_removal(
+    tmp_path: Path, fake_runner: tuple[list[list[str]], service.Runner]
+) -> None:
+    _, runner = fake_runner
+    environ = {"HOME": str(tmp_path)}
+    service.install_service(environ, runner)
+    (change,) = service.plan_uninstall_service(environ, runner)
+    assert change.old_content
+    assert change.new_content is None
+
+
+def test_plan_uninstall_service_apply_removes_and_disables(
+    tmp_path: Path, fake_runner: tuple[list[list[str]], service.Runner]
+) -> None:
+    calls, runner = fake_runner
+    environ = {"HOME": str(tmp_path)}
+    service.install_service(environ, runner)
+    calls.clear()
+    (change,) = service.plan_uninstall_service(environ, runner)
+    change.apply()
+    assert not change.path.exists()
+    assert ["systemctl", "--user", "disable", "--now", "claude-cache-bump-gateway.service"] in calls
