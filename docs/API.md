@@ -70,9 +70,11 @@ past `until` is accepted (not rejected as `interval_s`/`max_duration_s`
 would be): the session simply stops on its next scheduler tick.
 
 Disabling a session (`"enabled": false`) clears `until`, unlike
-`interval_s`/`max_duration_s`, which survive. Re-enabling without a new
-`until` therefore falls back to the max-duration stop rather than resuming
-the old deadline.
+`interval_s`/`max_duration_s`, which survive. An automatic stop clears it
+too, for every `stopped_reason` except `no_snapshot` (which only means
+nothing has been captured to replay yet). Re-enabling without a new `until`
+therefore falls back to the max-duration stop rather than resuming a
+deadline that is already spent.
 
 Response: the session's updated status dict (same shape as `GET
 /ccbg/sessions/{id}`).

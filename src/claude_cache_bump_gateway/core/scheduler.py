@@ -28,6 +28,12 @@ from claude_cache_bump_gateway.core.snapshot import (
 from claude_cache_bump_gateway.core.store import SnapshotStore
 from claude_cache_bump_gateway.core.upstream import Upstream
 
+#: Stop reasons that leave a session's ``until`` in place (see
+#: :meth:`Scheduler._persist_stop`). Every other reason is a session that ran
+#: out — its deadline is spent and must not outlive it. ``no_snapshot`` is not
+#: one of those: it only means no request has been captured yet.
+_KEEPS_DEADLINE_STOPS = frozenset({"no_snapshot"})
+
 
 class NoSnapshot(Exception):
     """Raised by :meth:`Scheduler.bump_now` when the session has nothing to replay."""
@@ -239,11 +245,22 @@ class Scheduler:
             task.cancel()
 
     def _persist_stop(self, session_id: str, reason: str) -> None:
-        """Set ``enabled = False`` and record ``stopped_reason`` for ``session_id``."""
+        """Set ``enabled = False`` and record ``stopped_reason`` for ``session_id``.
+
+        A stop that ends the session's working life also clears ``until``,
+        for the same reason :meth:`set_enabled` does on an explicit disable:
+        a later enable without a new deadline must fall back to the
+        max-duration stop instead of tripping over a deadline already in the
+        past and stopping again on its first tick. ``no_snapshot`` is the
+        exception (see :data:`_KEEPS_DEADLINE_STOPS`): nothing about the
+        session has run out, there is simply nothing to replay yet, so the
+        deadline the user asked for is kept.
+        """
         state = self._store.get_state(session_id)
         if state is None:
             return
-        state = dataclasses.replace(state, enabled=False, stopped_reason=reason)
+        until = state.until if reason in _KEEPS_DEADLINE_STOPS else None
+        state = dataclasses.replace(state, enabled=False, stopped_reason=reason, until=until)
         self._store.put_state(state)
 
     def _effective_interval(self, state: SessionState, snapshot: Snapshot) -> int:

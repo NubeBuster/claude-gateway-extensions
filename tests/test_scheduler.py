@@ -245,6 +245,34 @@ async def test_deadline_stops_at_absolute_time(
     await scheduler.stop()
 
 
+async def test_auto_stop_clears_the_deadline_so_re_enabling_runs_again(
+    tmp_path: Path, clock: FakeClock, store: MemoryStore
+) -> None:
+    """A session stopped by its deadline must not stop again the moment it is re-enabled."""
+    upstream = ScriptedUpstream([_ok_response()])
+    scheduler = Scheduler(_config(tmp_path), store, LargestPrefixSelector(), upstream, clock)
+
+    scheduler.note_request("sess-1", _snapshot(), ("authorization", "Bearer a"))
+    scheduler.set_enabled("sess-1", True, interval_s=1000, until=1005.0)
+    await _pump_until(lambda: store.get_state("sess-1").stopped_reason is not None)  # type: ignore[union-attr]
+
+    stopped = store.get_state("sess-1")
+    assert stopped is not None
+    assert stopped.stopped_reason == "deadline"
+    assert stopped.until is None
+
+    scheduler.set_enabled("sess-1", True, interval_s=5)
+    await _pump_until(lambda: store.get_state("sess-1").bump_count == 1)  # type: ignore[union-attr]
+
+    state = store.get_state("sess-1")
+    assert state is not None
+    assert state.enabled is True
+    assert state.until is None
+    assert state.stopped_reason is None
+
+    await scheduler.stop()
+
+
 async def test_deadline_takes_precedence_over_max_duration(
     tmp_path: Path, clock: FakeClock, store: MemoryStore
 ) -> None:
