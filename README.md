@@ -163,34 +163,57 @@ conditions and every edge case: `docs/DESIGN.md`.
 
 ## Configuration
 
-Everything is environment variables, prefix `CCBG_`. Set them in the `env`
-block of the Claude Code `settings.json` scope that should apply (user or
-project), or in the daemon's environment directly — the systemd unit passes
-through every `CCBG_*` variable present when you ran `ccbg install --service`.
+You do not need to configure anything. Put this in `~/.claude/settings.json`,
+or let `ccbg install` do it:
 
-| Variable                       | Default                                                       | Meaning                                                                                 |
-| ------------------------------ | ------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
-| `CCBG_HOST`                    | `127.0.0.1`                                                   | listen address                                                                          |
-| `CCBG_PORT`                    | `8787`                                                        | listen port                                                                             |
-| `CCBG_UPSTREAM`                | `https://api.anthropic.com`                                   | forward target                                                                          |
-| `CCBG_STATE_DIR`               | `${XDG_STATE_HOME:-~/.local/state}/claude-cache-bump-gateway` | persistence root                                                                        |
-| `CCBG_PERSIST`                 | `true`                                                        | write snapshots and state to disk                                                       |
-| `CCBG_DEFAULT_ENABLED`         | `false`                                                       | bump new sessions without being asked                                                   |
-| `CCBG_INTERVAL_1H_S`           | `3000`                                                        | interval when the prompt requests 1 h TTL                                               |
-| `CCBG_INTERVAL_5M_S`           | `240`                                                         | interval otherwise                                                                      |
-| `CCBG_MAX_DURATION_S`          | `86400`                                                       | stop bumping this long after the last real request                                      |
-| `CCBG_ON_CACHE_WRITE`          | `stop`                                                        | `stop` or `continue` when a bump paid a cache write                                     |
-| `CCBG_MAX_STREAMS_PER_SESSION` | `8`                                                           | snapshots retained per session                                                          |
-| `CCBG_LOG_LEVEL`               | `INFO`                                                        | Python logging level                                                                    |
-| `CCBG_URL`                     | `http://127.0.0.1:8787`                                       | where CLI subcommands find the daemon                                                   |
+```json
+{
+  "env": {
+    "ANTHROPIC_BASE_URL": "http://127.0.0.1:8787"
+  },
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "ccbg hook user-prompt-submit",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+Anything below goes in that same `env` object, next to `ANTHROPIC_BASE_URL`;
+Claude Code applies it per scope (user, project, or local), same as any
+other setting.
+
+| Variable                       | Default                                                       | What it does                                                     |
+| ------------------------------- | --------------------------------------------------------------- | -------------------------------------------------------------------- |
+| `CCBG_HOST`                    | `127.0.0.1`                                                   | local only (`127.0.0.1`) by default; who can reach the daemon    |
+| `CCBG_PORT`                    | `8787`                                                        | which port the daemon listens on                                 |
+| `CCBG_UPSTREAM`                | `https://api.anthropic.com`                                   | where requests are actually forwarded to                         |
+| `CCBG_STATE_DIR`               | `${XDG_STATE_HOME:-~/.local/state}/claude-cache-bump-gateway` | where session state and captured requests are saved               |
+| `CCBG_PERSIST`                 | `true`                                                        | save state to disk so it survives a daemon restart                |
+| `CCBG_DEFAULT_ENABLED`         | `false`                                                       | turn bumping on automatically for every new session               |
+| `CCBG_INTERVAL_1H_S`           | `3000`                                                        | how often to refresh the cache when the model gives it a longer lifetime |
+| `CCBG_INTERVAL_5M_S`           | `240`                                                         | how often to refresh the cache otherwise                          |
+| `CCBG_MAX_DURATION_S`          | `86400`                                                       | stop refreshing this long after you last sent a real message      |
+| `CCBG_ON_CACHE_WRITE`          | `stop`                                                        | `stop` bumping or `continue` when a refresh finds the cache already expired |
+| `CCBG_MAX_STREAMS_PER_SESSION` | `8`                                                           | how many separate conversation branches to remember per session   |
+| `CCBG_LOG_LEVEL`               | `INFO`                                                        | how much detail the daemon logs                                   |
+| `CCBG_URL`                     | `http://127.0.0.1:8787`                                       | where the `ccbg` command finds the daemon                         |
 
 This table is kept in sync with `docs/DESIGN.md` "Configuration"; if they
 ever disagree, `config.py` is the source of truth.
 
 ## Integrating
 
-The control API (`/ccbg/*` on the same listener, JSON, loopback-only,
-unauthenticated) is the integration point for anything that is not this
+The control API (`/ccbg/*` on the same listener, JSON, local-only by
+default, unauthenticated) is the integration point for anything that is not this
 project — PTY wrappers, editor plugins, other statuslines. Full contract:
 `docs/API.md`.
 
@@ -203,9 +226,9 @@ curl -s -X POST "http://127.0.0.1:8787/ccbg/sessions/$SESSION_ID/bump"
 
 ## Security and privacy
 
-- The control API is loopback-only and unauthenticated; it can spend your
-  subscription quota, so never expose it beyond `127.0.0.1` or put it behind
-  a port forward.
+- The control API is unauthenticated and listens on `127.0.0.1` by
+  default; it can spend your subscription quota, so never expose it beyond
+  `127.0.0.1` or put it behind a port forward.
 - Persisted snapshots hold the full conversation and the request credential
   (they are what gets replayed), at file mode 0600 inside a 0700 directory.
   Set `CCBG_PERSIST=false` to keep everything in memory only, at the cost of
