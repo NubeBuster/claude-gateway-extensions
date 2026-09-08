@@ -77,6 +77,63 @@ ccbg status --session "$CLAUDE_SESSION_ID" --json
 ccbg now --session "$CLAUDE_SESSION_ID"
 ```
 
+`ccbg status --session "$CLAUDE_SESSION_ID" --json` and `GET
+/ccbg/sessions/{id}` both return the same session status object:
+
+```json
+{
+  "session_id": "abc123",
+  "enabled": true,
+  "interval_s": null,
+  "max_duration_s": null,
+  "last_request_at": 1700000000.0,
+  "last_bump_at": 1700003000.0,
+  "bump_count": 3,
+  "stopped_reason": null,
+  "next_bump_at": 1700006000.0,
+  "streams": 2,
+  "last_result": {
+    "outcome": "ok",
+    "status": 200,
+    "usage": {
+      "input_tokens": 10,
+      "output_tokens": 0,
+      "cache_read_input_tokens": 4096,
+      "cache_creation_input_tokens": 0
+    },
+    "detail": "",
+    "stream_key": "ab12...",
+    "model": "claude-opus-4"
+  }
+}
+```
+
+| Field             | Type                       | Meaning                                                              |
+| ------------------ | -------------------------- | ---------------------------------------------------------------------- |
+| `session_id`       | string                     | the session this status is for                                       |
+| `enabled`          | bool                       | whether bumping is currently on                                      |
+| `interval_s`       | int or null                | per-session bump interval override; `null` uses the config default   |
+| `max_duration_s`   | int or null                | per-session max-duration override; `null` uses the config default    |
+| `last_request_at`  | float (epoch s) or null    | when the last real `/v1/messages` request was captured               |
+| `last_bump_at`     | float (epoch s) or null    | when the last successful bump replay ran                             |
+| `bump_count`       | int                        | number of successful bumps for this session                          |
+| `stopped_reason`   | string or null             | why bumping was turned off automatically (e.g. `cache_write`), if it was |
+| `next_bump_at`     | float (epoch s) or null    | when the next scheduled bump will fire; `null` if disabled or no snapshot |
+| `streams`          | int                        | number of distinct request streams captured for this session         |
+| `last_result`      | object or null             | the most recent `BumpResult` (below), or `null` if never bumped       |
+| `last_result.outcome`      | string             | `ok`, `cache_write`, `unauthorized`, `rejected`, or `transient`       |
+| `last_result.status`       | int or null        | upstream HTTP status of the bump replay                              |
+| `last_result.usage`        | object or null      | token usage from the replay response (fields below), or `null`       |
+| `last_result.usage.input_tokens`                | int | fresh (non-cached) input tokens billed                |
+| `last_result.usage.output_tokens`               | int | output tokens billed                                   |
+| `last_result.usage.cache_read_input_tokens`     | int | input tokens served from cache (a successful bump)     |
+| `last_result.usage.cache_creation_input_tokens` | int | input tokens billed as a fresh cache write              |
+| `last_result.detail`       | string              | short human-readable detail, empty on `ok`                           |
+| `last_result.stream_key`   | string or null      | which captured stream was replayed                                   |
+| `last_result.model`        | string or null      | the model of the replayed stream                                     |
+
+Full contract, including every other route: `docs/API.md`.
+
 To show cache status in your own statusline, append `ccbg statusline`
 to your existing `statusLine` command, e.g. `existing-command; ccbg
 statusline`. It reads the same statusline JSON from stdin and prints one
