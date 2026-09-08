@@ -2,13 +2,12 @@
 
 ## Scope
 
-This project does exactly one thing: keep a Claude Code session's prompt
-cache warm by replaying its last request with `max_tokens: 0` before the TTL
-expires. Non-goals (do not add these here; they belong in a separate project
-or plugin layer — see `docs/DESIGN.md` "Non-goals" for the full list and
-rationale): cache-miss gating, fork review, named checkpoints, TTL or
-`cache_control` rewriting, credit accounting, model substitution, audit
-logging, PTY input interception, control-API authentication.
+The shipped scope is whatever `docs/DESIGN.md` "Scope of 0.1" says it is;
+today that is one thing: keep a Claude Code session's prompt cache warm by
+replaying its last request with `max_tokens: 0` before the TTL expires. Later
+features are listed as candidates under DESIGN.md "Roadmap". Do not implement
+one here until it has been designed into `docs/DESIGN.md` first; a roadmap
+entry is not an approval to write the code.
 
 ## Invariants
 

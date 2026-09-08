@@ -13,6 +13,9 @@ normal cache-read pricing per bump (often free on a subscription); it stops
 bumping a session the moment a bump would pay a full cache write instead of
 a read (see "How it works").
 
+0.1 ships cache bumping only; other features are on the roadmap in
+`docs/DESIGN.md`.
+
 ## Requirements
 
 - Python 3.11+

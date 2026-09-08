@@ -18,15 +18,36 @@ This document records the decisions. `docs/API.md` specifies the control API.
 - Be a building block: a small, documented local API that other tooling
   (PTY wrappers, statusline scripts, editor plugins) can drive.
 
-## Non-goals
+## Scope of 0.1
 
-Explicitly out of scope for this project, even though a sibling proxy the
-author maintains has them: cache-miss gating, fork review, named checkpoints,
-TTL or `cache_control` placement rewriting, credit accounting, terminal-focus
-dialogs, side-turn classification, zero-downtime socket handover, model
-substitution, audit logging, PTY input interception, authentication on the
-control API (loopback-only is the boundary). Requests to add any of these go to
-a separate project or a plugin layer, not here.
+0.1 does cache bumping only: capture the last `/v1/messages` request per
+session, replay it on a timer, stop on the documented conditions. Everything
+else listed under "Roadmap" is deliberately absent from this release, not
+ruled out for the project.
+
+## Roadmap
+
+Candidate features for later releases, in no particular order:
+
+- Cache-miss gate: hold or refuse a request whose prefix is no longer cached.
+- Fork review: inspect a session's captured request before acting on it.
+- Named checkpoints: label a captured snapshot and return to it later.
+- TTL and placement policy: rewrite `cache_control` ttl and block placement.
+- Credit accounting: track what bumping and normal traffic cost.
+- Terminal-focus dialogs: prompt the user in the terminal that owns a session.
+- Side-turn classification: tell subagent and sidecar prompts from the main
+  conversation rather than inferring from prefix size.
+- Zero-downtime reload: hand the listening socket to a new process on restart.
+- Model substitution: route a request to a different model than requested.
+- Audit logging: a durable record of what the daemon forwarded and replayed.
+- PTY input interception: drive the gateway from the terminal instead of the
+  control API.
+- Control-API authentication: a credential in addition to the loopback bind.
+
+Each of these enters through an addition to this design document before any
+code, and must preserve the invariants that make the daemon safe to leave in
+the request path: byte-transparent forwarding, fail-closed bumping, and a
+loopback-only control API.
 
 ## Architecture
 
