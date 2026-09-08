@@ -36,6 +36,13 @@
   reading as 24h. Zero-padded hours (`04:20`) and hours 13..23 are
   unaffected. With an explicit day (`today`/`tomorrow`/a weekday), the
   earliest candidate still ahead on that day wins.
+- The hook's status replies and `cgx status` show time remaining until a
+  session's deadline: `until HH:MM — Nd Nh Nm from now` on the same local
+  calendar day, `until tomorrow at HH:MM — Nd Nh Nm from now` the next
+  day, or the full ISO 8601 timestamp beyond that.
+- `/cache` deadline names gain `morning` (9AM), `dinner` (6PM), and
+  `nighttime` (10PM), alongside the existing `noon`, `teatime`, and
+  `midnight`.
 - Explicit `--port`/`--host` wiring: `cgx serve`, `cgx service install`
   and `cgx configure` all take `--port N` (`serve`/`service install` also
   take `--host H`); `cgx configure` resolves the port from

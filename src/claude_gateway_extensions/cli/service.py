@@ -92,8 +92,8 @@ def render_unit(
 
     Passes through every ``CGX_*`` variable currently set in ``environ`` as
     an ``Environment=`` line, so the service sees the same configuration the
-    installing shell had (documented in the README's "Daemon settings"
-    section). ``port``/``host``, when given, are written explicitly as
+    installing shell had (documented in the README's "Daemon Environment
+    Variables" section). ``port``/``host``, when given, are written explicitly as
     ``CGX_PORT``/``CGX_HOST``, overriding whatever those two happened to
     be in the installing shell — the whole point of ``--port``/``--host`` is
     to pin the unit's port independent of shell state.
