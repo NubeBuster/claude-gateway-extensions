@@ -40,7 +40,7 @@ ccbg install --scope user
 ```
 
 > [!CAUTION]
-> This immediately affects all running Claude Code sessions in the given scope. Recommended to install when no large context sessions are live, to prevent potential cache misess or other risks.
+> This immediately affects all running Claude Code sessions in the given scope. Recommended to install when no large context sessions are live, to prevent potential cache misses or other risks.
 
 The daemon is per user, not per project — one instance serves every Claude
 Code project on the machine — so it has its own subcommand group,
