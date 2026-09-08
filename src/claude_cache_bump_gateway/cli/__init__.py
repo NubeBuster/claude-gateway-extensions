@@ -21,7 +21,7 @@ import os
 import sys
 import time
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, TextIO
 
@@ -109,9 +109,15 @@ def _cmd_serve(args: argparse.Namespace, config: Config, ctx: _Context) -> int:
 
     Imported lazily so every other subcommand works without ``aiohttp`` (or
     the server package, which may not exist yet during CLI-only development)
-    ever being imported.
+    ever being imported. ``--port``/``--host`` override whatever
+    ``CCBG_PORT``/``CCBG_HOST`` resolved to from the environment.
     """
-    del args
+    if args.port is not None or args.host is not None:
+        config = replace(
+            config,
+            host=args.host if args.host is not None else config.host,
+            port=args.port if args.port is not None else config.port,
+        )
     try:
         server_module = importlib.import_module("claude_cache_bump_gateway.server")
     except ModuleNotFoundError as exc:
@@ -250,14 +256,23 @@ _SERVICE_FLAG_REMOVED = (
 
 
 def _cmd_install(args: argparse.Namespace, config: Config, ctx: _Context) -> int:
-    """Install the Claude Code integration for the chosen scope."""
+    """Install the Claude Code integration for the chosen scope.
+
+    The URL written to ``env.ANTHROPIC_BASE_URL`` is derived from
+    ``--port`` (falling back to ``CCBG_PORT``/``CCBG_URL`` in the
+    environment, then the installed systemd unit's port, then the default),
+    not from ``config.url`` — see :func:`install.resolve_install_url`.
+    """
+    del config
     if args.service:
         ctx.stderr.write(_SERVICE_FLAG_REMOVED.format(cmd="install"))
         return EXIT_USAGE
+    installed_port = service.installed_port(ctx.environ)
+    url = install.resolve_install_url(args.port, ctx.environ, installed_port)
     try:
         result = install.install(
             scope=args.scope,
-            url=config.url,
+            url=url,
             force=args.force,
             dry_run=args.dry_run,
             environ=ctx.environ,
@@ -271,6 +286,7 @@ def _cmd_install(args: argparse.Namespace, config: Config, ctx: _Context) -> int
         return EXIT_OK
     ctx.stdout.write(f"wrote {result.settings_path}\n")
     ctx.stdout.write(f"installed skill at {result.skill_dir}\n")
+    ctx.stdout.write(f"daemon URL: {url}\n")
     return EXIT_OK
 
 
@@ -294,10 +310,15 @@ def _cmd_uninstall(args: argparse.Namespace, config: Config, ctx: _Context) -> i
 
 
 def _cmd_service_install(args: argparse.Namespace, config: Config, ctx: _Context) -> int:
-    """Write and enable the systemd user unit that runs the daemon."""
-    del args, config
+    """Write and enable the systemd user unit that runs the daemon.
+
+    ``--port``/``--host`` are written into the unit explicitly, overriding
+    whatever ``CCBG_PORT``/``CCBG_HOST`` happen to be set in the installing
+    shell (every other ``CCBG_*`` var is still copied through unchanged).
+    """
+    del config
     runner = ctx.service_runner if ctx.service_runner is not None else service.DEFAULT_RUNNER
-    path = service.install_service(ctx.environ, runner)
+    path = service.install_service(ctx.environ, runner, port=args.port, host=args.host)
     ctx.stdout.write(f"installed and started claude-cache-bump-gateway.service ({path})\n")
     return EXIT_OK
 
@@ -319,9 +340,13 @@ def _cmd_service_status(args: argparse.Namespace, config: Config, ctx: _Context)
     if not status.present:
         ctx.stdout.write("service: not installed; run `ccbg service install`\n")
     else:
+        port = service.installed_port(ctx.environ)
+        port_desc = (
+            str(port) if port is not None else "unset (daemon falls back to its own default)"
+        )
         ctx.stdout.write(
             f"service: unit present at {status.unit_path}, "
-            f"enabled={status.enabled}, active={status.active}\n"
+            f"enabled={status.enabled}, active={status.active}, port={port_desc}\n"
         )
     client = ctx.client_factory(config.url)
     health = check_daemon(client, config.url)
@@ -348,7 +373,12 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    subparsers.add_parser("serve", help="run the daemon")
+    _PORT_HELP = "override CCBG_PORT (default: env or 8787)"
+    _HOST_HELP = "override CCBG_HOST (default: env or 127.0.0.1)"
+
+    serve_parser = subparsers.add_parser("serve", help="run the daemon")
+    serve_parser.add_argument("--port", type=int, default=None, help=_PORT_HELP)
+    serve_parser.add_argument("--host", default=None, help=_HOST_HELP)
 
     status_parser = subparsers.add_parser("status", help="show session status")
     status_parser.add_argument("--session", help="session id (default: all sessions)")
@@ -399,6 +429,13 @@ def _build_parser() -> argparse.ArgumentParser:
     install_parser.add_argument(
         "--force", action="store_true", help="override a conflicting ANTHROPIC_BASE_URL"
     )
+    install_parser.add_argument(
+        "--port",
+        type=int,
+        default=None,
+        help="daemon port to point ANTHROPIC_BASE_URL at "
+        "(default: CCBG_PORT/CCBG_URL, then the installed service's port, then 8787)",
+    )
     install_parser.add_argument("--service", action="store_true", help=argparse.SUPPRESS)
 
     uninstall_parser = subparsers.add_parser("uninstall", help="remove the Claude Code integration")
@@ -413,7 +450,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "service", help="manage the systemd user service running the daemon"
     )
     service_subparsers = service_parser.add_subparsers(dest="service_command", required=True)
-    service_subparsers.add_parser("install", help="write and enable the systemd user unit")
+    service_install_parser = service_subparsers.add_parser(
+        "install", help="write and enable the systemd user unit"
+    )
+    service_install_parser.add_argument("--port", type=int, default=None, help=_PORT_HELP)
+    service_install_parser.add_argument("--host", default=None, help=_HOST_HELP)
     service_subparsers.add_parser("uninstall", help="disable and remove the systemd user unit")
     service_subparsers.add_parser("status", help="show the unit state and daemon health")
 

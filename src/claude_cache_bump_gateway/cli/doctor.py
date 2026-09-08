@@ -11,6 +11,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, TextIO
+from urllib.parse import urlsplit
 
 from claude_cache_bump_gateway.cli import install, service
 from claude_cache_bump_gateway.cli.client import (
@@ -65,6 +66,58 @@ def check_base_url(config: Config, environ: Mapping[str, str], cwd: Path) -> Che
             return CheckResult("ok", f"env.ANTHROPIC_BASE_URL set to {config.url} in {path}")
     return CheckResult(
         "warn", "env.ANTHROPIC_BASE_URL is not set in user or project settings; run `ccbg install`"
+    )
+
+
+def _find_settings_port(
+    environ: Mapping[str, str], cwd: Path
+) -> tuple[int | None, install.Scope | None]:
+    """Return the port embedded in whichever scope's ``env.ANTHROPIC_BASE_URL`` is set first."""
+    for scope in _SCOPES:
+        settings = _load_settings_quiet(scope, environ, cwd)
+        env = settings.get("env")
+        base_url = env.get("ANTHROPIC_BASE_URL") if isinstance(env, dict) else None
+        if isinstance(base_url, str):
+            port = urlsplit(base_url).port
+            if port is not None:
+                return port, scope
+    return None, None
+
+
+def check_port_consistency(
+    config: Config, environ: Mapping[str, str], cwd: Path, daemon_reachable: bool
+) -> CheckResult:
+    """Check that the settings URL, the unit's port and the reachable daemon agree on a port.
+
+    ``daemon_reachable`` comes from :func:`check_daemon` (not re-checked here, to avoid a
+    second network round trip) — it gates whether ``config.url``'s port counts as "the
+    reachable daemon" or is left out of the comparison. Sources that are simply absent (no
+    settings written yet, no unit installed) are not a mismatch; only two or more known,
+    disagreeing ports are.
+    """
+    settings_port, settings_scope = _find_settings_port(environ, cwd)
+    unit_port = service.installed_port(environ)
+    daemon_port = urlsplit(config.url).port if daemon_reachable else None
+
+    sources: dict[str, int] = {}
+    if settings_port is not None:
+        sources[f"{settings_scope} settings ANTHROPIC_BASE_URL"] = settings_port
+    if unit_port is not None:
+        sources["systemd unit CCBG_PORT"] = unit_port
+    if daemon_port is not None:
+        sources["reachable daemon (config.url)"] = daemon_port
+
+    if len(set(sources.values())) <= 1:
+        if sources:
+            port = next(iter(sources.values()))
+            return CheckResult("ok", f"port {port} agrees across {', '.join(sources)}")
+        return CheckResult("ok", "no port sources to compare yet")
+
+    detail = ", ".join(f"{name}={port}" for name, port in sources.items())
+    return CheckResult(
+        "warn",
+        f"ports disagree ({detail}); pick one port N and run "
+        f"`ccbg service install --port N` and `ccbg install --port N` to realign",
     )
 
 
@@ -164,9 +217,11 @@ def run_doctor(
 ) -> int:
     """Run every check, print one line each, and return 1 if any check failed else 0."""
     client = client_factory(config.url)
+    daemon_check = check_daemon(client, config.url)
     checks = [
-        check_daemon(client, config.url),
+        daemon_check,
         check_base_url(config, environ, cwd),
+        check_port_consistency(config, environ, cwd, daemon_check.status == "ok"),
         check_hook(environ, cwd),
         check_skill(environ, cwd),
         check_credentials(environ, cwd),
@@ -178,4 +233,4 @@ def run_doctor(
     return 1 if any(check.status == "fail" for check in checks) else 0
 
 
-__all__ = ["CheckResult", "run_doctor"]
+__all__ = ["CheckResult", "check_port_consistency", "run_doctor"]

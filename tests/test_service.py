@@ -114,3 +114,68 @@ def test_status_reports_disabled_inactive_unit(
     assert status.present is True
     assert status.enabled is False
     assert status.active is False
+
+
+def test_render_unit_explicit_port_overrides_shell_env(tmp_path: Path) -> None:
+    """--port must win over whatever CCBG_PORT happens to be in the installing shell."""
+    environ = {"HOME": str(tmp_path), "CCBG_PORT": "1111"}
+    text = service.render_unit("/usr/local/bin/ccbg", environ, port=9999)
+    assert "Environment=CCBG_PORT=9999" in text
+    assert "Environment=CCBG_PORT=1111" not in text
+
+
+def test_render_unit_explicit_port_with_no_env_port_set(tmp_path: Path) -> None:
+    environ = {"HOME": str(tmp_path)}
+    text = service.render_unit("/usr/local/bin/ccbg", environ, port=9999)
+    assert "Environment=CCBG_PORT=9999" in text
+
+
+def test_render_unit_explicit_host_overrides_shell_env(tmp_path: Path) -> None:
+    environ = {"HOME": str(tmp_path), "CCBG_HOST": "0.0.0.0"}
+    text = service.render_unit("/usr/local/bin/ccbg", environ, host="127.0.0.1")
+    assert "Environment=CCBG_HOST=127.0.0.1" in text
+    assert "Environment=CCBG_HOST=0.0.0.0" not in text
+
+
+def test_render_unit_still_passes_through_other_ccbg_vars_with_explicit_port(
+    tmp_path: Path,
+) -> None:
+    """Explicit --port must not disable the documented pass-through of other CCBG_* vars."""
+    environ = {"HOME": str(tmp_path), "CCBG_LOG_LEVEL": "DEBUG"}
+    text = service.render_unit("/usr/local/bin/ccbg", environ, port=9999)
+    assert "Environment=CCBG_PORT=9999" in text
+    assert "Environment=CCBG_LOG_LEVEL=DEBUG" in text
+
+
+def test_install_service_forwards_port_and_host(
+    tmp_path: Path, fake_runner: tuple[list[list[str]], service.Runner]
+) -> None:
+    _, runner = fake_runner
+    environ = {"HOME": str(tmp_path)}
+    unit_path = service.install_service(environ, runner, port=9999, host="0.0.0.0")
+    text = unit_path.read_text()
+    assert "Environment=CCBG_PORT=9999" in text
+    assert "Environment=CCBG_HOST=0.0.0.0" in text
+
+
+def test_installed_port_absent_without_a_unit(tmp_path: Path) -> None:
+    environ = {"HOME": str(tmp_path)}
+    assert service.installed_port(environ) is None
+
+
+def test_installed_port_absent_when_unit_has_no_explicit_port(
+    tmp_path: Path, fake_runner: tuple[list[list[str]], service.Runner]
+) -> None:
+    _, runner = fake_runner
+    environ = {"HOME": str(tmp_path)}
+    service.install_service(environ, runner)
+    assert service.installed_port(environ) is None
+
+
+def test_installed_port_reads_back_the_written_port(
+    tmp_path: Path, fake_runner: tuple[list[list[str]], service.Runner]
+) -> None:
+    _, runner = fake_runner
+    environ = {"HOME": str(tmp_path)}
+    service.install_service(environ, runner, port=9999)
+    assert service.installed_port(environ) == 9999

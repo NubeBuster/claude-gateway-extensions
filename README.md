@@ -23,7 +23,8 @@ a read (see "How it works").
 - [Both claude.ai substriptions and API billing are supported](https://code.claude.com/docs/en/gateways#subscriptions-and-gateways)
 - Linux or macOS. `ccbg service install` (the systemd user unit) is Linux
   only; on macOS run `ccbg serve` yourself (a shell, `tmux`, or a `launchd`
-  agent you write).
+  agent you write). Running without systemd: `ccbg serve --port 8787` in any
+  process manager or terminal, then `ccbg install --port 8787`.
 
 ## Installation
 
@@ -47,6 +48,10 @@ ccbg service install
 ```
 
 The service install requires no root, but reserves a port system wide. For concurrent proxies on the same machine, separate ports must be assigned.
+
+Both `ccbg service install` and `ccbg install` accept `--port N` to pick a
+non-default port; keep the two in sync (see "Running without systemd"
+above).
 
 ---
 
@@ -258,7 +263,7 @@ daemon and does not go through a settings.json variable.
 
 | Variable   | Default                 | What it does                                               |
 | ---------- | ----------------------- | ---------------------------------------------------------- |
-| `CCBG_URL` | `http://127.0.0.1:8787` | where the hook, the CLI and the statusline find the daemon |
+| `CCBG_URL` | `http://127.0.0.1:8787` | where the hook, the CLI and the statusline find the daemon; falls back to a loopback `ANTHROPIC_BASE_URL` (which `ccbg install` sets) when unset |
 
 #### Claude Code Hook
 

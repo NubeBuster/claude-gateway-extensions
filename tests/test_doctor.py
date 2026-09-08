@@ -116,6 +116,59 @@ def test_api_key_helper_in_settings_is_detected(tmp_path: Path) -> None:
     assert "apiKeyHelper" in stdout.getvalue()
 
 
+def test_port_consistency_ok_when_only_one_source_known(tmp_path: Path) -> None:
+    environ = {"HOME": str(tmp_path)}
+    config = Config.from_env({"CCBG_URL": URL})
+    check = doctor.check_port_consistency(config, environ, tmp_path, True)
+    assert check.status == "ok"
+
+
+def test_port_consistency_ok_when_settings_and_daemon_agree(tmp_path: Path) -> None:
+    environ = {"HOME": str(tmp_path)}
+    install.install(
+        scope="user", url=URL, force=False, dry_run=False, environ=environ, cwd=tmp_path
+    )
+    config = Config.from_env({"CCBG_URL": URL})
+    check = doctor.check_port_consistency(config, environ, tmp_path, True)
+    assert check.status == "ok"
+
+
+def test_port_consistency_warns_on_settings_daemon_port_mismatch(tmp_path: Path) -> None:
+    environ = {"HOME": str(tmp_path)}
+    install.install(
+        scope="user",
+        url="http://127.0.0.1:9999",
+        force=False,
+        dry_run=False,
+        environ=environ,
+        cwd=tmp_path,
+    )
+    config = Config.from_env({"CCBG_URL": URL})
+    check = doctor.check_port_consistency(config, environ, tmp_path, True)
+    assert check.status == "warn"
+    assert "9999" in check.message
+    assert "8787" in check.message
+    assert "--port" in check.message
+
+
+def test_port_consistency_warns_on_unit_daemon_port_mismatch(tmp_path: Path) -> None:
+    environ = {"HOME": str(tmp_path)}
+    service.install_service(environ, runner=lambda args: None, port=9999)
+    config = Config.from_env({"CCBG_URL": URL})
+    check = doctor.check_port_consistency(config, environ, tmp_path, True)
+    assert check.status == "warn"
+    assert "9999" in check.message
+
+
+def test_port_consistency_ignores_daemon_port_when_unreachable(tmp_path: Path) -> None:
+    """A daemon that failed the reachability check must not also produce a port mismatch."""
+    environ = {"HOME": str(tmp_path)}
+    service.install_service(environ, runner=lambda args: None, port=9999)
+    config = Config.from_env({"CCBG_URL": URL})
+    check = doctor.check_port_consistency(config, environ, tmp_path, False)
+    assert check.status == "ok"
+
+
 def test_state_dir_wrong_mode_is_a_warning(tmp_path: Path) -> None:
     environ = {"HOME": str(tmp_path)}
     state_dir = tmp_path / "state"

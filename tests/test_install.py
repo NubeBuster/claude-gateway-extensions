@@ -256,6 +256,65 @@ def test_skill_source_dir_falls_back_to_repo_checkout(
     assert source.parts[-3:] == ("claude", "skills", "cache")
 
 
+def test_resolve_install_port_prefers_explicit_flag() -> None:
+    assert install.resolve_install_port(9999, {"CCBG_PORT": "1111"}, 2222) == 9999
+
+
+def test_resolve_install_port_falls_back_to_ccbg_port_env() -> None:
+    assert install.resolve_install_port(None, {"CCBG_PORT": "1111"}, 2222) == 1111
+
+
+def test_resolve_install_port_falls_back_to_ccbg_url_env() -> None:
+    assert install.resolve_install_port(None, {"CCBG_URL": "http://127.0.0.1:1111"}, 2222) == 1111
+
+
+def test_resolve_install_port_falls_back_to_installed_unit_port() -> None:
+    assert install.resolve_install_port(None, {}, 2222) == 2222
+
+
+def test_resolve_install_port_falls_back_to_default() -> None:
+    assert install.resolve_install_port(None, {}, None) == install.DEFAULT_PORT
+
+
+def test_resolve_install_url_builds_loopback_url() -> None:
+    assert install.resolve_install_url(9999, {}, None) == "http://127.0.0.1:9999"
+
+
+def test_install_writes_ccbg_url_for_non_default_port(tmp_path: Path) -> None:
+    environ = {"HOME": str(tmp_path)}
+    url = "http://127.0.0.1:9999"
+    install.install(
+        scope="user", url=url, force=False, dry_run=False, environ=environ, cwd=tmp_path
+    )
+    path = install.settings_path("user", environ, tmp_path)
+    data = json.loads(path.read_text())
+    assert data["env"]["CCBG_URL"] == url
+
+
+def test_install_does_not_write_ccbg_url_for_default_port(tmp_path: Path) -> None:
+    environ = {"HOME": str(tmp_path)}
+    install.install(
+        scope="user", url=URL, force=False, dry_run=False, environ=environ, cwd=tmp_path
+    )
+    path = install.settings_path("user", environ, tmp_path)
+    data = json.loads(path.read_text())
+    assert "CCBG_URL" not in data.get("env", {})
+
+
+def test_uninstall_removes_ccbg_url(tmp_path: Path) -> None:
+    environ = {"HOME": str(tmp_path)}
+    url = "http://127.0.0.1:9999"
+    install.install(
+        scope="user", url=url, force=False, dry_run=False, environ=environ, cwd=tmp_path
+    )
+    path = install.settings_path("user", environ, tmp_path)
+    assert json.loads(path.read_text())["env"]["CCBG_URL"] == url
+
+    install.uninstall(scope="user", url=url, environ=environ, cwd=tmp_path)
+    data = json.loads(path.read_text())
+    assert "CCBG_URL" not in data.get("env", {})
+
+
 def test_skill_source_dir_raises_when_neither_location_exists(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

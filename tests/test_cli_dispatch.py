@@ -298,6 +298,78 @@ def test_service_install_uses_injected_runner(tmp_path: Path) -> None:
     )
 
 
+def test_service_install_port_and_host_flags(tmp_path: Path) -> None:
+    client = _FakeClient("http://x")
+    calls: list[list[str]] = []
+
+    def runner(args: list[str]) -> None:
+        calls.append(list(args))
+
+    code, out, _ = _run(
+        ["service", "install", "--port", "9999", "--host", "0.0.0.0"],
+        client,
+        environ={"HOME": str(tmp_path)},
+        service_runner=runner,
+    )
+    assert code == EXIT_OK
+    unit_path = tmp_path / ".config" / "systemd" / "user" / "claude-cache-bump-gateway.service"
+    text = unit_path.read_text()
+    assert "Environment=CCBG_PORT=9999" in text
+    assert "Environment=CCBG_HOST=0.0.0.0" in text
+    assert "installed and started" in out
+
+
+def test_service_status_reports_installed_unit_port(tmp_path: Path) -> None:
+    client = _FakeClient("http://x")
+    code, out, _ = _run(
+        ["service", "install", "--port", "9999"],
+        client,
+        environ={"HOME": str(tmp_path)},
+        service_runner=lambda args: None,
+    )
+    assert code == EXIT_OK
+
+    def query(args: list[str]) -> str:
+        return "enabled" if "is-enabled" in args else "active"
+
+    code, out, _ = _run(
+        ["service", "status"], client, environ={"HOME": str(tmp_path)}, service_query=query
+    )
+    assert code == EXIT_OK
+    assert "port=9999" in out
+
+
+def test_install_writes_url_for_explicit_port(tmp_path: Path) -> None:
+    client = _FakeClient("http://x")
+    code, out, _ = _run(
+        ["install", "--scope", "user", "--port", "9999"],
+        client,
+        environ={"HOME": str(tmp_path)},
+    )
+    assert code == EXIT_OK
+    assert "daemon URL: http://127.0.0.1:9999" in out
+    settings_path = tmp_path / ".claude" / "settings.json"
+    data = json.loads(settings_path.read_text())
+    assert data["env"]["ANTHROPIC_BASE_URL"] == "http://127.0.0.1:9999"
+    assert data["env"]["CCBG_URL"] == "http://127.0.0.1:9999"
+
+
+def test_install_port_falls_back_to_installed_service_port(tmp_path: Path) -> None:
+    client = _FakeClient("http://x")
+    environ = {"HOME": str(tmp_path)}
+    code, _, _ = _run(
+        ["service", "install", "--port", "9999"],
+        client,
+        environ=environ,
+        service_runner=lambda a: None,
+    )
+    assert code == EXIT_OK
+
+    code, out, _ = _run(["install", "--scope", "user"], client, environ=environ)
+    assert code == EXIT_OK
+    assert "daemon URL: http://127.0.0.1:9999" in out
+
+
 def test_service_status_reports_not_installed_and_daemon_health() -> None:
     client = _FakeClient("http://x")
     code, out, _ = _run(["service", "status"], client, environ={"HOME": "/nonexistent-home"})
@@ -334,6 +406,39 @@ def test_serve_imports_server_module_lazily(monkeypatch: pytest.MonkeyPatch) -> 
     code, _, _ = _run(["serve"], client)
     assert code == EXIT_OK
     assert len(calls) == 1
+
+
+def test_serve_port_flag_overrides_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    import types
+
+    fake_module = types.ModuleType("claude_cache_bump_gateway.server")
+    calls: list[Any] = []
+    fake_module.run = lambda config: calls.append(config)  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "claude_cache_bump_gateway.server", fake_module)
+
+    client = _FakeClient("http://x")
+    code, _, _ = _run(
+        ["serve", "--port", "9999", "--host", "0.0.0.0"],
+        client,
+        environ={"CCBG_PORT": "1111"},
+    )
+    assert code == EXIT_OK
+    assert calls[0].port == 9999
+    assert calls[0].host == "0.0.0.0"
+
+
+def test_serve_without_flags_uses_env_port(monkeypatch: pytest.MonkeyPatch) -> None:
+    import types
+
+    fake_module = types.ModuleType("claude_cache_bump_gateway.server")
+    calls: list[Any] = []
+    fake_module.run = lambda config: calls.append(config)  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "claude_cache_bump_gateway.server", fake_module)
+
+    client = _FakeClient("http://x")
+    code, _, _ = _run(["serve"], client, environ={"CCBG_PORT": "1111"})
+    assert code == EXIT_OK
+    assert calls[0].port == 1111
 
 
 def test_serve_missing_server_module_is_a_clean_failure(monkeypatch: pytest.MonkeyPatch) -> None:

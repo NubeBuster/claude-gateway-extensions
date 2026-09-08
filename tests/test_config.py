@@ -90,3 +90,44 @@ def test_non_local_hosts_are_accepted_but_not_local(host: str) -> None:
     config = Config.from_env({"CCBG_HOST": host})
     assert config.host == host
     assert config.is_local_host() is False
+
+
+def test_url_defaults_from_host_and_port() -> None:
+    """With nothing set, url tracks CCBG_HOST/CCBG_PORT rather than a hardcoded literal."""
+    config = Config.from_env({"CCBG_PORT": "9001"})
+    assert config.url == "http://127.0.0.1:9001"
+
+
+def test_url_prefers_ccbg_url_over_everything() -> None:
+    config = Config.from_env(
+        {
+            "CCBG_URL": "http://127.0.0.1:9999",
+            "CCBG_PORT": "9001",
+            "ANTHROPIC_BASE_URL": "http://127.0.0.1:7000",
+        }
+    )
+    assert config.url == "http://127.0.0.1:9999"
+
+
+def test_url_falls_back_to_loopback_anthropic_base_url() -> None:
+    config = Config.from_env({"ANTHROPIC_BASE_URL": "http://127.0.0.1:9001"})
+    assert config.url == "http://127.0.0.1:9001"
+
+
+@pytest.mark.parametrize(
+    "base_url",
+    [
+        "https://127.0.0.1:9001",  # not http
+        "http://192.168.1.5:9001",  # not loopback
+        "http://example.com:9001",  # not loopback
+    ],
+)
+def test_url_ignores_non_loopback_or_non_http_anthropic_base_url(base_url: str) -> None:
+    """A non-loopback (or non-http) ANTHROPIC_BASE_URL is not this daemon; ignore it."""
+    config = Config.from_env({"ANTHROPIC_BASE_URL": base_url})
+    assert config.url == "http://127.0.0.1:8787"
+
+
+def test_url_falls_back_to_default_when_nothing_set() -> None:
+    config = Config.from_env({})
+    assert config.url == "http://127.0.0.1:8787"

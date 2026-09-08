@@ -177,6 +177,31 @@ def test_bump_reports_tokens(fake_daemon: tuple[str, dict, list]) -> None:
     assert "48213 tokens read from cache" in decision["reason"]
 
 
+def test_falls_back_to_loopback_anthropic_base_url(fake_daemon: tuple[str, dict, list]) -> None:
+    """No CCBG_URL set: a loopback ANTHROPIC_BASE_URL (what Claude Code passes to hooks) works."""
+    base_url, routes, _calls = fake_daemon
+    routes[("PUT", "/ccbg/sessions/s1")] = (200, {"session_id": "s1", "enabled": False})
+    code, out = _run({"session_id": "s1", "prompt": "/cache off"}, {"ANTHROPIC_BASE_URL": base_url})
+    assert code == 0
+    decision = json.loads(out)
+    assert decision["reason"] == "cache: off"
+
+
+def test_non_loopback_anthropic_base_url_is_ignored() -> None:
+    """A non-loopback ANTHROPIC_BASE_URL is not this daemon; the hook must not try to reach it.
+
+    ``CCBG_PORT`` pins the resulting default to a port nothing is listening
+    on, so this stays hermetic instead of depending on port 8787 being free.
+    """
+    code, out = _run(
+        {"session_id": "s1", "prompt": "/cache off"},
+        {"ANTHROPIC_BASE_URL": "https://api.anthropic.com", "CCBG_PORT": "18787"},
+    )
+    assert code == 0
+    decision = json.loads(out)
+    assert "daemon not reachable at http://127.0.0.1:18787" in decision["reason"]
+
+
 def test_on_is_removed_and_gives_the_unparseable_hint(
     fake_daemon: tuple[str, dict, list],
 ) -> None:

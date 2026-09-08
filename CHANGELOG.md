@@ -36,3 +36,11 @@
   reading as 24h. Zero-padded hours (`04:20`) and hours 13..23 are
   unaffected. With an explicit day (`today`/`tomorrow`/a weekday), the
   earliest candidate still ahead on that day wins.
+- Explicit `--port`/`--host` wiring: `ccbg serve`, `ccbg service install`
+  and `ccbg install` all take `--port N` (`serve`/`service install` also
+  take `--host H`); `ccbg install` resolves the port from
+  `CCBG_PORT`/`CCBG_URL` or the installed systemd unit before falling back
+  to 8787, and prints the URL it wrote. The hook, statusline and CLI now
+  also fall back to a loopback `ANTHROPIC_BASE_URL` when `CCBG_URL` is
+  unset. `ccbg doctor` gained a check that the settings URL, the unit's
+  port and the reachable daemon all agree.

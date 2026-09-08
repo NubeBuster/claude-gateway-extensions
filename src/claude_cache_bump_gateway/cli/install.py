@@ -25,6 +25,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
+from urllib.parse import urlsplit
 
 Scope = Literal["user", "project"]
 
@@ -33,6 +34,12 @@ Scope = Literal["user", "project"]
 HOOK_COMMAND = "ccbg hook user-prompt-submit"
 _HOOK_TIMEOUT_S = 5
 _SKILL_NAME = "cache"
+
+#: The daemon's default port and the resulting default URL (matches
+#: ``config.py``'s ``CCBG_HOST``/``CCBG_PORT`` defaults) — the port below
+#: which ``ccbg install`` does not bother also writing ``env.CCBG_URL``.
+DEFAULT_PORT = 8787
+DEFAULT_URL = f"http://127.0.0.1:{DEFAULT_PORT}"
 
 
 class InstallError(Exception):
@@ -122,6 +129,64 @@ def remove_base_url(settings: dict[str, Any], url: str) -> None:
         del env["ANTHROPIC_BASE_URL"]
         if not env:
             del settings["env"]
+
+
+def merge_ccbg_url(settings: dict[str, Any], url: str) -> None:
+    """Set ``env.CCBG_URL`` to ``url`` in-place.
+
+    Only called for a non-default ``url`` (see :func:`install`): the common
+    default-port case relies on the hook/statusline/CLI's ``ANTHROPIC_BASE_URL``
+    fallback (``config.py``) instead of a redundant settings entry.
+    """
+    env = settings.setdefault("env", {})
+    env["CCBG_URL"] = url
+
+
+def remove_ccbg_url(settings: dict[str, Any], url: str) -> None:
+    """Remove ``env.CCBG_URL`` if it equals ``url`` in-place (mirrors ``remove_base_url``)."""
+    env = settings.get("env")
+    if isinstance(env, dict) and env.get("CCBG_URL") == url:
+        del env["CCBG_URL"]
+        if not env:
+            del settings["env"]
+
+
+def resolve_install_port(
+    port: int | None,
+    environ: Mapping[str, str],
+    installed_port: int | None,
+) -> int:
+    """Resolve the daemon port ``ccbg install`` writes into ``ANTHROPIC_BASE_URL``.
+
+    Precedence: the ``--port`` flag, then ``CCBG_PORT`` or (failing that)
+    the port embedded in ``CCBG_URL`` if either is set in ``environ``, then
+    ``installed_port`` (the port baked into the systemd unit, if
+    ``ccbg service install`` already ran — see
+    :func:`~claude_cache_bump_gateway.cli.service.installed_port`), then
+    :data:`DEFAULT_PORT`.
+    """
+    if port is not None:
+        return port
+    env_port = environ.get("CCBG_PORT")
+    if env_port:
+        return int(env_port)
+    env_url = environ.get("CCBG_URL")
+    if env_url:
+        parsed_port = urlsplit(env_url).port
+        if parsed_port is not None:
+            return parsed_port
+    if installed_port is not None:
+        return installed_port
+    return DEFAULT_PORT
+
+
+def resolve_install_url(
+    port: int | None,
+    environ: Mapping[str, str],
+    installed_port: int | None,
+) -> str:
+    """Return the loopback URL ``ccbg install`` writes; see :func:`resolve_install_port`."""
+    return f"http://127.0.0.1:{resolve_install_port(port, environ, installed_port)}"
 
 
 def hook_entry_has_command(entry: Mapping[str, Any], command: str) -> bool:
@@ -232,6 +297,8 @@ def install(
     skill_dir = skills_dir(scope, environ, cwd)
     settings = load_settings(path)
     merge_base_url(settings, url, force)
+    if url != DEFAULT_URL:
+        merge_ccbg_url(settings, url)
     merge_hook(settings)
     if dry_run:
         return InstallResult(path, skill_dir, settings, True)
@@ -258,6 +325,7 @@ def uninstall(
     skill_dir = skills_dir(scope, environ, cwd)
     settings = load_settings(path)
     remove_base_url(settings, url)
+    remove_ccbg_url(settings, url)
     remove_hook(settings)
     if path.is_file():
         backup_settings(path)
@@ -267,12 +335,16 @@ def uninstall(
 
 
 __all__ = [
+    "DEFAULT_PORT",
+    "DEFAULT_URL",
     "HOOK_COMMAND",
     "InstallError",
     "InstallResult",
     "Scope",
     "hook_entry_has_command",
     "install",
+    "resolve_install_port",
+    "resolve_install_url",
     "settings_path",
     "skills_dir",
     "uninstall",

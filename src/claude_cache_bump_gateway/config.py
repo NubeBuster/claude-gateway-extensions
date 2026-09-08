@@ -15,6 +15,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
+from urllib.parse import urlsplit
 
 OnCacheWrite = Literal["stop", "continue"]
 
@@ -85,6 +86,44 @@ def _parse_on_cache_write(raw: str) -> OnCacheWrite:
     return raw
 
 
+def _is_loopback_http_url(url: str) -> bool:
+    """Return whether ``url`` is an ``http://`` URL whose host is loopback.
+
+    Used to decide whether an ambient ``ANTHROPIC_BASE_URL`` (which Claude
+    Code sets for every hook/statusline invocation once ``ccbg install`` has
+    run) is safe to treat as "this is the daemon" rather than some unrelated
+    gateway.
+    """
+    parsed = urlsplit(url)
+    return parsed.scheme == "http" and bool(parsed.hostname) and _is_loopback_host(parsed.hostname)
+
+
+def _format_host_for_url(host: str) -> str:
+    """Return ``host`` formatted for embedding in a URL, bracketing a bare IPv6 literal."""
+    if ":" in host and not host.startswith("["):
+        return f"[{host}]"
+    return host
+
+
+def _resolve_daemon_url(env: Mapping[str, str], host: str, port: int) -> str:
+    """Resolve the URL clients (hook, statusline, CLI) use to reach the daemon.
+
+    Precedence: ``CCBG_URL`` if set, then ``ANTHROPIC_BASE_URL`` if it is a
+    loopback ``http://`` URL (Claude Code passes it to every hook/statusline
+    invocation, so this removes the need to also set ``CCBG_URL`` in the
+    common case; a non-loopback ``ANTHROPIC_BASE_URL`` is ignored since it is
+    not this daemon), then ``http://{host}:{port}`` built from this same
+    ``Config``'s resolved host/port.
+    """
+    ccbg_url = env.get("CCBG_URL")
+    if ccbg_url:
+        return ccbg_url
+    base_url = env.get("ANTHROPIC_BASE_URL")
+    if base_url and _is_loopback_http_url(base_url):
+        return base_url
+    return f"http://{_format_host_for_url(host)}:{port}"
+
+
 @dataclass(frozen=True)
 class Config:
     """Immutable daemon configuration.
@@ -136,7 +175,7 @@ class Config:
             "CCBG_MAX_STREAMS_PER_SESSION", env.get("CCBG_MAX_STREAMS_PER_SESSION", "8")
         )
         log_level = env.get("CCBG_LOG_LEVEL", "INFO")
-        url = env.get("CCBG_URL", "http://127.0.0.1:8787")
+        url = _resolve_daemon_url(env, host, port)
 
         return cls(
             host=host,

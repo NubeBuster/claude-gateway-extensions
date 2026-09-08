@@ -73,18 +73,29 @@ def unit_path(environ: Mapping[str, str]) -> Path:
     return base / "systemd" / "user" / _UNIT_NAME
 
 
-def render_unit(executable: str, environ: Mapping[str, str]) -> str:
+def render_unit(
+    executable: str,
+    environ: Mapping[str, str],
+    *,
+    port: int | None = None,
+    host: str | None = None,
+) -> str:
     """Render the systemd user unit file content for ``executable``.
 
     Passes through every ``CCBG_*`` variable currently set in ``environ`` as
     an ``Environment=`` line, so the service sees the same configuration the
-    installing shell had.
+    installing shell had (documented in the README's "Daemon settings"
+    section). ``port``/``host``, when given, are written explicitly as
+    ``CCBG_PORT``/``CCBG_HOST``, overriding whatever those two happened to
+    be in the installing shell — the whole point of ``--port``/``--host`` is
+    to pin the unit's port independent of shell state.
     """
-    env_lines = [
-        f"Environment={key}={value}"
-        for key, value in sorted(environ.items())
-        if key.startswith("CCBG_")
-    ]
+    env_vars = {key: value for key, value in environ.items() if key.startswith("CCBG_")}
+    if port is not None:
+        env_vars["CCBG_PORT"] = str(port)
+    if host is not None:
+        env_vars["CCBG_HOST"] = host
+    env_lines = [f"Environment={key}={value}" for key, value in sorted(env_vars.items())]
     lines = [
         "[Unit]",
         "Description=claude-cache-bump-gateway",
@@ -102,12 +113,22 @@ def render_unit(executable: str, environ: Mapping[str, str]) -> str:
     return "\n".join(lines)
 
 
-def install_service(environ: Mapping[str, str], runner: Runner = _default_runner) -> Path:
-    """Write the systemd user unit and enable it now; return the unit path."""
+def install_service(
+    environ: Mapping[str, str],
+    runner: Runner = _default_runner,
+    *,
+    port: int | None = None,
+    host: str | None = None,
+) -> Path:
+    """Write the systemd user unit and enable it now; return the unit path.
+
+    ``port``/``host`` are forwarded to :func:`render_unit` to pin the unit's
+    ``CCBG_PORT``/``CCBG_HOST`` explicitly.
+    """
     executable = _ccbg_executable()
     path = unit_path(environ)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(render_unit(executable, environ))
+    path.write_text(render_unit(executable, environ, port=port, host=host))
     runner(["systemctl", "--user", "daemon-reload"])
     runner(["systemctl", "--user", "enable", "--now", _UNIT_NAME])
     return path
@@ -147,6 +168,26 @@ def service_status(environ: Mapping[str, str], query: Query = _default_query) ->
     return ServiceStatus(path, True, enabled, active)
 
 
+def installed_port(environ: Mapping[str, str]) -> int | None:
+    """Return the ``CCBG_PORT`` baked into the installed unit file, or ``None``.
+
+    ``None`` covers both "no unit installed" and "the unit has no explicit
+    ``CCBG_PORT`` line" (the daemon would then fall back to its own
+    default/environment at start time, which this function cannot see).
+    """
+    path = unit_path(environ)
+    if not path.is_file():
+        return None
+    prefix = "Environment=CCBG_PORT="
+    for line in path.read_text().splitlines():
+        if line.startswith(prefix):
+            try:
+                return int(line[len(prefix) :])
+            except ValueError:
+                return None
+    return None
+
+
 __all__ = [
     "DEFAULT_QUERY",
     "DEFAULT_RUNNER",
@@ -154,6 +195,7 @@ __all__ = [
     "Runner",
     "ServiceStatus",
     "install_service",
+    "installed_port",
     "render_unit",
     "service_status",
     "uninstall_service",
