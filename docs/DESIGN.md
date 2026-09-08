@@ -52,6 +52,21 @@ deliberately absent from this release, not ruled out for the project.
   spawns with the scoped `settings.json` `env` block already applied, so
   user/project/local scoping comes for free. `settings.json` rejects unknown
   top-level keys and a parallel file ladder would duplicate Claude Code's.
+  `managed` is deliberately not offered as a scope: it is root-owned and
+  machine-wide, while the daemon it would point at is per user.
+- **Every file a user owns is diffed and confirmed before it is written.**
+  `ccbg configure`, `unconfigure` and `ccbg service install`/`uninstall`
+  compute their changes first and show each one as a colored unified diff,
+  applying it only on a `y`. A bad `settings.json` edit breaks live sessions
+  and a bad unit edit breaks the running daemon, so consent is per file,
+  `--yes` is the only bypass, and a non-interactive stdin without it aborts
+  rather than choosing for the user.
+- **The port is written down, never assumed.** `serve`, `service install`
+  and `configure` each take `--port`, and `configure` resolves exactly one
+  port (`--port`, then `CCBG_PORT`/`CCBG_URL`, then the installed unit, then
+  the default) into the `ANTHROPIC_BASE_URL` it writes, so the settings
+  file, the systemd unit and the running daemon cannot drift apart
+  unnoticed; `ccbg doctor` compares the three and names any that disagree.
 - **Control API on `/ccbg/`, loopback only, unauthenticated.** The prefix
   cannot collide with an Anthropic path. It is the integration point for
   everything external. A non-local `CCBG_HOST` is the user's explicit choice

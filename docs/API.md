@@ -156,6 +156,12 @@ The API is unauthenticated by design and listens on `127.0.0.1` by default
 address is never refused, but the daemon logs a warning on startup, since
 anyone who can reach the listener can spend your subscription quota.
 
+The examples below use the default port `8787`; substitute whatever port the
+daemon listens on (`CCBG_PORT`, or `ccbg serve --port`/`ccbg service install
+--port`). `ccbg configure --port` writes the same port into
+`env.ANTHROPIC_BASE_URL`, which the hook, statusline and CLI fall back to
+when `CCBG_URL` is unset.
+
 Turn bumping on for the current session:
 
 ```sh
