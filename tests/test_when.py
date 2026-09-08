@@ -415,14 +415,59 @@ def test_weekday_across_amsterdam_dst_week() -> None:
 def test_weekday_invalid_clock_gives_a_hint() -> None:
     now = _at(2026, 9, 8, 8, 0)
     with pytest.raises(WhenError, match="try 2h, 9PM, tomorrow 10AM"):
-        parse_when("wed dinner", now)
+        parse_when("wed evening", now)
 
 
-@pytest.mark.parametrize("text", ["morning", "dinner", "evening"])
+@pytest.mark.parametrize("text", ["evening", "brunch", "lunchtime"])
 def test_period_and_meal_words_are_rejected(text: str) -> None:
+    """Only the named times the grammar actually defines are accepted; near-misses are not."""
     now = _at(2026, 9, 8, 8, 0)
     with pytest.raises(WhenError, match="try 2h, 9PM, tomorrow 10AM"):
         parse_when(text, now)
+
+
+# -- new named times: morning, dinner, nighttime -----------------------------
+
+
+@pytest.mark.parametrize(
+    ("text", "hour", "minute"),
+    [("morning", 9, 0), ("dinner", 18, 0), ("nighttime", 22, 0)],
+)
+def test_named_times_morning_dinner_nighttime(text: str, hour: int, minute: int) -> None:
+    now = _at(2026, 9, 8, 6, 0)
+    result = parse_when(text, now)
+    assert result == At(_at(2026, 9, 8, hour, minute))
+
+
+@pytest.mark.parametrize("text", ["MORNING", "Dinner", "NightTime"])
+def test_named_times_are_case_insensitive(text: str) -> None:
+    now = _at(2026, 9, 8, 6, 0)
+    result = parse_when(text, now)
+    assert isinstance(result, At)
+
+
+def test_named_time_rolls_to_tomorrow_when_already_past() -> None:
+    now = _at(2026, 9, 8, 20, 0)
+    result = parse_when("morning", now)
+    assert result == At(_at(2026, 9, 9, 9, 0))
+
+
+def test_named_time_with_tomorrow() -> None:
+    now = _at(2026, 9, 8, 8, 0)
+    result = parse_when("tomorrow dinner", now)
+    assert result == At(_at(2026, 9, 9, 18, 0))
+
+
+def test_named_time_with_today() -> None:
+    now = _at(2026, 9, 8, 8, 0)
+    result = parse_when("today nighttime", now)
+    assert result == At(_at(2026, 9, 8, 22, 0))
+
+
+def test_named_time_with_weekday() -> None:
+    now = _at(2026, 9, 8, 8, 0)  # Tuesday
+    result = parse_when("fri morning", now)
+    assert result == At(_at(2026, 9, 11, 9, 0))
 
 
 # -- DST transitions ---------------------------------------------------------

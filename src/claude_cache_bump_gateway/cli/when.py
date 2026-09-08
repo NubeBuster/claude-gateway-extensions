@@ -29,7 +29,14 @@ _DURATION_TOKEN_RE = re.compile(r"(\d+)\s*(day|d|hr|h|min|m)")
 _DURATION_UNIT_SECONDS = {"d": 86400, "day": 86400, "h": 3600, "hr": 3600, "m": 60, "min": 60}
 
 _CLOCK_RE = re.compile(r"^(\d{1,2})(?::(\d{2})(?::\d{2})?)?\s*(am|pm)?$")
-_NAMED_CLOCKS = {"noon": dt_time(12, 0), "midnight": dt_time(0, 0), "teatime": dt_time(16, 0)}
+_NAMED_CLOCKS = {
+    "morning": dt_time(9, 0),
+    "noon": dt_time(12, 0),
+    "teatime": dt_time(16, 0),
+    "dinner": dt_time(18, 0),
+    "nighttime": dt_time(22, 0),
+    "midnight": dt_time(0, 0),
+}
 
 #: ``date.weekday()`` numbering: Monday=0 .. Sunday=6. Three spellings, all
 #: case-insensitive (the caller already lowercases): two-letter, three-letter
