@@ -324,10 +324,8 @@ git clone https://github.com/NubeBuster/claude-cache-bump-gateway
 cd claude-cache-bump-gateway
 python3 -m venv .venv && .venv/bin/pip install -e '.[dev]'
 # or: uv sync --extra dev
-.venv/bin/ruff check src tests
-.venv/bin/ruff format --check src tests
-.venv/bin/pyright
-.venv/bin/pytest
+make check   # ruff check, ruff format --check, pyright, pytest
+make fix     # ruff format, ruff check --fix
 ```
 
 The `cache` skill lives at `claude/skills/cache/SKILL.md` in the repo root;

@@ -49,6 +49,8 @@ entry is not an approval to write the code.
   invocation. A general mandate such as "publish", "release" or "deploy"
   authorises only the push it names, never a later one. Agents commit
   freely and ask before every push.
+- Verification is `make check`, run once before a commit; never chain
+  `ruff`/`pyright`/`pytest` by hand. Use `make fix` for formatting.
 
 ## Commits
 
