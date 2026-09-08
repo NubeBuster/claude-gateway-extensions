@@ -41,25 +41,26 @@ ccbg doctor
 
 `ccbg install` idempotently merges `env.ANTHROPIC_BASE_URL` and a
 `UserPromptSubmit` hook into the chosen `settings.json`, and copies the
-`cache-bump` skill into the matching `skills/` directory — nothing else in
+`cache` skill into the matching `skills/` directory — nothing else in
 your `settings.json` is touched. `--service` also writes and enables a
 systemd user unit running `ccbg serve`. `ccbg doctor` reports what is and
 is not wired up. Use `--scope project` to wire a single project's
 `.claude/settings.json` instead of (or alongside) your user one.
 
-Then, inside a Claude Code session: `/cache-bump on`.
+Then, inside a Claude Code session: `/cache on`.
 
 ## Usage
 
-The `/cache-bump` command inside Claude Code:
+The `/cache` command inside Claude Code:
 
-| Command              | Effect                                                  |
-| -------------------- | ------------------------------------------------------- |
-| `/cache-bump on`     | turn bumping on for the current session                 |
-| `/cache-bump on 2h`  | turn bumping on with a 2-hour max duration override     |
-| `/cache-bump off`    | turn bumping off                                        |
-| `/cache-bump status` | show whether bumping is on and when the next bump fires |
-| `/cache-bump now`    | bump immediately, outside the normal schedule           |
+| Command         | Effect                                                  |
+| --------------- | -------------------------------------------------------- |
+| `/cache`        | same as `/cache status`                                 |
+| `/cache on`     | turn bumping on for the current session                 |
+| `/cache on 2h`  | turn bumping on with a 2-hour max duration override     |
+| `/cache off`    | turn bumping off                                        |
+| `/cache status` | show whether bumping is on and when the next bump fires |
+| `/cache bump`   | bump immediately, outside the normal schedule           |
 
 `on <duration>` accepts `<N>h` or `<N>m` and overrides `max_duration_s` for
 that session, not the bump interval.
@@ -76,10 +77,10 @@ ccbg status --session "$CLAUDE_SESSION_ID" --json
 ccbg now --session "$CLAUDE_SESSION_ID"
 ```
 
-To show cache-bump status in your own statusline, append `ccbg statusline`
+To show cache status in your own statusline, append `ccbg statusline`
 to your existing `statusLine` command, e.g. `existing-command; ccbg
 statusline`. It reads the same statusline JSON from stdin and prints one
-short segment (`cache-bump: on, next in 47m`, `cache-bump: off`, or nothing
+short segment (`cache: on, next in 47m`, `cache: off`, or nothing
 when the daemon is unreachable or the session is unknown); it never blocks.
 
 ## How it works
@@ -201,5 +202,11 @@ python3 -m venv .venv && .venv/bin/pip install -e '.[dev]'
 .venv/bin/pyright
 .venv/bin/pytest
 ```
+
+The `cache` skill lives at `claude/skills/cache/SKILL.md` in the repo root;
+`ccbg install` copies it into the target `skills/` directory. Cloned instead
+of installed and want it without running `ccbg install`? Copy
+`claude/skills/cache/` into `~/.claude/skills/` (or a project's
+`.claude/skills/`) yourself.
 
 MIT licensed, see `LICENSE`.

@@ -1,7 +1,7 @@
 """Idempotent installer/uninstaller for the Claude Code integration surface.
 
 Merges ``env.ANTHROPIC_BASE_URL`` and the ``UserPromptSubmit`` hook into the
-chosen ``settings.json``, copies the ``cache-bump`` skill, and optionally
+chosen ``settings.json``, copies the ``cache`` skill, and optionally
 writes and enables a systemd user unit. See ``docs/DESIGN.md``
 "Claude Code integration" and "Configuration" (why no config file) for the
 rationale; the only ``settings.json`` keys ever written are ``env`` (one
@@ -29,7 +29,7 @@ Scope = Literal["user", "project"]
 #: to find and remove exactly the entry this installer added.
 HOOK_COMMAND = "ccbg hook user-prompt-submit"
 _HOOK_TIMEOUT_S = 5
-_SKILL_NAME = "cache-bump"
+_SKILL_NAME = "cache"
 _UNIT_NAME = "claude-cache-bump-gateway.service"
 
 #: A runner executes a systemd command; tests inject a fake instead of the
@@ -65,7 +65,7 @@ def settings_path(scope: Scope, environ: Mapping[str, str], cwd: Path) -> Path:
 
 
 def skills_dir(scope: Scope, environ: Mapping[str, str], cwd: Path) -> Path:
-    """Return the destination directory for the ``cache-bump`` skill for ``scope``."""
+    """Return the destination directory for the ``cache`` skill for ``scope``."""
     if scope == "user":
         return user_home(environ) / ".claude" / "skills" / _SKILL_NAME
     return cwd / ".claude" / "skills" / _SKILL_NAME
@@ -175,14 +175,30 @@ def remove_hook(settings: dict[str, Any], command: str = HOOK_COMMAND) -> None:
 
 
 def skill_source_dir() -> Any:
-    """Return the packaged ``cache-bump`` skill directory via ``importlib.resources``.
+    """Return the packaged ``cache`` skill directory.
 
-    Packaging-free: works both from an editable/source checkout (where the
-    skill lives at ``src/claude_cache_bump_gateway/data/skills/cache-bump/``
-    and ``claude/skills/cache-bump/`` is a symlink to it) and from an
-    installed wheel.
+    The canonical source is the repo-root ``claude/skills/cache/``; the
+    wheel's ``force-include`` mapping (see ``pyproject.toml``) copies it to
+    ``claude_cache_bump_gateway/data/skills/cache/`` at build time, so an
+    installed wheel resolves it via ``importlib.resources``. An editable
+    install (``pip install -e .``) never runs that mapping, so this falls
+    back to the repo-root path computed from this file's location.
+
+    Raises :class:`InstallError` if neither location exists.
     """
-    return importlib.resources.files("claude_cache_bump_gateway") / "data" / "skills" / _SKILL_NAME
+    packaged = (
+        importlib.resources.files("claude_cache_bump_gateway") / "data" / "skills" / _SKILL_NAME
+    )
+    if packaged.is_dir():
+        return packaged
+    repo_root = Path(__file__).resolve().parents[3]
+    fallback = repo_root / "claude" / "skills" / _SKILL_NAME
+    if fallback.is_dir():
+        return fallback
+    raise InstallError(
+        f"cannot find the packaged '{_SKILL_NAME}' skill: checked {packaged} "
+        f"(installed wheel) and {fallback} (editable checkout)"
+    )
 
 
 def copy_skill(dest_dir: Path) -> None:

@@ -295,3 +295,43 @@ def test_uninstall_without_settings_creates_nothing(tmp_path: Path) -> None:
 
     assert not path.exists()
     assert not path.with_name(path.name + ".bak").exists()
+
+
+def test_skill_source_dir_prefers_installed_wheel_location(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When the wheel's force-include mapping populated the package, use it."""
+    packaged = tmp_path / "packaged" / "data" / "skills" / "cache"
+    packaged.mkdir(parents=True)
+    (packaged / "SKILL.md").write_text("packaged\n")
+
+    monkeypatch.setattr(install.importlib.resources, "files", lambda _pkg: tmp_path / "packaged")
+    assert install.skill_source_dir() == packaged
+
+
+def test_skill_source_dir_falls_back_to_repo_checkout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An editable install never runs force-include; fall back to the repo path."""
+    monkeypatch.setattr(
+        install.importlib.resources, "files", lambda _pkg: Path("/nonexistent-package-dir")
+    )
+    source = install.skill_source_dir()
+    assert (source / "SKILL.md").is_file()
+    assert source.parts[-3:] == ("claude", "skills", "cache")
+
+
+def test_skill_source_dir_raises_when_neither_location_exists(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        install.importlib.resources, "files", lambda _pkg: Path("/nonexistent-package-dir")
+    )
+    fake_module_file = (
+        tmp_path / "fake-repo" / "src" / "claude_cache_bump_gateway" / "cli" / "install.py"
+    )
+    fake_module_file.parent.mkdir(parents=True)
+    monkeypatch.setattr(install, "__file__", str(fake_module_file))
+
+    with pytest.raises(install.InstallError):
+        install.skill_source_dir()

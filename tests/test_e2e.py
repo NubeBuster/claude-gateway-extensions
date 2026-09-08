@@ -261,9 +261,9 @@ async def test_full_lifecycle(state_dir: Path, tmp_path: Path) -> None:
             assert final["stopped_reason"] == "cache_write"
             assert final["last_result"]["outcome"] == "cache_write"
 
-            # --- 5. the hook answers /cache-bump status without a model turn -
+            # --- 5. the hook answers /cache status without a model turn -----
             hook_out = io.StringIO()
-            payload = json.dumps({"prompt": "/cache-bump status", "session_id": SESSION_ID})
+            payload = json.dumps({"prompt": "/cache status", "session_id": SESSION_ID})
             code = await asyncio.get_running_loop().run_in_executor(
                 None,
                 lambda: run_user_prompt_submit(io.StringIO(payload), hook_out, {"CCBG_URL": base}),
@@ -271,7 +271,7 @@ async def test_full_lifecycle(state_dir: Path, tmp_path: Path) -> None:
             assert code == 0
             decision = json.loads(hook_out.getvalue())
             assert decision["decision"] == "block"
-            assert "cache-bump: off" in decision["reason"]
+            assert "cache: off" in decision["reason"]
             assert "cache_write" in decision["reason"]
     finally:
         await proxy.close()

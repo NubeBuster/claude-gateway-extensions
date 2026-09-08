@@ -25,17 +25,17 @@ def _format_segment(session: Mapping[str, object], now: float) -> str:
     if not session.get("enabled"):
         stopped_reason = session.get("stopped_reason")
         if stopped_reason:
-            return f"cache-bump: off, stopped: {stopped_reason}"
-        return "cache-bump: off"
+            return f"cache: off, stopped: {stopped_reason}"
+        return "cache: off"
     next_bump_at = session.get("next_bump_at")
     if isinstance(next_bump_at, int | float):
         minutes = max(0, round((next_bump_at - now) / 60))
-        return f"cache-bump: on, next in {minutes}m"
-    return "cache-bump: on"
+        return f"cache: on, next in {minutes}m"
+    return "cache: on"
 
 
 def run_statusline(stdin: TextIO, stdout: TextIO, environ: Mapping[str, str]) -> int:
-    """Read the statusline JSON from ``stdin`` and print the cache-bump segment.
+    """Read the statusline JSON from ``stdin`` and print the cache segment.
 
     Always returns 0. Prints nothing when the input is unparseable, the
     daemon is unreachable, or the session id is unknown to the daemon.

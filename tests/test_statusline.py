@@ -73,14 +73,14 @@ def test_on_with_next_bump(fake_daemon: tuple[str, dict]) -> None:
         {"session_id": "s1", "enabled": True, "next_bump_at": time.time() + 47 * 60},
     )
     out = _run({"session_id": "s1"}, {"CCBG_URL": base_url})
-    assert out.strip() == "cache-bump: on, next in 47m"
+    assert out.strip() == "cache: on, next in 47m"
 
 
 def test_off(fake_daemon: tuple[str, dict]) -> None:
     base_url, routes = fake_daemon
     routes[("GET", "/ccbg/sessions/s1")] = (200, {"session_id": "s1", "enabled": False})
     out = _run({"session_id": "s1"}, {"CCBG_URL": base_url})
-    assert out.strip() == "cache-bump: off"
+    assert out.strip() == "cache: off"
 
 
 def test_off_with_stopped_reason(fake_daemon: tuple[str, dict]) -> None:
@@ -90,7 +90,7 @@ def test_off_with_stopped_reason(fake_daemon: tuple[str, dict]) -> None:
         {"session_id": "s1", "enabled": False, "stopped_reason": "unauthorized"},
     )
     out = _run({"session_id": "s1"}, {"CCBG_URL": base_url})
-    assert out.strip() == "cache-bump: off, stopped: unauthorized"
+    assert out.strip() == "cache: off, stopped: unauthorized"
 
 
 def test_daemon_unreachable_prints_nothing() -> None:

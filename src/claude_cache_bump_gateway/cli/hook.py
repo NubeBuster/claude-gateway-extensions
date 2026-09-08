@@ -1,4 +1,4 @@
-"""``UserPromptSubmit`` hook handler for the ``/cache-bump`` fall-through command.
+"""``UserPromptSubmit`` hook handler for the ``/cache`` fall-through command.
 
 See ``docs/DESIGN.md`` "Claude Code integration": a hook is used instead of
 relying on the skill because it is the only deterministic path that avoids a
@@ -19,7 +19,7 @@ from typing import Any, TextIO
 from claude_cache_bump_gateway.cli.client import ApiError, ControlClient, DaemonUnreachable
 from claude_cache_bump_gateway.config import Config
 
-_COMMAND_PREFIX = "/cache-bump"
+_COMMAND_PREFIX = "/cache"
 _DURATION_RE = re.compile(r"^(\d+)([hm])$")
 
 
@@ -44,33 +44,33 @@ def _format_on_reason(session: Mapping[str, Any], now: float) -> str:
     """Format the reason line for ``on`` and an enabled ``status``."""
     minutes = _minutes_until(session.get("next_bump_at"), now)
     if minutes is None:
-        return "cache-bump: on for this session"
-    return f"cache-bump: on for this session, next bump in {minutes}m"
+        return "cache: on for this session"
+    return f"cache: on for this session, next bump in {minutes}m"
 
 
 def _format_now_reason(result: Mapping[str, Any]) -> str:
-    """Format the reason line for the ``now`` command from a bump result payload."""
+    """Format the reason line for the ``bump`` command from a bump result payload."""
     outcome = result.get("outcome")
     usage = result.get("usage") or {}
     if outcome == "ok":
         tokens = usage.get("cache_read_input_tokens", 0)
-        return f"cache-bump: bumped, {tokens} tokens read from cache"
+        return f"cache: bumped, {tokens} tokens read from cache"
     if outcome == "cache_write":
-        return "cache-bump: bumped, but the cache had already expired (paid a full write)"
+        return "cache: bumped, but the cache had already expired (paid a full write)"
     if outcome == "unauthorized":
-        return "cache-bump: bump failed, credential rejected (session stopped)"
+        return "cache: bump failed, credential rejected (session stopped)"
     if outcome == "rejected":
-        return "cache-bump: bump failed, upstream rejected the replay (session stopped)"
+        return "cache: bump failed, upstream rejected the replay (session stopped)"
     if outcome == "transient":
-        return "cache-bump: bump failed, transient upstream error, try again shortly"
+        return "cache: bump failed, transient upstream error, try again shortly"
     error = result.get("error")
     if error:
-        return f"cache-bump: bump not possible right now ({error})"
-    return "cache-bump: bump failed, unrecognised response from daemon"
+        return f"cache: bump not possible right now ({error})"
+    return "cache: bump failed, unrecognised response from daemon"
 
 
 def _handle_command(client: ControlClient, session_id: str, argument: str, now: float) -> str:
-    """Dispatch the parsed ``/cache-bump`` argument and return the reason line."""
+    """Dispatch the parsed ``/cache`` argument and return the reason line."""
     parts = argument.split()
     action = parts[0].lower() if parts else "status"
     if action == "on":
@@ -79,8 +79,8 @@ def _handle_command(client: ControlClient, session_id: str, argument: str, now: 
         return _format_on_reason(session, now)
     if action == "off":
         client.set_session(session_id, False)
-        return "cache-bump: off"
-    if action == "now":
+        return "cache: off"
+    if action == "bump":
         result = client.bump(session_id)
         return _format_now_reason(result)
     if action == "status":
@@ -88,23 +88,25 @@ def _handle_command(client: ControlClient, session_id: str, argument: str, now: 
             session = client.get_session(session_id)
         except ApiError as exc:
             if exc.status == 404:
-                return "cache-bump: off"
+                return "cache: off"
             raise
         if session.get("enabled"):
             return _format_on_reason(session, now)
         stopped_reason = session.get("stopped_reason")
         if stopped_reason:
-            return f"cache-bump: off, stopped: {stopped_reason}"
-        return "cache-bump: off"
-    return f"cache-bump: unknown command {action!r} (use on, off, status or now)"
+            return f"cache: off, stopped: {stopped_reason}"
+        return "cache: off"
+    return f"cache: unknown command {action!r} (use on, off, status or bump)"
 
 
 def run_user_prompt_submit(stdin: TextIO, stdout: TextIO, environ: Mapping[str, str]) -> int:
-    """Read the ``UserPromptSubmit`` hook JSON from ``stdin`` and handle ``/cache-bump``.
+    """Read the ``UserPromptSubmit`` hook JSON from ``stdin`` and handle ``/cache``.
 
-    Returns 0 unconditionally once a ``/cache-bump`` prompt has been
-    recognised (so the user sees a reason instead of a hook failure), and 0
-    silently for any prompt that does not match or for unparseable input.
+    Returns 0 unconditionally once a ``/cache`` prompt has been recognised
+    (so the user sees a reason instead of a hook failure), and 0 silently
+    for any prompt that does not match or for unparseable input. A match
+    requires ``/cache`` to be followed by end-of-string or whitespace, so
+    ``/cachefoo`` (and the old ``/cache-bump`` spelling) are left alone.
     """
     raw = stdin.read()
     try:
@@ -119,23 +121,26 @@ def run_user_prompt_submit(stdin: TextIO, stdout: TextIO, environ: Mapping[str, 
     stripped = prompt.strip()
     if not stripped.startswith(_COMMAND_PREFIX):
         return 0
-    argument = stripped[len(_COMMAND_PREFIX) :].strip()
+    rest = stripped[len(_COMMAND_PREFIX) :]
+    if rest and not rest[0].isspace():
+        return 0
+    argument = rest.strip()
     session_id = payload.get("session_id")
 
     config = Config.from_env(environ)
     reason: str
     if not isinstance(session_id, str) or not session_id:
-        reason = "cache-bump: no session id in hook payload"
+        reason = "cache: no session id in hook payload"
     else:
         client = ControlClient(config.url)
         try:
             reason = _handle_command(client, session_id, argument, time.time())
         except DaemonUnreachable:
-            reason = f"cache-bump: daemon not reachable at {config.url} (is ccbg serve running?)"
+            reason = f"cache: daemon not reachable at {config.url} (is ccbg serve running?)"
         except ApiError as exc:
-            reason = f"cache-bump: daemon error ({exc.status})"
+            reason = f"cache: daemon error ({exc.status})"
         except Exception as exc:
-            reason = f"cache-bump: unexpected error ({exc})"
+            reason = f"cache: unexpected error ({exc})"
 
     stdout.write(json.dumps({"decision": "block", "reason": reason}))
     stdout.write("\n")

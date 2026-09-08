@@ -86,6 +86,18 @@ def test_non_matching_prompt_prints_nothing() -> None:
     assert out == ""
 
 
+def test_cachefoo_does_not_match() -> None:
+    code, out = _run({"session_id": "s1", "prompt": "/cachefoo"}, {})
+    assert code == 0
+    assert out == ""
+
+
+def test_old_cache_bump_spelling_does_not_match() -> None:
+    code, out = _run({"session_id": "s1", "prompt": "/cache-bump on"}, {})
+    assert code == 0
+    assert out == ""
+
+
 def test_invalid_json_exits_silently() -> None:
     stdin = io.StringIO("{not json")
     stdout = io.StringIO()
@@ -103,7 +115,7 @@ def test_on_with_duration_sets_max_duration_and_blocks(
         {"session_id": "s1", "enabled": True, "next_bump_at": None},
     )
     code, out = _run(
-        {"session_id": "s1", "prompt": "/cache-bump on 2h"},
+        {"session_id": "s1", "prompt": "/cache on 2h"},
         {"CCBG_URL": base_url},
     )
     assert code == 0
@@ -116,27 +128,36 @@ def test_on_with_duration_sets_max_duration_and_blocks(
 def test_off_blocks_with_off_reason(fake_daemon: tuple[str, dict, list]) -> None:
     base_url, routes, _calls = fake_daemon
     routes[("PUT", "/ccbg/sessions/s1")] = (200, {"session_id": "s1", "enabled": False})
-    code, out = _run({"session_id": "s1", "prompt": "/cache-bump off"}, {"CCBG_URL": base_url})
+    code, out = _run({"session_id": "s1", "prompt": "/cache off"}, {"CCBG_URL": base_url})
     assert code == 0
     decision = json.loads(out)
-    assert decision["reason"] == "cache-bump: off"
+    assert decision["reason"] == "cache: off"
 
 
-def test_now_reports_tokens(fake_daemon: tuple[str, dict, list]) -> None:
+def test_bump_reports_tokens(fake_daemon: tuple[str, dict, list]) -> None:
     base_url, routes, _calls = fake_daemon
     routes[("POST", "/ccbg/sessions/s1/bump")] = (
         200,
         {"outcome": "ok", "usage": {"cache_read_input_tokens": 48213}},
     )
-    code, out = _run({"session_id": "s1", "prompt": "/cache-bump now"}, {"CCBG_URL": base_url})
+    code, out = _run({"session_id": "s1", "prompt": "/cache bump"}, {"CCBG_URL": base_url})
     assert code == 0
     decision = json.loads(out)
     assert "48213 tokens read from cache" in decision["reason"]
 
 
+def test_old_now_verb_is_an_unknown_command(fake_daemon: tuple[str, dict, list]) -> None:
+    base_url, _routes, calls = fake_daemon
+    code, out = _run({"session_id": "s1", "prompt": "/cache now"}, {"CCBG_URL": base_url})
+    assert code == 0
+    decision = json.loads(out)
+    assert decision["reason"] == "cache: unknown command 'now' (use on, off, status or bump)"
+    assert calls == []
+
+
 def test_daemon_unreachable_prints_helpful_reason_and_exits_zero() -> None:
     code, out = _run(
-        {"session_id": "s1", "prompt": "/cache-bump status"},
+        {"session_id": "s1", "prompt": "/cache status"},
         {"CCBG_URL": "http://127.0.0.1:1"},
     )
     assert code == 0
@@ -152,7 +173,7 @@ def test_default_status_action(fake_daemon: tuple[str, dict, list]) -> None:
         200,
         {"session_id": "s1", "enabled": True, "next_bump_at": None},
     )
-    code, out = _run({"session_id": "s1", "prompt": "/cache-bump"}, {"CCBG_URL": base_url})
+    code, out = _run({"session_id": "s1", "prompt": "/cache"}, {"CCBG_URL": base_url})
     assert code == 0
     decision = json.loads(out)
     assert "on for this session" in decision["reason"]

@@ -48,6 +48,9 @@ path = "src/claude_cache_bump_gateway/__init__.py"
 [tool.hatch.build.targets.wheel]
 packages = ["src/claude_cache_bump_gateway"]
 
+[tool.hatch.build.targets.wheel.force-include]
+"claude/skills/cache" = "claude_cache_bump_gateway/data/skills/cache"
+
 [tool.hatch.build.targets.sdist]
 include = ["src", "docs", "claude", "tests", "README.md", "LICENSE", "pyproject.toml"]
 

@@ -1,11 +1,11 @@
 ---
-name: cache-bump
-description: Toggle prompt-cache bumping for this session (on, off, status, now). Handled by the ccbg hook when installed.
-argument-hint: "on [2h] | off | status | now"
+name: cache
+description: Toggle prompt-cache bumping for this session (on, off, status, bump). Handled by the ccbg hook when installed.
+argument-hint: "[on [2h] | off | status | bump]"
 disable-model-invocation: true
 ---
 
-This request, `/cache-bump $ARGUMENTS`, reached you as a model turn instead
+This request, `/cache $ARGUMENTS`, reached you as a model turn instead
 of being intercepted by a hook. That means the claude-cache-bump-gateway
 `UserPromptSubmit` hook is not installed, or the daemon is not running.
 

@@ -12,6 +12,6 @@
   disable, immediate bump, and forget.
 - `ccbg` CLI: `serve`, `status`, `on`/`off`, `now`, `forget`, `hook`,
   `statusline`, `install`/`uninstall`, `doctor`.
-- Claude Code integration: `/cache-bump` skill and `UserPromptSubmit` hook,
+- Claude Code integration: `/cache` skill and `UserPromptSubmit` hook,
   statusline segment, idempotent settings.json installer with systemd user
   service support.

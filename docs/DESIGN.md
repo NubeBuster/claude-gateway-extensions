@@ -74,7 +74,7 @@ src/claude_cache_bump_gateway/
     statusline.py    statusline segment
     install.py       settings.json merge, skill copy, systemd unit
     doctor.py        environment checks
-claude/skills/cache-bump/SKILL.md   fall-through skill (D10a)
+claude/skills/cache/SKILL.md        fall-through skill (D10a)
 tests/               pytest, fake upstream server, no real API calls
 ```
 
@@ -242,18 +242,20 @@ integration point for anything that is not this project.
 Deliberately minimal and entirely optional; the daemon plus `ANTHROPIC_BASE_URL`
 is the whole product, the rest is convenience.
 
-- Skill `claude/skills/cache-bump/SKILL.md`, invoked as `/cache-bump on|off|status|now`.
+- Skill `claude/skills/cache/SKILL.md`, invoked as `/cache [on|off|status|bump]`
+  (bare `/cache` means `status`).
   Its body only tells the model that the hook is not installed and how to install
   it. When the hook is installed the prompt never reaches the model, so the skill
   is pure discoverability with a graceful fall-through.
 - `UserPromptSubmit` hook `ccbg hook user-prompt-submit`: reads the hook JSON
-  from stdin; if `prompt` starts with `/cache-bump`, calls the control API for
-  `session_id` and prints `{"decision": "block", "reason": "<one-line status>"}`
-  so the command is handled without a model turn. Any other prompt exits 0 with
-  no output. A hook is used because it is the only deterministic path; a skill
-  always ends in a model turn.
+  from stdin; if `prompt` is `/cache` followed by end-of-string or whitespace,
+  calls the control API for `session_id` and prints
+  `{"decision": "block", "reason": "<one-line status>"}` so the command is
+  handled without a model turn. Any other prompt exits 0 with no output. A
+  hook is used because it is the only deterministic path; a skill always ends
+  in a model turn.
 - `ccbg statusline`: reads the statusline JSON from stdin, prints one short
-  segment (`cache-bump: on, next in 47m`, `cache-bump: off`, or nothing when the
+  segment (`cache: on, next in 47m`, `cache: off`, or nothing when the
   daemon is unreachable) for users to append to their own statusline command.
 - `ccbg install [--scope user|project]`: idempotently merges into the chosen
   `settings.json` the `env.ANTHROPIC_BASE_URL` entry and the hook registration,
@@ -302,7 +304,7 @@ describes it as an opt-in with that trade-off.
   the largest prefix, which is normally the lead's conversation, but a very
   large subagent prompt could win. Integrators who care should supply a selector
   that also looks at `x-claude-code-agent-id`.
-- The hook-based `/cache-bump` command relies on `UserPromptSubmit` receiving
+- The hook-based `/cache` command relies on `UserPromptSubmit` receiving
   the raw text before skill expansion. If a future Claude Code version expands
   skills first, the skill body still explains the situation to the user.
 - Upstream requests are held open with no read timeout, matching Claude Code's

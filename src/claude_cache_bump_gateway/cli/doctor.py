@@ -85,12 +85,12 @@ def check_hook(environ: Mapping[str, str], cwd: Path) -> CheckResult:
 
 
 def check_skill(environ: Mapping[str, str], cwd: Path) -> CheckResult:
-    """Check that the ``cache-bump`` skill is present in some scope."""
+    """Check that the ``cache`` skill is present in some scope."""
     for scope in _SCOPES:
         skill_dir = install.skills_dir(scope, environ, cwd)
         if (skill_dir / "SKILL.md").is_file():
-            return CheckResult("ok", f"cache-bump skill present at {skill_dir}")
-    return CheckResult("warn", "cache-bump skill not found; run `ccbg install`")
+            return CheckResult("ok", f"cache skill present at {skill_dir}")
+    return CheckResult("warn", "cache skill not found; run `ccbg install`")
 
 
 def check_credentials(environ: Mapping[str, str], cwd: Path) -> CheckResult:
