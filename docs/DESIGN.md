@@ -41,6 +41,12 @@ deliberately absent from this release, not ruled out for the project.
   timestamp that replaces the max-duration stop for that session; the
   daemon-side max duration remains the default only when no deadline is
   given, e.g. plain `ccbg on`.
+- **Waiting for the first snapshot is a bounded wait, not a stop.** A session
+  enabled before its first request (`/cache 2h` as the opening prompt) has
+  nothing to replay yet, so it waits for one instead of stopping and losing
+  the deadline the user just set. The wait ends at its deadline, or at the
+  max duration measured from the moment it was enabled, whichever comes
+  first: a session that never sees traffic must not stay enabled forever.
 - **Environment variables only, split by process.** Daemon settings are read
   by `ccbg serve`; session settings by the hook and CLI, which Claude Code
   spawns with the scoped `settings.json` `env` block already applied, so
