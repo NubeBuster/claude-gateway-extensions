@@ -22,6 +22,13 @@ from claude_cache_bump_gateway.config import Config
 _COMMAND_PREFIX = "/cache"
 _DURATION_RE = re.compile(r"^(\d+)([hm])$")
 
+#: Interval overrides Claude Code may populate via a scoped ``settings.json``
+#: ``env`` block. Checked in this order because a 1 h cache TTL is the
+#: common case on a Claude Code subscription (see ``docs/DESIGN.md``); a
+#: project is expected to set at most one of the two.
+_INTERVAL_ENV_VARS = ("CCBG_INTERVAL_1H_S", "CCBG_INTERVAL_5M_S")
+_MAX_DURATION_ENV_VAR = "CCBG_MAX_DURATION_S"
+
 
 def _parse_duration(token: str) -> int | None:
     """Parse an ``Nh``/``Nm`` duration token into seconds, or ``None`` if malformed."""
@@ -31,6 +38,37 @@ def _parse_duration(token: str) -> int | None:
     value, unit = match.groups()
     seconds = int(value) * (3600 if unit == "h" else 60)
     return seconds
+
+
+def _parse_env_int(raw: str | None) -> int | None:
+    """Parse an environment variable as an int, or ``None`` if absent or malformed.
+
+    Fails soft (returns ``None`` on a malformed value) rather than raising,
+    matching the rest of this module: a bad session-policy variable should
+    not break the ``/cache`` command, it should just not be forwarded.
+    """
+    if raw is None:
+        return None
+    try:
+        return int(raw)
+    except ValueError:
+        return None
+
+
+def _session_policy_from_env(environ: Mapping[str, str]) -> tuple[int | None, int | None]:
+    """Read the session-policy overrides Claude Code populates via ``settings.json``.
+
+    Returns ``(interval_s, max_duration_s)``, each ``None`` when the
+    corresponding variable is absent (or malformed) in ``environ``, the hook
+    process's own environment, so the daemon's own defaults apply.
+    """
+    interval_s: int | None = None
+    for name in _INTERVAL_ENV_VARS:
+        interval_s = _parse_env_int(environ.get(name))
+        if interval_s is not None:
+            break
+    max_duration_s = _parse_env_int(environ.get(_MAX_DURATION_ENV_VAR))
+    return interval_s, max_duration_s
 
 
 def _minutes_until(epoch: float | None, now: float) -> int | None:
@@ -69,13 +107,20 @@ def _format_now_reason(result: Mapping[str, Any]) -> str:
     return "cache: bump failed, unrecognised response from daemon"
 
 
-def _handle_command(client: ControlClient, session_id: str, argument: str, now: float) -> str:
+def _handle_command(
+    client: ControlClient, session_id: str, argument: str, now: float, environ: Mapping[str, str]
+) -> str:
     """Dispatch the parsed ``/cache`` argument and return the reason line."""
     parts = argument.split()
     action = parts[0].lower() if parts else "status"
     if action == "on":
+        interval_s, env_max_duration_s = _session_policy_from_env(environ)
         max_duration_s = _parse_duration(parts[1]) if len(parts) > 1 else None
-        session = client.set_session(session_id, True, max_duration_s=max_duration_s)
+        if max_duration_s is None:
+            max_duration_s = env_max_duration_s
+        session = client.set_session(
+            session_id, True, interval_s=interval_s, max_duration_s=max_duration_s
+        )
         return _format_on_reason(session, now)
     if action == "off":
         client.set_session(session_id, False)
@@ -134,7 +179,7 @@ def run_user_prompt_submit(stdin: TextIO, stdout: TextIO, environ: Mapping[str, 
     else:
         client = ControlClient(config.url)
         try:
-            reason = _handle_command(client, session_id, argument, time.time())
+            reason = _handle_command(client, session_id, argument, time.time(), environ)
         except DaemonUnreachable:
             reason = f"cache: daemon not reachable at {config.url} (is ccbg serve running?)"
         except ApiError as exc:

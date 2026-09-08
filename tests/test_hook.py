@@ -125,6 +125,47 @@ def test_on_with_duration_sets_max_duration_and_blocks(
     assert calls == [("PUT", "/ccbg/sessions/s1", {"enabled": True, "max_duration_s": 7200})]
 
 
+def test_on_forwards_project_interval_from_env(fake_daemon: tuple[str, dict, list]) -> None:
+    base_url, routes, calls = fake_daemon
+    routes[("PUT", "/ccbg/sessions/s1")] = (
+        200,
+        {"session_id": "s1", "enabled": True, "next_bump_at": None},
+    )
+    code, _out = _run(
+        {"session_id": "s1", "prompt": "/cache on"},
+        {"CCBG_URL": base_url, "CCBG_INTERVAL_1H_S": "1800"},
+    )
+    assert code == 0
+    assert calls == [("PUT", "/ccbg/sessions/s1", {"enabled": True, "interval_s": 1800})]
+
+
+def test_on_explicit_duration_overrides_env_max_duration(
+    fake_daemon: tuple[str, dict, list],
+) -> None:
+    base_url, routes, calls = fake_daemon
+    routes[("PUT", "/ccbg/sessions/s1")] = (
+        200,
+        {"session_id": "s1", "enabled": True, "next_bump_at": None},
+    )
+    code, _out = _run(
+        {"session_id": "s1", "prompt": "/cache on 2h"},
+        {"CCBG_URL": base_url, "CCBG_MAX_DURATION_S": "3600"},
+    )
+    assert code == 0
+    assert calls == [("PUT", "/ccbg/sessions/s1", {"enabled": True, "max_duration_s": 7200})]
+
+
+def test_on_with_empty_env_sends_no_overrides(fake_daemon: tuple[str, dict, list]) -> None:
+    base_url, routes, calls = fake_daemon
+    routes[("PUT", "/ccbg/sessions/s1")] = (
+        200,
+        {"session_id": "s1", "enabled": True, "next_bump_at": None},
+    )
+    code, _out = _run({"session_id": "s1", "prompt": "/cache on"}, {"CCBG_URL": base_url})
+    assert code == 0
+    assert calls == [("PUT", "/ccbg/sessions/s1", {"enabled": True})]
+
+
 def test_off_blocks_with_off_reason(fake_daemon: tuple[str, dict, list]) -> None:
     base_url, routes, _calls = fake_daemon
     routes[("PUT", "/ccbg/sessions/s1")] = (200, {"session_id": "s1", "enabled": False})
