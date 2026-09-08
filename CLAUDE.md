@@ -42,6 +42,13 @@ entry is not an approval to write the code.
   together.
 - No emojis anywhere in docs or code comments.
 
+## Agent behavior rules
+
+- Pushing to any git remote requires the user's explicit consent, given per
+  invocation. A general mandate such as "publish", "release" or "deploy"
+  authorises only the push it names, never a later one. Agents commit
+  freely and ask before every push.
+
 ## Commits
 
 Conventional commits: `type(scope): topic: specifics`, subject at most 72
