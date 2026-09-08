@@ -129,13 +129,20 @@ class ControlClient:
         enabled: bool,
         interval_s: int | None = None,
         max_duration_s: int | None = None,
+        until: float | None = None,
     ) -> dict[str, Any]:
-        """Enable/disable bumping and optionally set overrides via ``PUT /ccbg/sessions/{id}``."""
+        """Enable/disable bumping and optionally set overrides via ``PUT /ccbg/sessions/{id}``.
+
+        ``until`` is an absolute Unix epoch deadline that replaces the
+        max-duration stop for this session; see ``docs/API.md``.
+        """
         payload: dict[str, Any] = {"enabled": enabled}
         if interval_s is not None:
             payload["interval_s"] = interval_s
         if max_duration_s is not None:
             payload["max_duration_s"] = max_duration_s
+        if until is not None:
+            payload["until"] = until
         status, parsed = self._request("PUT", f"/ccbg/sessions/{session_id}", payload)
         if not 200 <= status < 300:
             raise ApiError(status, str(parsed))

@@ -106,64 +106,44 @@ def test_invalid_json_exits_silently() -> None:
     assert stdout.getvalue() == ""
 
 
-def test_on_with_duration_sets_max_duration_and_blocks(
-    fake_daemon: tuple[str, dict, list],
-) -> None:
+def test_duration_enables_with_an_absolute_deadline(fake_daemon: tuple[str, dict, list]) -> None:
     base_url, routes, calls = fake_daemon
     routes[("PUT", "/ccbg/sessions/s1")] = (
         200,
-        {"session_id": "s1", "enabled": True, "next_bump_at": None},
+        {
+            "session_id": "s1",
+            "enabled": True,
+            "until": 1700006000,
+            "next_bump_at": 1700003000,
+            "last_request_at": 1700000000,
+            "last_bump_at": None,
+        },
     )
-    code, out = _run(
-        {"session_id": "s1", "prompt": "/cache on 2h"},
-        {"CCBG_URL": base_url},
-    )
+    code, out = _run({"session_id": "s1", "prompt": "/cache 2h"}, {"CCBG_URL": base_url})
     assert code == 0
     decision = json.loads(out)
     assert decision["decision"] == "block"
-    assert "on for this session" in decision["reason"]
-    assert calls == [("PUT", "/ccbg/sessions/s1", {"enabled": True, "max_duration_s": 7200})]
+    assert "cache: bumping until" in decision["reason"]
+    assert len(calls) == 1
+    method, path, body = calls[0]
+    assert (method, path) == ("PUT", "/ccbg/sessions/s1")
+    assert body["enabled"] is True
+    assert isinstance(body["until"], int | float)
+    assert "interval_s" not in body
+    assert "max_duration_s" not in body
 
 
-def test_on_forwards_project_interval_from_env(fake_daemon: tuple[str, dict, list]) -> None:
+def test_clock_time_enables_with_an_absolute_deadline(fake_daemon: tuple[str, dict, list]) -> None:
     base_url, routes, calls = fake_daemon
     routes[("PUT", "/ccbg/sessions/s1")] = (
         200,
-        {"session_id": "s1", "enabled": True, "next_bump_at": None},
+        {"session_id": "s1", "enabled": True, "until": 1700006000, "next_bump_at": None},
     )
-    code, _out = _run(
-        {"session_id": "s1", "prompt": "/cache on"},
-        {"CCBG_URL": base_url, "CCBG_INTERVAL_1H_S": "1800"},
-    )
+    code, out = _run({"session_id": "s1", "prompt": "/cache 9PM"}, {"CCBG_URL": base_url})
     assert code == 0
-    assert calls == [("PUT", "/ccbg/sessions/s1", {"enabled": True, "interval_s": 1800})]
-
-
-def test_on_explicit_duration_overrides_env_max_duration(
-    fake_daemon: tuple[str, dict, list],
-) -> None:
-    base_url, routes, calls = fake_daemon
-    routes[("PUT", "/ccbg/sessions/s1")] = (
-        200,
-        {"session_id": "s1", "enabled": True, "next_bump_at": None},
-    )
-    code, _out = _run(
-        {"session_id": "s1", "prompt": "/cache on 2h"},
-        {"CCBG_URL": base_url, "CCBG_MAX_DURATION_S": "3600"},
-    )
-    assert code == 0
-    assert calls == [("PUT", "/ccbg/sessions/s1", {"enabled": True, "max_duration_s": 7200})]
-
-
-def test_on_with_empty_env_sends_no_overrides(fake_daemon: tuple[str, dict, list]) -> None:
-    base_url, routes, calls = fake_daemon
-    routes[("PUT", "/ccbg/sessions/s1")] = (
-        200,
-        {"session_id": "s1", "enabled": True, "next_bump_at": None},
-    )
-    code, _out = _run({"session_id": "s1", "prompt": "/cache on"}, {"CCBG_URL": base_url})
-    assert code == 0
-    assert calls == [("PUT", "/ccbg/sessions/s1", {"enabled": True})]
+    decision = json.loads(out)
+    assert "cache: bumping until" in decision["reason"]
+    assert calls[0][2]["enabled"] is True
 
 
 def test_off_blocks_with_off_reason(fake_daemon: tuple[str, dict, list]) -> None:
@@ -173,6 +153,16 @@ def test_off_blocks_with_off_reason(fake_daemon: tuple[str, dict, list]) -> None
     assert code == 0
     decision = json.loads(out)
     assert decision["reason"] == "cache: off"
+
+
+def test_zero_is_also_off(fake_daemon: tuple[str, dict, list]) -> None:
+    base_url, routes, calls = fake_daemon
+    routes[("PUT", "/ccbg/sessions/s1")] = (200, {"session_id": "s1", "enabled": False})
+    code, out = _run({"session_id": "s1", "prompt": "/cache 0"}, {"CCBG_URL": base_url})
+    assert code == 0
+    decision = json.loads(out)
+    assert decision["reason"] == "cache: off"
+    assert calls == [("PUT", "/ccbg/sessions/s1", {"enabled": False})]
 
 
 def test_bump_reports_tokens(fake_daemon: tuple[str, dict, list]) -> None:
@@ -187,12 +177,41 @@ def test_bump_reports_tokens(fake_daemon: tuple[str, dict, list]) -> None:
     assert "48213 tokens read from cache" in decision["reason"]
 
 
-def test_old_now_verb_is_an_unknown_command(fake_daemon: tuple[str, dict, list]) -> None:
+def test_on_is_removed_and_gives_the_unparseable_hint(
+    fake_daemon: tuple[str, dict, list],
+) -> None:
     base_url, _routes, calls = fake_daemon
-    code, out = _run({"session_id": "s1", "prompt": "/cache now"}, {"CCBG_URL": base_url})
+    code, out = _run({"session_id": "s1", "prompt": "/cache on"}, {"CCBG_URL": base_url})
     assert code == 0
     decision = json.loads(out)
-    assert decision["reason"] == "cache: unknown command 'now' (use on, off, status or bump)"
+    assert "try 2h, 9PM, tomorrow 10AM" in decision["reason"]
+    assert calls == []
+
+
+def test_on_with_duration_is_also_unparseable(fake_daemon: tuple[str, dict, list]) -> None:
+    base_url, _routes, calls = fake_daemon
+    code, out = _run({"session_id": "s1", "prompt": "/cache on 2h"}, {"CCBG_URL": base_url})
+    assert code == 0
+    decision = json.loads(out)
+    assert "try 2h, 9PM, tomorrow 10AM" in decision["reason"]
+    assert calls == []
+
+
+def test_deadline_in_the_past_is_an_error(fake_daemon: tuple[str, dict, list]) -> None:
+    base_url, _routes, calls = fake_daemon
+    code, out = _run({"session_id": "s1", "prompt": "/cache yesterday"}, {"CCBG_URL": base_url})
+    assert code == 0
+    decision = json.loads(out)
+    assert "in the past" in decision["reason"]
+    assert calls == []
+
+
+def test_unsupported_date_format_hints_iso(fake_daemon: tuple[str, dict, list]) -> None:
+    base_url, _routes, calls = fake_daemon
+    code, out = _run({"session_id": "s1", "prompt": "/cache 4/20/2027"}, {"CCBG_URL": base_url})
+    assert code == 0
+    decision = json.loads(out)
+    assert "YYYY-MM-DD" in decision["reason"]
     assert calls == []
 
 
@@ -218,3 +237,20 @@ def test_default_status_action(fake_daemon: tuple[str, dict, list]) -> None:
     assert code == 0
     decision = json.loads(out)
     assert "on for this session" in decision["reason"]
+
+
+def test_status_shows_the_deadline_when_set(fake_daemon: tuple[str, dict, list]) -> None:
+    base_url, routes, _calls = fake_daemon
+    routes[("GET", "/ccbg/sessions/s1")] = (
+        200,
+        {
+            "session_id": "s1",
+            "enabled": True,
+            "until": 1700006000,
+            "next_bump_at": 1700003000,
+        },
+    )
+    code, out = _run({"session_id": "s1", "prompt": "/cache status"}, {"CCBG_URL": base_url})
+    assert code == 0
+    decision = json.loads(out)
+    assert "cache: on until" in decision["reason"]

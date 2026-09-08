@@ -22,6 +22,7 @@ import sys
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, TextIO
 
@@ -35,6 +36,7 @@ from claude_cache_bump_gateway.cli.client import (
 from claude_cache_bump_gateway.cli.doctor import run_doctor
 from claude_cache_bump_gateway.cli.hook import run_user_prompt_submit
 from claude_cache_bump_gateway.cli.statusline import run_statusline
+from claude_cache_bump_gateway.cli.when import At, WhenError, local_now, parse_when
 from claude_cache_bump_gateway.config import Config, ConfigError
 
 EXIT_OK = 0
@@ -76,6 +78,13 @@ def _require_session(args: argparse.Namespace, ctx: _Context) -> str:
     return session_id
 
 
+def _format_until_local(until: object) -> str:
+    """Format an ``until`` epoch value as a local ISO 8601 timestamp, or ``-`` if unset."""
+    if not isinstance(until, int | float):
+        return "-"
+    return datetime.fromtimestamp(until, tz=UTC).astimezone().isoformat(timespec="minutes")
+
+
 def _format_status_line(session: Mapping[str, Any], now: float) -> str:
     """Format one ``status``/``on``/``off`` output line for a session status payload."""
     session_id = session.get("session_id", "?")
@@ -87,8 +96,9 @@ def _format_status_line(session: Mapping[str, Any], now: float) -> str:
     last_result = session.get("last_result")
     last_outcome = last_result.get("outcome") if isinstance(last_result, dict) else None
     stopped_reason = session.get("stopped_reason") or "-"
+    until = _format_until_local(session.get("until"))
     return (
-        f"{session_id}  enabled={enabled}  next_bump={next_bump}  "
+        f"{session_id}  enabled={enabled}  next_bump={next_bump}  until={until}  "
         f"last_result={last_outcome or '-'}  stopped={stopped_reason}"
     )
 
@@ -135,13 +145,34 @@ def _cmd_status(args: argparse.Namespace, config: Config, ctx: _Context) -> int:
     return EXIT_OK
 
 
+def _resolve_until(args: argparse.Namespace) -> float | None:
+    """Parse ``--until`` (an ``on``-only flag) into an epoch deadline, or ``None`` if unset."""
+    until_text = getattr(args, "until", None)
+    if until_text is None:
+        return None
+    try:
+        deadline = parse_when(until_text, local_now())
+    except WhenError as exc:
+        raise _UsageError(f"--until {until_text!r}: {exc}") from exc
+    if not isinstance(deadline, At):
+        raise _UsageError(
+            f"--until {until_text!r}: expected a deadline, e.g. 2h, 9PM, 2026-12-31 08:00"
+        )
+    return deadline.when.timestamp()
+
+
 def _cmd_set_enabled(args: argparse.Namespace, config: Config, ctx: _Context, enabled: bool) -> int:
     """Shared handler for ``on`` and ``off``."""
     session_id = _require_session(args, ctx)
+    until = _resolve_until(args)
     client = ctx.client_factory(config.url)
     try:
         result = client.set_session(
-            session_id, enabled, interval_s=args.interval, max_duration_s=args.max_duration
+            session_id,
+            enabled,
+            interval_s=args.interval,
+            max_duration_s=args.max_duration,
+            until=until,
         )
     except DaemonUnreachable as exc:
         ctx.stderr.write(f"{exc}\n")
@@ -285,6 +316,12 @@ def _build_parser() -> argparse.ArgumentParser:
             dest="max_duration",
             help="max duration in seconds",
         )
+        if name == "on":
+            p.add_argument(
+                "--until",
+                default=None,
+                help="absolute deadline, e.g. 2h, 9PM, 2026-12-31 08:00 (see /cache grammar)",
+            )
 
     add_on_off("on")
     add_on_off("off")

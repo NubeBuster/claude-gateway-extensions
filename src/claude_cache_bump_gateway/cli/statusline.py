@@ -12,12 +12,22 @@ from __future__ import annotations
 import json
 import time
 from collections.abc import Mapping
+from datetime import UTC, datetime
 from typing import TextIO
 
 from claude_cache_bump_gateway.cli.client import ApiError, ControlClient, DaemonUnreachable
 from claude_cache_bump_gateway.config import Config
 
 _TIMEOUT_S = 0.5
+
+
+def _format_deadline(until_epoch: float, now: float) -> str:
+    """Format ``until_epoch`` as local ``HH:MM`` if it falls today, else ``MM-DD HH:MM``."""
+    deadline = datetime.fromtimestamp(until_epoch, tz=UTC).astimezone()
+    today = datetime.fromtimestamp(now, tz=UTC).astimezone()
+    if deadline.date() == today.date():
+        return deadline.strftime("%H:%M")
+    return deadline.strftime("%m-%d %H:%M")
 
 
 def _format_segment(session: Mapping[str, object], now: float) -> str:
@@ -27,6 +37,9 @@ def _format_segment(session: Mapping[str, object], now: float) -> str:
         if stopped_reason:
             return f"cache: off, stopped: {stopped_reason}"
         return "cache: off"
+    until = session.get("until")
+    if isinstance(until, int | float):
+        return f"cache: on, until {_format_deadline(until, now)}"
     next_bump_at = session.get("next_bump_at")
     if isinstance(next_bump_at, int | float):
         minutes = max(0, round((next_bump_at - now) / 60))

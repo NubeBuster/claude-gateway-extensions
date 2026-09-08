@@ -6,71 +6,32 @@ skill because it is the only deterministic path that avoids a model turn.
 ``run_user_prompt_submit`` reads the hook JSON from stdin, and for a
 matching prompt prints a single ``{"decision": "block", "reason": ...}``
 JSON line to stdout so Claude Code shows the reason without invoking the
-model.
+model. The ``/cache`` grammar itself (durations, clock times, dates, the
+fixed ``status``/``bump``/``off`` keywords) is parsed by
+:func:`~claude_cache_bump_gateway.cli.when.parse_when`; this module only
+dispatches the parsed result to the control API and formats the reply.
 """
 
 from __future__ import annotations
 
 import json
-import re
-import time
 from collections.abc import Mapping
+from datetime import UTC, datetime
 from typing import Any, TextIO
 
 from claude_cache_bump_gateway.cli.client import ApiError, ControlClient, DaemonUnreachable
+from claude_cache_bump_gateway.cli.when import (
+    At,
+    Bump,
+    Off,
+    Status,
+    WhenError,
+    local_now,
+    parse_when,
+)
 from claude_cache_bump_gateway.config import Config
 
 _COMMAND_PREFIX = "/cache"
-_DURATION_RE = re.compile(r"^(\d+)([hm])$")
-
-#: Interval overrides Claude Code may populate via a scoped ``settings.json``
-#: ``env`` block. Checked in this order because a 1 h cache TTL is the
-#: common case on a Claude Code subscription (see ``docs/DESIGN.md``
-#: "Decisions"); a
-#: project is expected to set at most one of the two.
-_INTERVAL_ENV_VARS = ("CCBG_INTERVAL_1H_S", "CCBG_INTERVAL_5M_S")
-_MAX_DURATION_ENV_VAR = "CCBG_MAX_DURATION_S"
-
-
-def _parse_duration(token: str) -> int | None:
-    """Parse an ``Nh``/``Nm`` duration token into seconds, or ``None`` if malformed."""
-    match = _DURATION_RE.match(token)
-    if match is None:
-        return None
-    value, unit = match.groups()
-    seconds = int(value) * (3600 if unit == "h" else 60)
-    return seconds
-
-
-def _parse_env_int(raw: str | None) -> int | None:
-    """Parse an environment variable as an int, or ``None`` if absent or malformed.
-
-    Fails soft (returns ``None`` on a malformed value) rather than raising,
-    matching the rest of this module: a bad session-policy variable should
-    not break the ``/cache`` command, it should just not be forwarded.
-    """
-    if raw is None:
-        return None
-    try:
-        return int(raw)
-    except ValueError:
-        return None
-
-
-def _session_policy_from_env(environ: Mapping[str, str]) -> tuple[int | None, int | None]:
-    """Read the session-policy overrides Claude Code populates via ``settings.json``.
-
-    Returns ``(interval_s, max_duration_s)``, each ``None`` when the
-    corresponding variable is absent (or malformed) in ``environ``, the hook
-    process's own environment, so the daemon's own defaults apply.
-    """
-    interval_s: int | None = None
-    for name in _INTERVAL_ENV_VARS:
-        interval_s = _parse_env_int(environ.get(name))
-        if interval_s is not None:
-            break
-    max_duration_s = _parse_env_int(environ.get(_MAX_DURATION_ENV_VAR))
-    return interval_s, max_duration_s
 
 
 def _minutes_until(epoch: float | None, now: float) -> int | None:
@@ -80,12 +41,56 @@ def _minutes_until(epoch: float | None, now: float) -> int | None:
     return max(0, round((epoch - now) / 60))
 
 
+def _interval_minutes(session: Mapping[str, Any]) -> int | None:
+    """Reconstruct the effective bump interval, in whole minutes, from a status payload.
+
+    The status payload has no direct "interval" field once a session is
+    running (``interval_s`` is only the override, ``null`` when the config
+    default applies); the effective interval is instead the distance from
+    ``next_bump_at`` back to whichever of ``last_request_at``/``last_bump_at``
+    it was scheduled from.
+    """
+    next_bump_at = session.get("next_bump_at")
+    if not isinstance(next_bump_at, int | float):
+        return None
+    last_request_at = session.get("last_request_at")
+    last_bump_at = session.get("last_bump_at")
+    anchor = max(
+        last_request_at if isinstance(last_request_at, int | float) else 0.0,
+        last_bump_at if isinstance(last_bump_at, int | float) else 0.0,
+    )
+    if anchor <= 0:
+        return None
+    return max(0, round((next_bump_at - anchor) / 60))
+
+
+def _iso_local(epoch: float) -> str:
+    """Format an epoch timestamp as a minute-precision local ISO 8601 string with offset."""
+    local = datetime.fromtimestamp(epoch, tz=UTC).astimezone()
+    return local.isoformat(timespec="minutes")
+
+
 def _format_on_reason(session: Mapping[str, Any], now: float) -> str:
-    """Format the reason line for ``on`` and an enabled ``status``."""
+    """Format the reason line for an enabled ``status`` (no new deadline this call)."""
+    until = session.get("until")
     minutes = _minutes_until(session.get("next_bump_at"), now)
+    if isinstance(until, int | float):
+        head = f"cache: on until {_iso_local(until)}"
+    else:
+        head = "cache: on for this session"
     if minutes is None:
+        return head
+    return f"{head}, next bump in {minutes}m"
+
+
+def _format_until_reason(session: Mapping[str, Any]) -> str:
+    """Format the reason line for freshly enabling bumping with an absolute deadline."""
+    until = session.get("until")
+    if not isinstance(until, int | float):
         return "cache: on for this session"
-    return f"cache: on for this session, next bump in {minutes}m"
+    minutes = _interval_minutes(session)
+    suffix = f" (bump every {minutes}m)" if minutes is not None else ""
+    return f"cache: bumping until {_iso_local(until)}{suffix}"
 
 
 def _format_now_reason(result: Mapping[str, Any]) -> str:
@@ -109,41 +114,38 @@ def _format_now_reason(result: Mapping[str, Any]) -> str:
     return "cache: bump failed, unrecognised response from daemon"
 
 
-def _handle_command(
-    client: ControlClient, session_id: str, argument: str, now: float, environ: Mapping[str, str]
-) -> str:
-    """Dispatch the parsed ``/cache`` argument and return the reason line."""
-    parts = argument.split()
-    action = parts[0].lower() if parts else "status"
-    if action == "on":
-        interval_s, env_max_duration_s = _session_policy_from_env(environ)
-        max_duration_s = _parse_duration(parts[1]) if len(parts) > 1 else None
-        if max_duration_s is None:
-            max_duration_s = env_max_duration_s
-        session = client.set_session(
-            session_id, True, interval_s=interval_s, max_duration_s=max_duration_s
-        )
-        return _format_on_reason(session, now)
-    if action == "off":
+def _handle_command(client: ControlClient, session_id: str, argument: str, now_dt: datetime) -> str:
+    """Parse the ``/cache`` argument and dispatch it, returning the reason line."""
+    try:
+        deadline = parse_when(argument, now_dt)
+    except WhenError as exc:
+        return f"cache: {exc}"
+
+    if isinstance(deadline, Off):
         client.set_session(session_id, False)
         return "cache: off"
-    if action == "bump":
+
+    if isinstance(deadline, Bump):
         result = client.bump(session_id)
         return _format_now_reason(result)
-    if action == "status":
-        try:
-            session = client.get_session(session_id)
-        except ApiError as exc:
-            if exc.status == 404:
-                return "cache: off"
-            raise
-        if session.get("enabled"):
-            return _format_on_reason(session, now)
-        stopped_reason = session.get("stopped_reason")
-        if stopped_reason:
-            return f"cache: off, stopped: {stopped_reason}"
-        return "cache: off"
-    return f"cache: unknown command {action!r} (use on, off, status or bump)"
+
+    if isinstance(deadline, At):
+        session = client.set_session(session_id, True, until=deadline.when.timestamp())
+        return _format_until_reason(session)
+
+    assert isinstance(deadline, Status)
+    try:
+        session = client.get_session(session_id)
+    except ApiError as exc:
+        if exc.status == 404:
+            return "cache: off"
+        raise
+    if session.get("enabled"):
+        return _format_on_reason(session, now_dt.timestamp())
+    stopped_reason = session.get("stopped_reason")
+    if stopped_reason:
+        return f"cache: off, stopped: {stopped_reason}"
+    return "cache: off"
 
 
 def run_user_prompt_submit(stdin: TextIO, stdout: TextIO, environ: Mapping[str, str]) -> int:
@@ -175,13 +177,14 @@ def run_user_prompt_submit(stdin: TextIO, stdout: TextIO, environ: Mapping[str, 
     session_id = payload.get("session_id")
 
     config = Config.from_env(environ)
+    now_dt = local_now()
     reason: str
     if not isinstance(session_id, str) or not session_id:
         reason = "cache: no session id in hook payload"
     else:
         client = ControlClient(config.url)
         try:
-            reason = _handle_command(client, session_id, argument, time.time(), environ)
+            reason = _handle_command(client, session_id, argument, now_dt)
         except DaemonUnreachable:
             reason = f"cache: daemon not reachable at {config.url} (is ccbg serve running?)"
         except ApiError as exc:

@@ -214,3 +214,16 @@ async def test_put_accepts_a_past_until_unlike_max_duration(harness: ServerHarne
     assert resp.status == 200
     data = await resp.json()
     assert data["until"] == 1.0
+
+
+async def test_put_disabling_clears_until(harness: ServerHarness) -> None:
+    """Disabling drops the deadline; re-enabling without one does not resurrect it."""
+    session = "/ccbg/sessions/sess-until-cleared"
+    await harness.client.put(session, json={"enabled": True, "until": 1700006000})
+
+    disabled = await harness.client.put(session, json={"enabled": False})
+    assert disabled.status == 200
+    assert (await disabled.json())["until"] is None
+
+    reenabled = await harness.client.put(session, json={"enabled": True})
+    assert (await reenabled.json())["until"] is None

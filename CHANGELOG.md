@@ -15,3 +15,13 @@
 - Claude Code integration: `/cache` skill and `UserPromptSubmit` hook,
   statusline segment, idempotent settings.json installer with systemd user
   service support.
+- `/cache` takes an absolute deadline instead of an open-ended `on`:
+  durations (`2h`, `2d 4h`), clock times (`9PM`, `21:00`, `noon`),
+  `today`/`tomorrow`, and ISO dates, all parsed timezone-aware in the
+  user's local zone (`cli/when.py`). The control API's `PUT
+  /ccbg/sessions/{id}` gained `until` (absolute epoch seconds), which
+  replaces the max-duration stop for that session (`stopped_reason:
+  "deadline"`); `ccbg on --until` and the statusline/`ccbg status` deadline
+  display reuse the same parser and field. A bare number other than `0` is
+  rejected rather than guessed at, and disabling a session clears its
+  deadline, so re-enabling without one falls back to the max duration.

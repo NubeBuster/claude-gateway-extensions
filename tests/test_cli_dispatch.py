@@ -66,12 +66,14 @@ class _FakeClient:
         enabled: bool,
         interval_s: int | None = None,
         max_duration_s: int | None = None,
+        until: float | None = None,
     ) -> dict[str, Any]:
-        self.calls.append(("set_session", (session_id, enabled, interval_s, max_duration_s)))
+        self.calls.append(("set_session", (session_id, enabled, interval_s, max_duration_s, until)))
         self._maybe_raise()
         session = {
             "session_id": session_id,
             "enabled": enabled,
+            "until": until,
             "next_bump_at": None,
             "last_result": None,
             "stopped_reason": None,
@@ -160,7 +162,7 @@ def test_on_uses_claude_session_id_env() -> None:
     code, out, _ = _run(["on"], client, environ={"CLAUDE_SESSION_ID": "s1"})
     assert code == EXIT_OK
     assert "s1" in out
-    assert client.calls == [("set_session", ("s1", True, None, None))]
+    assert client.calls == [("set_session", ("s1", True, None, None, None))]
 
 
 def test_on_explicit_session_and_duration() -> None:
@@ -169,7 +171,34 @@ def test_on_explicit_session_and_duration() -> None:
         ["on", "--session", "s1", "--interval", "60", "--max-duration", "7200"], client
     )
     assert code == EXIT_OK
-    assert client.calls == [("set_session", ("s1", True, 60, 7200))]
+    assert client.calls == [("set_session", ("s1", True, 60, 7200, None))]
+
+
+def test_on_with_until_flag_reuses_parse_when() -> None:
+    client = _FakeClient("http://x")
+    code, out, _ = _run(["on", "--session", "s1", "--until", "2h"], client)
+    assert code == EXIT_OK
+    assert "until=" in out
+    ((_name, call_args),) = client.calls
+    session_id, enabled, interval_s, max_duration_s, until = call_args
+    assert (session_id, enabled, interval_s, max_duration_s) == ("s1", True, None, None)
+    assert isinstance(until, float)
+
+
+def test_on_with_until_status_word_is_a_usage_error() -> None:
+    client = _FakeClient("http://x")
+    code, _, err = _run(["on", "--session", "s1", "--until", "status"], client)
+    assert code == EXIT_USAGE
+    assert "expected a deadline" in err
+    assert client.calls == []
+
+
+def test_on_with_unparseable_until_is_a_usage_error() -> None:
+    client = _FakeClient("http://x")
+    code, _, err = _run(["on", "--session", "s1", "--until", "banana"], client)
+    assert code == EXIT_USAGE
+    assert "banana" in err
+    assert client.calls == []
 
 
 def test_off() -> None:
@@ -177,7 +206,7 @@ def test_off() -> None:
     code, out, _ = _run(["off", "--session", "s1"], client)
     assert code == EXIT_OK
     assert "enabled=False" in out
-    assert client.calls == [("set_session", ("s1", False, None, None))]
+    assert client.calls == [("set_session", ("s1", False, None, None, None))]
 
 
 def test_now_ok_outcome_exits_zero() -> None:

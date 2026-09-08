@@ -69,6 +69,11 @@ default only applies when `until` is never given, e.g. plain `ccbg on`. A
 past `until` is accepted (not rejected as `interval_s`/`max_duration_s`
 would be): the session simply stops on its next scheduler tick.
 
+Disabling a session (`"enabled": false`) clears `until`, unlike
+`interval_s`/`max_duration_s`, which survive. Re-enabling without a new
+`until` therefore falls back to the max-duration stop rather than resuming
+the old deadline.
+
 Response: the session's updated status dict (same shape as `GET
 /ccbg/sessions/{id}`).
 

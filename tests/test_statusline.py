@@ -7,6 +7,7 @@ import json
 import threading
 import time
 from collections.abc import Iterator
+from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import ClassVar
 
@@ -74,6 +75,32 @@ def test_on_with_next_bump(fake_daemon: tuple[str, dict]) -> None:
     )
     out = _run({"session_id": "s1"}, {"CCBG_URL": base_url})
     assert out.strip() == "cache: on, next in 47m"
+
+
+def test_on_with_deadline_today(fake_daemon: tuple[str, dict]) -> None:
+    base_url, routes = fake_daemon
+    now = time.time()
+    until = now + 47 * 60
+    routes[("GET", "/ccbg/sessions/s1")] = (
+        200,
+        {"session_id": "s1", "enabled": True, "until": until, "next_bump_at": now + 40 * 60},
+    )
+    out = _run({"session_id": "s1"}, {"CCBG_URL": base_url})
+    expected = datetime.fromtimestamp(until, tz=UTC).astimezone().strftime("%H:%M")
+    assert out.strip() == f"cache: on, until {expected}"
+
+
+def test_on_with_deadline_another_day(fake_daemon: tuple[str, dict]) -> None:
+    base_url, routes = fake_daemon
+    now = time.time()
+    until = now + 3 * 86400
+    routes[("GET", "/ccbg/sessions/s1")] = (
+        200,
+        {"session_id": "s1", "enabled": True, "until": until, "next_bump_at": now + 40 * 60},
+    )
+    out = _run({"session_id": "s1"}, {"CCBG_URL": base_url})
+    expected = datetime.fromtimestamp(until, tz=UTC).astimezone().strftime("%m-%d %H:%M")
+    assert out.strip() == f"cache: on, until {expected}"
 
 
 def test_off(fake_daemon: tuple[str, dict]) -> None:

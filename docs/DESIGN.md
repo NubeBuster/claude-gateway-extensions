@@ -37,8 +37,10 @@ deliberately absent from this release, not ruled out for the project.
 - **Absolute deadline, not an open-ended toggle.** Enabling always states
   when to stop (`/cache 2h`, `/cache 9PM`, `/cache tomorrow 10AM`). An
   unlimited "on" invites forgotten sessions that spend quota indefinitely.
-  Being implemented; the daemon-side max duration remains the default only
-  when no deadline is given.
+  The deadline is sent to the daemon as `until`, an absolute epoch
+  timestamp that replaces the max-duration stop for that session; the
+  daemon-side max duration remains the default only when no deadline is
+  given, e.g. plain `ccbg on`.
 - **Environment variables only, split by process.** Daemon settings are read
   by `ccbg serve`; session settings by the hook and CLI, which Claude Code
   spawns with the scoped `settings.json` `env` block already applied, so

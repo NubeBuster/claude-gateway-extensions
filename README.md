@@ -55,30 +55,40 @@ ccbg doctor
 is not wired up. Use `--scope project` to wire a single project's
 `.claude/settings.json` instead of (or alongside) your user one.
 
-Then, inside a Claude Code session: `/cache on`.
+Then, inside a Claude Code session: `/cache 2h`.
 
 ## Usage
 
 The `/cache` command inside Claude Code is installed as a SKILL.md to provide autocomplete, but is intercepted by the `UserPromptSubmit` hook and the agent never sees it.
 
-| Command         | Effect                                                  |
-| --------------- | ------------------------------------------------------- |
-| `/cache`        | same as `/cache status`                                 |
-| `/cache on`     | turn bumping on for the current session                 |
-| `/cache on 2h`  | turn bumping on with a 2-hour max duration override     |
-| `/cache off`    | turn bumping off                                        |
-| `/cache status` | show whether bumping is on and when the next bump fires |
-| `/cache bump`   | bump immediately, outside the normal schedule           |
+It takes a deadline instead of an open-ended `on`: enabling bumping always
+says when it stops. `/cache` (or `/cache status`) reports status, `/cache
+bump` bumps immediately, `/cache off` (or `/cache 0`) disables it.
+Everything else is parsed as a deadline, case-insensitive and
+whitespace-tolerant:
 
-`on <duration>` accepts `<N>h` or `<N>m` and overrides `max_duration_s` for
-that session, not the bump interval.
+```
+/cache 2h                  # 2 hours from now
+/cache 90m                 # 90 minutes from now
+/cache 2d 4h                # 52 hours from now (also: 2d4h, joined)
+/cache 9PM                 # today at 21:00, or tomorrow if already past
+/cache tomorrow 10AM       # tomorrow at 10:00
+/cache tomorrow            # exactly 24 hours from now
+/cache today 6PM           # today at 18:00 (error if already past)
+/cache 2026-12-31 08:00    # an absolute local date and time (ISO only)
+```
+
+All times are your local timezone. Named clock times `noon`, `midnight` and
+`teatime` (16:00) are also accepted. A deadline already in the past, or an
+unsupported date format such as `4/20/2027`, is rejected with a one-line
+reason instead of silently doing something else.
 
 CLI equivalents (`--session` defaults to `$CLAUDE_SESSION_ID`, which Claude
 Code sets in every hook and command it runs):
 
 ```sh
-ccbg on --session "$CLAUDE_SESSION_ID"
-ccbg on --session "$CLAUDE_SESSION_ID" --max-duration 7200
+ccbg on --session "$CLAUDE_SESSION_ID" --until 2h
+ccbg on --session "$CLAUDE_SESSION_ID"             # daemon's default max duration
 ccbg off --session "$CLAUDE_SESSION_ID"
 ccbg status                                        # every known session
 ccbg status --session "$CLAUDE_SESSION_ID" --json
@@ -94,6 +104,7 @@ ccbg now --session "$CLAUDE_SESSION_ID"
   "enabled": true,
   "interval_s": null,
   "max_duration_s": null,
+  "until": null,
   "last_request_at": 1700000000.0,
   "last_bump_at": 1700003000.0,
   "bump_count": 3,
@@ -122,6 +133,7 @@ ccbg now --session "$CLAUDE_SESSION_ID"
 | `enabled`                                       | bool                    | whether bumping is currently on                                           |
 | `interval_s`                                    | int or null             | per-session bump interval override; `null` uses the config default        |
 | `max_duration_s`                                | int or null             | per-session max-duration override; `null` uses the config default         |
+| `until`                                         | float (epoch s) or null | absolute deadline that replaces the max-duration stop, if one was set     |
 | `last_request_at`                               | float (epoch s) or null | when the last real `/v1/messages` request was captured                    |
 | `last_bump_at`                                  | float (epoch s) or null | when the last successful bump replay ran                                  |
 | `bump_count`                                    | int                     | number of successful bumps for this session                               |
@@ -200,17 +212,15 @@ tables below.
 
 ### Session settings (put these in settings.json)
 
-Claude Code applies these per user, project, or local scope, and the hook
-forwards the interval and duration ones to the daemon as this session's
-overrides when you run `/cache on` (`CCBG_URL` just tells the hook, the CLI
-and the statusline where to find the daemon).
+Claude Code applies these per user, project, or local scope (`CCBG_URL`
+tells the hook, the CLI and the statusline where to find the daemon). The
+deadline you type at `/cache <duration|clock|date>` — or pass to `ccbg on
+--until` — is the actual per-session policy; it is sent straight to the
+daemon and does not go through a settings.json variable.
 
-| Variable              | Default                 | What it does                                                             |
-| --------------------- | ----------------------- | ------------------------------------------------------------------------ |
-| `CCBG_INTERVAL_1H_S`  | `3000`                  | how often to refresh the cache when the model gives it a longer lifetime |
-| `CCBG_INTERVAL_5M_S`  | `240`                   | how often to refresh the cache otherwise                                 |
-| `CCBG_MAX_DURATION_S` | `86400`                 | stop refreshing this long after you last sent a real message             |
-| `CCBG_URL`            | `http://127.0.0.1:8787` | where the hook, the CLI and the statusline find the daemon               |
+| Variable   | Default                 | What it does                                                 |
+| ---------- | ----------------------- | ------------------------------------------------------------ |
+| `CCBG_URL` | `http://127.0.0.1:8787` | where the hook, the CLI and the statusline find the daemon   |
 
 ### Daemon settings (set where the daemon runs)
 
@@ -228,6 +238,9 @@ edit claude-cache-bump-gateway.service`.
 | `CCBG_STATE_DIR`               | `${XDG_STATE_HOME:-~/.local/state}/claude-cache-bump-gateway` | where session state and captured requests are saved                         |
 | `CCBG_PERSIST`                 | `true`                                                        | save state to disk so it survives a daemon restart                          |
 | `CCBG_DEFAULT_ENABLED`         | `false`                                                       | turn bumping on automatically for every new session                         |
+| `CCBG_INTERVAL_1H_S`           | `3000`                                                        | how often to refresh the cache when the model gives it a longer lifetime    |
+| `CCBG_INTERVAL_5M_S`           | `240`                                                         | how often to refresh the cache otherwise                                    |
+| `CCBG_MAX_DURATION_S`          | `86400`                                                       | stop refreshing this long after the last real message, when no `/cache` deadline was given |
 | `CCBG_ON_CACHE_WRITE`          | `stop`                                                        | `stop` bumping or `continue` when a refresh finds the cache already expired |
 | `CCBG_MAX_STREAMS_PER_SESSION` | `8`                                                           | how many separate conversation branches to remember per session             |
 | `CCBG_LOG_LEVEL`               | `INFO`                                                        | how much detail the daemon logs                                             |
@@ -283,13 +296,13 @@ curl -s -X POST "http://127.0.0.1:8787/ccbg/sessions/$SESSION_ID/bump"
 - Add testing setup for preventing regressions during scope expansion and development
 - Add `shadow fork` capability including
   - `/name` customizability giving full control over the `/rename` without extra overhead.
-  - custom subagent configuration capabilities adhering where possible to the offiical [Claude Code frontmatter fields format](https://code.claude.com/docs/en/sub-agents#supported-frontmatter-fields) where sensible
+  - custom subagent configuration capabilities adhering where possible to the official [Claude Code frontmatter fields format](https://code.claude.com/docs/en/sub-agents#supported-frontmatter-fields) where sensible
   - a ready to use implementation for a specific pattern this allows for: `fork-review` hook self assessment.
-    For example on TaskCreate at _PreToolUse_ the agent reviews it's own tool call parameters, for example the teammate picked to assign to a Task, it can give some verdicts:
+    For example on TaskCreate at _PreToolUse_ the agent reviews its own tool call parameters, for example the teammate picked to assign to a Task, it can give some verdicts:
     - `OK` - the session proceeds and the main session is unaffected entirely.
     - `reject, +reason injected into additionalContext` - **only** if an intervention is decided for does this provide compounding overhead (context growth, disruption)
-    - `mutate tooluse input arguments` & `optional info injected into additionalContext` - auto correct itself with it's own model, context, and an entire one-shot prompt that hbas no persistent overhead. **This can replace many rejecting guardrail hooks with steering and auto correction by a classifier step**
-    - `run some script conditioned on the agent's own decisicion` - the decision is forgotten and the main session/agenmt is none the wiser'
+    - `mutate tooluse input arguments` & `optional info injected into additionalContext` - auto correct itself with its own model, context, and an entire one-shot prompt that has no persistent overhead. **This can replace many rejecting guardrail hooks with steering and auto correction by a classifier step**
+    - `run some script conditioned on the agent's own decision` - the decision is forgotten and the main session/agent is none the wiser'
       This allows for [agent-based-hooks](https://code.claude.com/docs/en/hooks#agent-based-hooks) but with the parent context, parent cache hit, and thus low overhead single-shot micro-fork type of agent based hook implementations. Making agent based hooks possibly viable, in contrast to the native implementation.
 - Implement support for Windows
 

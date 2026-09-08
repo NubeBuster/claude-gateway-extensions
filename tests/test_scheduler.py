@@ -284,6 +284,44 @@ async def test_past_deadline_stops_immediately(
     await scheduler.stop()
 
 
+async def test_disabling_clears_the_deadline(
+    tmp_path: Path, clock: FakeClock, store: MemoryStore
+) -> None:
+    """``/cache off`` drops ``until``; re-enabling falls back to the max duration."""
+    upstream = ScriptedUpstream([])
+    scheduler = Scheduler(_config(tmp_path), store, LargestPrefixSelector(), upstream, clock)
+
+    scheduler.note_request("sess-1", _snapshot(), ("authorization", "Bearer a"))
+    scheduler.set_enabled("sess-1", True, interval_s=1000, until=1005.0)
+    disabled = scheduler.set_enabled("sess-1", False)
+    assert disabled.until is None
+    assert store.get_state("sess-1").until is None  # type: ignore[union-attr]
+
+    reenabled = scheduler.set_enabled("sess-1", True)
+    assert reenabled.until is None
+    assert reenabled.max_duration_s is None
+
+    await scheduler.stop()
+
+
+async def test_disabling_keeps_interval_and_max_duration_overrides(
+    tmp_path: Path, clock: FakeClock, store: MemoryStore
+) -> None:
+    """Only ``until`` is cleared on disable; the other overrides survive."""
+    upstream = ScriptedUpstream([])
+    scheduler = Scheduler(_config(tmp_path), store, LargestPrefixSelector(), upstream, clock)
+
+    scheduler.note_request("sess-1", _snapshot(), ("authorization", "Bearer a"))
+    scheduler.set_enabled("sess-1", True, interval_s=1000, max_duration_s=7200, until=1005.0)
+    disabled = scheduler.set_enabled("sess-1", False)
+
+    assert disabled.interval_s == 1000
+    assert disabled.max_duration_s == 7200
+    assert disabled.until is None
+
+    await scheduler.stop()
+
+
 async def test_in_flight_request_defers_bump(
     tmp_path: Path, clock: FakeClock, store: MemoryStore
 ) -> None:

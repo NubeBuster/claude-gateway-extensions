@@ -128,6 +128,10 @@ class Scheduler:
         max-duration stop for this session (see :meth:`_run_session`); omit
         or pass ``None`` to leave a previously set deadline untouched, same
         as ``interval_s``/``max_duration_s``.
+
+        Disabling clears the deadline, so re-enabling the session without a
+        new one falls back to the daemon's default max duration instead of
+        silently resuming a deadline the user already turned off.
         """
         state = self._store.get_state(session_id)
         if state is None:
@@ -141,6 +145,8 @@ class Scheduler:
             state = dataclasses.replace(state, until=until)
         if enabled:
             state = dataclasses.replace(state, stopped_reason=None)
+        else:
+            state = dataclasses.replace(state, until=None)
         self._store.put_state(state)
         if enabled:
             self._ensure_task(session_id)
