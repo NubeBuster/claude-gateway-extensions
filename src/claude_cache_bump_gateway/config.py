@@ -8,6 +8,7 @@ directly.
 
 from __future__ import annotations
 
+import ipaddress
 import os
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -56,6 +57,24 @@ def _parse_int(name: str, raw: str) -> int:
         return int(raw)
     except ValueError as exc:
         raise ConfigError(f"{name}: invalid integer value {raw!r}") from exc
+
+
+def _is_loopback_host(host: str) -> bool:
+    """Return whether ``host`` is ``localhost`` or a loopback IP literal.
+
+    Accepts any address in the IPv4 ``127.0.0.0/8`` block or the IPv6
+    loopback ``::1``, not just ``127.0.0.1``; surrounding brackets on an
+    IPv6 literal (``[::1]``) are stripped before parsing. A value that is
+    not ``localhost`` and does not parse as an IP address is treated as
+    non-loopback (fail closed) rather than raising here.
+    """
+    if host == "localhost":
+        return True
+    candidate = host[1:-1] if host.startswith("[") and host.endswith("]") else host
+    try:
+        return ipaddress.ip_address(candidate).is_loopback
+    except ValueError:
+        return False
 
 
 def _parse_on_cache_write(raw: str) -> OnCacheWrite:
@@ -141,7 +160,7 @@ class Config:
 
     def validate(self) -> None:
         """Refuse a non-loopback listen host unless ``allow_non_loopback`` is set."""
-        if not self.allow_non_loopback and self.host not in ("127.0.0.1", "::1", "localhost"):
+        if not self.allow_non_loopback and not _is_loopback_host(self.host):
             raise ConfigError(
                 f"CCBG_HOST={self.host!r} is not loopback; "
                 "set CCBG_ALLOW_NON_LOOPBACK=true to override"

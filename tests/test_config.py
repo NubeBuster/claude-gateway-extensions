@@ -85,3 +85,21 @@ def test_non_loopback_host_allowed_with_override() -> None:
 def test_loopback_hosts_accepted(host: str) -> None:
     config = Config.from_env({"CCBG_HOST": host})
     assert config.host == host
+
+
+@pytest.mark.parametrize("host", ["127.0.0.2", "127.255.255.254", "[::1]"])
+def test_any_loopback_ip_literal_accepted(host: str) -> None:
+    config = Config.from_env({"CCBG_HOST": host})
+    assert config.host == host
+
+
+@pytest.mark.parametrize("host", ["0.0.0.0", "192.168.1.10", "myhost"])
+def test_non_loopback_hosts_refused_by_default(host: str) -> None:
+    with pytest.raises(ConfigError):
+        Config.from_env({"CCBG_HOST": host})
+
+
+@pytest.mark.parametrize("host", ["0.0.0.0", "192.168.1.10", "myhost"])
+def test_non_loopback_hosts_accepted_with_override(host: str) -> None:
+    config = Config.from_env({"CCBG_HOST": host, "CCBG_ALLOW_NON_LOOPBACK": "true"})
+    assert config.host == host
