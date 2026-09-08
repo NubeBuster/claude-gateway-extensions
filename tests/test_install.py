@@ -69,7 +69,7 @@ def test_install_creates_settings_with_only_documented_keys(tmp_path: Path) -> N
     )
     assert result.settings_path == path
     data = json.loads(path.read_text())
-    assert set(data.keys()) <= {"env", "hooks", "statusLine"}
+    assert set(data.keys()) <= {"env", "hooks"}
     assert data["env"]["ANTHROPIC_BASE_URL"] == URL
     assert data["hooks"]["UserPromptSubmit"] == [
         {"hooks": [{"type": "command", "command": install.HOOK_COMMAND, "timeout": 5}]}
