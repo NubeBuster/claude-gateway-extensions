@@ -6,13 +6,16 @@ wired to a swappable :class:`~claude_cache_bump_gateway.core.store.SnapshotStore
 :class:`~claude_cache_bump_gateway.core.selector.TargetSelector`,
 :class:`~claude_cache_bump_gateway.core.upstream.Upstream` and
 :class:`~claude_cache_bump_gateway.core.clock.Clock`. :func:`serve` validates
-``Config`` and runs the resulting application until interrupted.
+``Config`` and runs the resulting application until a shutdown signal
+(``SIGTERM`` or ``SIGINT``) arrives, then cleans up.
 """
 
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
+import signal
 from collections.abc import AsyncIterator
 
 import aiohttp
@@ -101,11 +104,41 @@ def make_app(
     return app
 
 
+#: Signals that ask the daemon to shut down. ``SIGTERM`` is what
+#: ``systemctl --user stop`` sends to the unit ``ccbg install --service``
+#: writes, so it must run the same cleanup path as ``Ctrl-C``.
+SHUTDOWN_SIGNALS: tuple[signal.Signals, ...] = (signal.SIGTERM, signal.SIGINT)
+
+
+def install_shutdown_handlers(loop: asyncio.AbstractEventLoop, stop: asyncio.Event) -> None:
+    """Arrange for :data:`SHUTDOWN_SIGNALS` to set ``stop`` instead of killing the process.
+
+    A no-op where the loop does not support signal handlers (Windows, or a
+    loop running off the main thread); the caller still shuts down cleanly on
+    ``KeyboardInterrupt`` there.
+    """
+    for sig in SHUTDOWN_SIGNALS:
+        try:
+            loop.add_signal_handler(sig, stop.set)
+        except (NotImplementedError, RuntimeError, ValueError):  # pragma: no cover - platform
+            logger.debug("cannot install a handler for %s on this platform", sig.name)
+
+
+def remove_shutdown_handlers(loop: asyncio.AbstractEventLoop) -> None:
+    """Undo :func:`install_shutdown_handlers`, restoring the default disposition."""
+    for sig in SHUTDOWN_SIGNALS:
+        with contextlib.suppress(NotImplementedError, RuntimeError, ValueError):
+            loop.remove_signal_handler(sig)
+
+
 async def serve(config: Config) -> None:
     """Validate ``config``, build the app, and serve it on ``config.host:config.port``.
 
-    Runs until cancelled (e.g. by the caller's own signal handling); the
-    listener and scheduler are cleaned up via :class:`aiohttp.web.AppRunner`.
+    Runs until a shutdown signal arrives (or the task is cancelled), then
+    tears the listener and the scheduler down via
+    :class:`aiohttp.web.AppRunner`'s cleanup, which is what flushes the app's
+    ``cleanup_ctx`` — closing the shared client session and stopping the
+    scheduler's per-session tasks.
     """
     config.validate()
     logging.basicConfig(level=config.log_level)
@@ -123,7 +156,12 @@ async def serve(config: Config) -> None:
     await runner.setup()
     site = web.TCPSite(runner, config.host, config.port)
     await site.start()
+    stop = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    install_shutdown_handlers(loop, stop)
     try:
-        await asyncio.Event().wait()
+        await stop.wait()
+        logger.info("ccbg shutting down")
     finally:
+        remove_shutdown_handlers(loop)
         await runner.cleanup()
