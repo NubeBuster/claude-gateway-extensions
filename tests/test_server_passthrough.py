@@ -381,7 +381,7 @@ async def test_capture_reads_usage_from_a_gzipped_response(harness: ServerHarnes
     assert snapshots[0].usage.total_input == 4107
 
 
-@pytest.mark.invariant(decision="Byte-transparent forwarding")
+@pytest.mark.invariant(decision="Bodies never reach a log")
 async def test_no_request_or_response_body_reaches_any_log_record(
     harness: ServerHarness, caplog: pytest.LogCaptureFixture
 ) -> None:

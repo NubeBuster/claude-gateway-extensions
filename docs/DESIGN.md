@@ -16,6 +16,11 @@ deliberately absent from this release, not ruled out for the project.
 - **Byte-transparent forwarding.** Headers (minus RFC hop-by-hop) and bodies
   pass through unmodified in both directions. The daemon must be safe to leave
   in the request path permanently, so it interprets nothing it does not need.
+- **Bodies never reach a log.** Request and response bodies are written to no
+  log at any level; headers and bodies are only ever tee'd into the daemon's
+  private snapshot. They carry the user's credential and whole conversations,
+  so raising the log level must never turn the daemon into a transcript
+  recorder.
 - **Tee only the private copy.** Only `POST /v1/messages` is captured, and
   only the daemon's own copy of the response is decoded and parsed. The bytes
   the client receives are never touched.
