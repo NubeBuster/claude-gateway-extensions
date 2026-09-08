@@ -52,9 +52,11 @@ Request body:
 ```
 
 `enabled` is required and must be a boolean. `interval_s` and
-`max_duration_s` are optional integers (seconds); omit or pass `null` to
-leave a previously set value untouched, or to fall back to the config
-default if none was ever set.
+`max_duration_s` are optional integers (seconds) and must be `>= 1`; omit or
+pass `null` to leave a previously set value untouched, or to fall back to the
+config default if none was ever set. Zero and negative values are rejected
+rather than clamped — an `interval_s` of `0` would make the daemon bump on
+every scheduler tick, spending a cache read per second.
 
 Response: the session's updated status dict (same shape as `GET
 /ccbg/sessions/{id}`).

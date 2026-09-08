@@ -5,6 +5,7 @@ from __future__ import annotations
 import gzip
 import json
 
+import pytest
 from aiohttp import web
 
 from conftest import ServerHarness
@@ -167,3 +168,19 @@ async def test_bump_detects_a_cache_write_in_a_gzipped_response(harness: ServerH
     status = await (await harness.client.get("/ccbg/sessions/sess-gz")).json()
     assert status["enabled"] is False
     assert status["stopped_reason"] == "cache_write"
+
+
+@pytest.mark.parametrize("value", [0, -1])
+@pytest.mark.parametrize("field", ["interval_s", "max_duration_s"])
+async def test_put_rejects_non_positive_durations(
+    harness: ServerHarness, field: str, value: int
+) -> None:
+    """A zero interval would bump on every tick; reject it instead of spending on it."""
+    resp = await harness.client.put(
+        "/ccbg/sessions/sess-interval", json={"enabled": True, field: value}
+    )
+    assert resp.status == 400
+    assert (await resp.json())["error"] == "invalid_body"
+
+    # And nothing was created for the rejected session.
+    assert (await harness.client.get("/ccbg/sessions/sess-interval")).status == 404

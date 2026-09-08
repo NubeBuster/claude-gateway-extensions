@@ -73,10 +73,10 @@ async def put_session(request: web.Request) -> web.Response:
         return web.json_response({"error": "invalid_body"}, status=400)
 
     interval_s = body.get("interval_s")
-    if not _is_optional_int(interval_s):
+    if not _is_optional_positive_int(interval_s):
         return web.json_response({"error": "invalid_body"}, status=400)
     max_duration_s = body.get("max_duration_s")
-    if not _is_optional_int(max_duration_s):
+    if not _is_optional_positive_int(max_duration_s):
         return web.json_response({"error": "invalid_body"}, status=400)
 
     scheduler: Scheduler = request.app[SCHEDULER_KEY]
@@ -122,9 +122,16 @@ async def _read_json_object(request: web.Request) -> dict[str, Any] | None:
     return data if isinstance(data, dict) else None
 
 
-def _is_optional_int(value: object) -> bool:
-    """Return ``True`` if ``value`` is ``None`` or a plain ``int`` (not ``bool``)."""
-    return value is None or (isinstance(value, int) and not isinstance(value, bool))
+def _is_optional_positive_int(value: object) -> bool:
+    """Return ``True`` if ``value`` is ``None`` or a plain positive ``int`` (not ``bool``).
+
+    Zero and negatives are rejected rather than clamped: an ``interval_s`` of
+    ``0`` makes the scheduler bump on every tick, so a typo in a control-API
+    call would spend a cache read per second for as long as the session lives.
+    """
+    if value is None:
+        return True
+    return isinstance(value, int) and not isinstance(value, bool) and value > 0
 
 
 def register(app: web.Application) -> None:
