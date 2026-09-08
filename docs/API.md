@@ -161,6 +161,87 @@ returns `204`.
 
 Status codes: `204` on success, `400` on an invalid id.
 
+## POST /cgx/sessions/{id}/fork
+
+Run one shadow review fork now: replay the session's selected snapshot
+(the same one bumping would pick) with a single review turn appended, and
+return the verdict. See `docs/DESIGN.md`'s "Shadow review fork" section
+for the design; this section documents only the contract a client sees.
+
+Request body:
+
+```json
+{"prompt": "Classify the command below...", "hook_event": "PreToolUse",
+  "payload": {"tool_name": "Bash", "tool_input": {"command": "rm -rf /"}},
+  "max_tokens": 512}
+```
+
+`prompt` is required and must be a string: it becomes the fork's one
+appended user message, followed by `payload` pretty-printed as a fenced
+JSON block. `hook_event` is optional and accepted as any JSON value, but
+the daemon does not validate it, act on it, or log it -- it exists so a
+hook-side caller (`cgx fork-review`) has a place to pass its event name
+through in the same body, purely for the caller's own bookkeeping.
+`payload` is optional (omit or pass `null` for none) and is opaque to the
+daemon: whatever JSON value it is gets embedded verbatim in the fork's
+appended message. `max_tokens` is an optional positive integer that caps
+this one fork's reply, overriding `CGX_FORK_MAX_TOKENS`; `0` or a negative
+value is rejected rather than clamped, same as `interval_s` above.
+
+Response `200`:
+
+```json
+{"verdict": "ok", "reason": "fine", "mutation": null,
+  "usage": {"input_tokens": 3, "output_tokens": 12,
+  "cache_read_input_tokens": 4096, "cache_creation_input_tokens": 0},
+  "paid_write": false}
+```
+
+`verdict` is `"ok"` or `"intervene"`. `reason` is always a string.
+`mutation` is an object when the reviewer supplied one, otherwise `null`.
+`usage` is the fork reply's usage block (same fields as `BumpResult.usage`
+above), or `null` when no request ever reached the upstream
+(`no_snapshot`, `rate_limited`). `paid_write` is `true` when the fork's
+own `cache_creation_input_tokens` was greater than zero: the cached
+prefix had drifted, so this fork paid a full cache write instead of the
+expected cache read; the verdict is still returned, since the answer was
+already paid for, but a caller or statusline can use this flag to surface
+a fork that is quietly costing real money.
+
+This endpoint always answers `200` -- never `409` or `404` -- including
+for the following degraded outcomes, so no client needs a fail-open
+branch of its own the way `POST .../bump`'s `409` requires one:
+
+- `no_snapshot`: the session has no captured request to fork from yet
+  (`usage: null`, `paid_write: false`). An unknown (but well-formed)
+  session id collapses into this same outcome rather than a `404`: unlike
+  every other session endpoint, this one does not distinguish "session
+  never seen" from "session seen but has no snapshot".
+- `rate_limited`: the session has already made `CGX_FORK_MAX_PER_MIN`
+  forks in the trailing 60 seconds (`usage: null`, `paid_write: false`).
+  No request reaches the upstream.
+- `fork_failed`: the fork request itself failed -- a network error or a
+  non-200 status from the upstream.
+- `unparseable_verdict`: the upstream request succeeded but the reply was
+  not the expected shape -- text content blocks that cannot be
+  concatenated, or content that is not strict JSON matching
+  `{"verdict": "ok"|"intervene", "reason": str, "mutation": object|null}`.
+  `usage` is still populated from the reply when it was readable, and
+  `paid_write` is computed from it, so a caller can see that a wasted
+  fork was also an expensive one.
+
+`400` cases: `{"error": "invalid_session_id"}` for a malformed id (same
+pattern as every other endpoint); `{"error": "invalid_body"}` when the
+body is not a JSON object, `prompt` is missing or not a string, or
+`max_tokens` is present and not a positive integer.
+
+A fork never alters the session's bump state: it does not set
+`last_bump_at`, does not increment `bump_count`, does not reset the bump
+timer, and never stops the session -- a fork whose own reply looked like
+a cache write only sets `paid_write: true` above, it never triggers the
+`cache_write` stop that a real bump would. A fork is a side channel that
+shares only the session's captured snapshot and credential, nothing else.
+
 ## Graceful shutdown
 
 `SIGTERM` or `SIGINT` (what `systemctl --user stop`, `cgx service restart`
