@@ -1,7 +1,7 @@
 """``ccbg statusline`` segment for a user's own Claude Code statusline command.
 
-See ``docs/DESIGN.md`` "Claude Code integration". Reads the statusline JSON
-from stdin, queries the control API with a short timeout, and prints one
+Reads the statusline JSON from stdin, queries the control API with a short
+timeout, and prints one
 short segment. Prints nothing (and still exits 0) when the daemon is
 unreachable or the session is unknown, since a statusline segment must never
 block or clutter the line for an optional integration.

@@ -3,7 +3,8 @@
 Defines the :class:`SnapshotStore` protocol plus two implementations:
 :class:`MemoryStore` (process-local, LRU-capped) and :class:`FileStore`
 (one JSON file per snapshot and per session state, under the XDG state
-directory, permissioned per ``docs/DESIGN.md`` "Persistence").
+directory, permissioned per the "Plaintext snapshots at 0600, persistence
+opt-out" decision in ``docs/DESIGN.md`` "Decisions").
 """
 
 from __future__ import annotations

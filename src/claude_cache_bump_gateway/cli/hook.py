@@ -1,9 +1,10 @@
 """``UserPromptSubmit`` hook handler for the ``/cache`` fall-through command.
 
-See ``docs/DESIGN.md`` "Claude Code integration": a hook is used instead of
-relying on the skill because it is the only deterministic path that avoids a
-model turn. ``run_user_prompt_submit`` reads the hook JSON from stdin, and
-for a matching prompt prints a single ``{"decision": "block", "reason": ...}``
+Per the "Skill as pure fall-through, hook does the work" decision in
+``docs/DESIGN.md`` "Decisions": a hook is used instead of relying on the
+skill because it is the only deterministic path that avoids a model turn.
+``run_user_prompt_submit`` reads the hook JSON from stdin, and for a
+matching prompt prints a single ``{"decision": "block", "reason": ...}``
 JSON line to stdout so Claude Code shows the reason without invoking the
 model.
 """
@@ -24,7 +25,8 @@ _DURATION_RE = re.compile(r"^(\d+)([hm])$")
 
 #: Interval overrides Claude Code may populate via a scoped ``settings.json``
 #: ``env`` block. Checked in this order because a 1 h cache TTL is the
-#: common case on a Claude Code subscription (see ``docs/DESIGN.md``); a
+#: common case on a Claude Code subscription (see ``docs/DESIGN.md``
+#: "Decisions"); a
 #: project is expected to set at most one of the two.
 _INTERVAL_ENV_VARS = ("CCBG_INTERVAL_1H_S", "CCBG_INTERVAL_5M_S")
 _MAX_DURATION_ENV_VAR = "CCBG_MAX_DURATION_S"

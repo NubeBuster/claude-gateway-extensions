@@ -1,7 +1,8 @@
 """Control API routes served locally under ``/ccbg/``.
 
-Full request/response contract: ``docs/API.md``. Design record:
-``docs/DESIGN.md`` "Control API". These routes must be registered before
+Full request/response contract: ``docs/API.md``. Design record: the
+"Control API on ``/ccbg/``..." decision in ``docs/DESIGN.md`` "Decisions".
+These routes must be registered before
 :func:`claude_cache_bump_gateway.server.passthrough.register`'s catch-all so
 ``/ccbg/*`` is served locally rather than forwarded.
 """

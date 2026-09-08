@@ -1,7 +1,8 @@
 """Daemon configuration, parsed once from ``CCBG_*`` environment variables.
 
-``Config`` is the single source of truth for every tunable described in
-``docs/DESIGN.md`` "Configuration". It is a frozen dataclass built by
+``Config`` is the single source of truth for every tunable, per the
+"Environment variables only, split by process" decision in ``docs/DESIGN.md``
+"Decisions". It is a frozen dataclass built by
 :meth:`Config.from_env`; nothing else in this codebase reads ``os.environ``
 directly.
 """
@@ -88,9 +89,9 @@ def _parse_on_cache_write(raw: str) -> OnCacheWrite:
 class Config:
     """Immutable daemon configuration.
 
-    See ``docs/DESIGN.md`` "Configuration" for the meaning and default of
-    every field, and "Claude Code integration" / "Control API" for how
-    ``url`` and ``host``/``port`` are used.
+    See ``README.md``'s Configuration table for the meaning and default of
+    every field; the "Control API on ``/ccbg/``..." decision in
+    ``docs/DESIGN.md`` "Decisions" covers how ``host``/``port`` are used.
     """
 
     host: str

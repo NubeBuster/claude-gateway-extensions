@@ -1,8 +1,7 @@
 """``ccbg doctor``: a handful of environment checks with one line each.
 
-See ``docs/DESIGN.md`` "Claude Code integration" and "Security". Every check
-returns ``ok``, ``warn`` or ``fail``; :func:`run_doctor` prints one line per
-check and returns exit code 1 if any check failed.
+Every check returns ``ok``, ``warn`` or ``fail``; :func:`run_doctor` prints
+one line per check and returns exit code 1 if any check failed.
 """
 
 from __future__ import annotations

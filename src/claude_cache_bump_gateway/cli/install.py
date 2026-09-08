@@ -2,9 +2,10 @@
 
 Merges ``env.ANTHROPIC_BASE_URL`` and the ``UserPromptSubmit`` hook into the
 chosen ``settings.json``, copies the ``cache`` skill, and optionally
-writes and enables a systemd user unit. See ``docs/DESIGN.md``
-"Claude Code integration" and "Configuration" (why no config file) for the
-rationale; the only ``settings.json`` keys ever written are ``env`` (one
+writes and enables a systemd user unit. See the "Skill as pure fall-through"
+and "Environment variables only, split by process" (why no config file)
+decisions in ``docs/DESIGN.md`` "Decisions" for the rationale; the only
+``settings.json`` keys ever written are ``env`` (one
 entry, ``ANTHROPIC_BASE_URL``) and ``hooks.UserPromptSubmit`` (one entry).
 ``statusLine`` is deliberately not touched — ``ccbg statusline`` is something
 the user appends to their own command, per the README.

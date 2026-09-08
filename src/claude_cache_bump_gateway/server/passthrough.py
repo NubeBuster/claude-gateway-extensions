@@ -1,8 +1,9 @@
 """Transparent forwarding, hop-by-hop filtering, SSE streaming and tee capture.
 
 A single catch-all handler forwards every method and path to
-``config.upstream`` unbuffered, per ``docs/DESIGN.md`` "Request flow". Only
-``POST /v1/messages`` is treated specially: the request body is read fully
+``config.upstream`` unbuffered, per the byte-transparent forwarding decision
+in ``docs/DESIGN.md`` "Decisions". Only ``POST /v1/messages`` is treated
+specially: the request body is read fully
 (Claude Code sends it as one buffer anyway) and the response is tee'd as it
 streams so a :class:`~claude_cache_bump_gateway.core.snapshot.Snapshot` can be
 captured for the session's bump scheduler. Every other request passes
@@ -230,8 +231,7 @@ def _extract_usage(body: bytes, content_type: str, content_encoding: str | None 
 def _parse_sse_usage(body: bytes) -> dict[str, Any] | None:
     """Merge ``usage`` from the ``message_start`` and ``message_delta`` SSE events.
 
-    ``message_delta``'s fields override ``message_start``'s on overlap, per
-    ``docs/DESIGN.md`` "Request flow".
+    ``message_delta``'s fields override ``message_start``'s on overlap.
     """
     merged: dict[str, Any] | None = None
     for raw_line in body.split(b"\n"):

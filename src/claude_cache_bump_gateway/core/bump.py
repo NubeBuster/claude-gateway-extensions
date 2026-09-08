@@ -3,9 +3,9 @@
 :func:`build_bump_body` and :func:`build_bump_headers` turn a
 :class:`~claude_cache_bump_gateway.core.snapshot.Snapshot` into the exact
 request to replay. :func:`classify` turns the response into a
-:class:`BumpResult` per the outcome table in ``docs/DESIGN.md`` "Bump
-protocol". :func:`bump_once` ties transport, building and classification
-together for the scheduler.
+:class:`BumpResult` per the fail-closed classification decision in
+``docs/DESIGN.md`` "Decisions". :func:`bump_once` ties transport, building
+and classification together for the scheduler.
 """
 
 from __future__ import annotations
@@ -82,7 +82,7 @@ def _excerpt(body: bytes) -> str:
 
 
 def classify(status: int, body_bytes: bytes) -> BumpResult:
-    """Classify a bump response per ``docs/DESIGN.md`` "Bump protocol".
+    """Classify a bump response, failing closed on anything unconfirmed.
 
     A 200 response is only trusted as a confirmed cache read when its
     ``usage`` block was actually readable. A body this code cannot read (an

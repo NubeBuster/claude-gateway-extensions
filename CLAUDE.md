@@ -21,8 +21,8 @@ entry is not an approval to write the code.
   the user's explicit choice and logs a warning, it is never refused.
 - `ccbg install`/`uninstall` write only `env.ANTHROPIC_BASE_URL` and
   `hooks.UserPromptSubmit` in `settings.json`, plus the skill copy. Never
-  add another settings key without updating `docs/DESIGN.md` and both
-  README/DESIGN config tables.
+  add another settings key without recording the decision in
+  `docs/DESIGN.md` and updating the README Configuration tables.
 - Single runtime dependency: `aiohttp`. Do not add a second HTTP or web
   framework; the CLI client uses `urllib` deliberately, to stay import-light.
 - CLI is `argparse`, not `typer` (overrides the root Scripts CLAUDE.md's
@@ -37,9 +37,10 @@ entry is not an approval to write the code.
 
 ## Docs
 
-- README.md's Configuration table and DESIGN.md's Configuration table must
-  list the same `CCBG_*` variables with the same defaults; update both
-  together.
+- README.md's Configuration tables are the only variable reference; every
+  `CCBG_*` variable in `config.py` appears there with its real default.
+- `docs/DESIGN.md` records decisions and their rationale only. Do not add
+  module maps, flows or tables that restate the code or the README.
 - No emojis anywhere in docs or code comments.
 
 ## Agent behavior rules

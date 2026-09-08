@@ -4,8 +4,9 @@
 polls in small ticks (never sleeping past ``_TICK_S`` in one call) so that
 real requests, disablement and in-flight requests are observed promptly and
 so tests can drive the whole thing through a :class:`~.clock.FakeClock`
-without ever waiting on real time. See ``docs/DESIGN.md`` "Scheduling and
-stop conditions" for the rules this module implements.
+without ever waiting on real time. See the interval and fail-closed
+classification bullets in ``docs/DESIGN.md`` "Decisions" for the rules
+this module implements.
 """
 
 from __future__ import annotations

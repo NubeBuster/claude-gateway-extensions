@@ -1,8 +1,8 @@
 """``ccbg`` argparse entry point.
 
-Wires every subcommand described in ``docs/DESIGN.md`` "Claude Code
-integration" to the control API client (:mod:`.client`), the hook and
-statusline handlers, the installer, and doctor. Every dependency that a test
+Wires every subcommand to the control API client (:mod:`.client`), the hook
+and statusline handlers, the installer, and doctor. Every dependency that a
+test
 needs to fake — the control API client, the daemon process, the systemd
 runner, stdio, the environment and the working directory — is a parameter of
 :func:`main`, not a module global, so tests exercise the real dispatch code

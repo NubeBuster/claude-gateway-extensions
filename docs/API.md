@@ -1,8 +1,8 @@
 # Control API
 
 Served by the same listener as the proxy itself, under `/ccbg/`. JSON only,
-listens on `127.0.0.1` by default, unauthenticated (see `docs/DESIGN.md`
-"Security"). The
+listens on `127.0.0.1` by default, unauthenticated (see the README's
+"Security and privacy"). The
 `/ccbg/` prefix cannot collide with an Anthropic API path, so it is safe to
 share a listener with the transparent passthrough.
 
@@ -82,7 +82,9 @@ Response body is a `BumpResult`:
 ```
 
 `outcome` is one of `ok`, `cache_write`, `unauthorized`, `rejected`,
-`transient` (see `docs/DESIGN.md` "Bump protocol" for what each means).
+`transient`: `ok` is a confirmed cache read; `cache_write` means the cache
+was gone and a write was paid; `unauthorized` is 401/403; `rejected` is any
+other 4xx; `transient` is a network or 5xx error or unreadable usage.
 
 Status codes: `200` when `outcome` is `ok`, `409` for any other outcome (the
 result is still returned in the body), `400` on an invalid id, `404` with
@@ -100,7 +102,7 @@ Status codes: `204` on success, `400` on an invalid id.
 ## Integrating
 
 The API is unauthenticated by design and listens on `127.0.0.1` by default
-(see `docs/DESIGN.md` "Security"). Setting `CCBG_HOST` to a non-local
+(see the README's "Security and privacy"). Setting `CCBG_HOST` to a non-local
 address is never refused, but the daemon logs a warning on startup, since
 anyone who can reach the listener can spend your subscription quota.
 

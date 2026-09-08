@@ -1,8 +1,8 @@
 """aiohttp ``Application`` factory wiring the proxy's core objects together.
 
-``make_app`` builds the application described in ``docs/DESIGN.md``
-"Architecture": the control API and the transparent passthrough route, each
-wired to a swappable :class:`~claude_cache_bump_gateway.core.store.SnapshotStore`,
+``make_app`` builds the application: the control API and the transparent
+passthrough route, each wired to a swappable
+:class:`~claude_cache_bump_gateway.core.store.SnapshotStore`,
 :class:`~claude_cache_bump_gateway.core.selector.TargetSelector`,
 :class:`~claude_cache_bump_gateway.core.upstream.Upstream` and
 :class:`~claude_cache_bump_gateway.core.clock.Clock`. :func:`serve` warns

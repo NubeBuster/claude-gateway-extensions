@@ -158,8 +158,7 @@ when the daemon is unreachable or the session is unknown); it never blocks.
    timer resets. Otherwise the cache was already gone and the bump paid for
    a full write — by default the daemon stops bumping that session.
 
-Full design and rationale, including the session/stream model, stop
-conditions and every edge case: `docs/DESIGN.md`.
+The decisions behind this and why they were made: `docs/DESIGN.md`.
 
 ## Configuration
 
@@ -225,8 +224,7 @@ edit claude-cache-bump-gateway.service`.
 | `CCBG_MAX_STREAMS_PER_SESSION` | `8`                                                           | how many separate conversation branches to remember per session   |
 | `CCBG_LOG_LEVEL`               | `INFO`                                                        | how much detail the daemon logs                                   |
 
-These two tables are kept in sync with `docs/DESIGN.md` "Configuration"; if
-they ever disagree, `config.py` is the source of truth.
+If a table and the code ever disagree, `config.py` is the source of truth.
 
 ## Integrating
 
