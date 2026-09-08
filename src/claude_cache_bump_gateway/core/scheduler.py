@@ -1,10 +1,12 @@
 """Per-session bump scheduling: timers, retries and stop conditions.
 
-:class:`Scheduler` owns one asyncio task per enabled session. Each task
-polls in small ticks (never sleeping past ``_TICK_S`` in one call) so that
-real requests, disablement and in-flight requests are observed promptly and
-so tests can drive the whole thing through a :class:`~.clock.FakeClock`
-without ever waiting on real time. See the interval and fail-closed
+:class:`Scheduler` owns one asyncio task per enabled session. A task with a
+snapshot to bump polls in small ticks (never sleeping past ``_TICK_S`` in
+one call) so that real requests, disablement and in-flight requests are
+observed promptly; one still waiting for its first snapshot parks on an
+event instead, since there is nothing to re-check every second. Either way
+tests drive the whole thing through a :class:`~.clock.FakeClock` without
+ever waiting on real time. See the interval and fail-closed
 classification bullets in ``docs/DESIGN.md`` "Decisions" for the rules
 this module implements.
 """
