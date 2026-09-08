@@ -52,6 +52,11 @@ class _FakeRequestHandler(BaseHTTPRequestHandler):
         pass
 
 
+#: ``HTTPServer.shutdown()`` waits up to one poll interval for the serving
+#: thread to notice; the stdlib default of 0.5 s is paid by every test.
+_POLL_INTERVAL_S = 0.01
+
+
 @pytest.fixture
 def fake_server() -> Iterator[tuple[str, dict[tuple[str, str], tuple[int, object]]]]:
     """Start a fake control-API HTTP server and yield ``(base_url, routes)``."""
@@ -62,7 +67,11 @@ def fake_server() -> Iterator[tuple[str, dict[tuple[str, str], tuple[int, object
 
     _Handler.routes = routes
     server = HTTPServer(("127.0.0.1", 0), _Handler)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    # poll_interval bounds how long shutdown() blocks; the 0.5 s default
+    # made teardown dominate this file's runtime.
+    thread = threading.Thread(
+        target=lambda: server.serve_forever(poll_interval=_POLL_INTERVAL_S), daemon=True
+    )
     thread.start()
     try:
         yield f"http://127.0.0.1:{server.server_port}", routes
