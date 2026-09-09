@@ -370,10 +370,11 @@ review" roadmap line; no part of it ships in 1.0.
 - **Templates are plain text files in the user's config directory**
   (`CGX_TEMPLATE_DIR`, default `$XDG_CONFIG_HOME/cgx/templates`),
   `{placeholder}` substituted from the hook payload's top-level fields,
-  unknown placeholders left literal. Two ship as examples — task
-  assignment review at `PreToolUse` `TaskCreate`, and a permission
-  classifier at `PreToolUse` `Bash` — because the feature's value is
-  entirely in prompts the user is expected to edit.
+  unknown placeholders left literal. Four ship as examples — task
+  assignment review at `PreToolUse` `TaskCreate|TaskUpdate`, a permission
+  classifier at `PreToolUse` `Bash`, and the `UserPromptSubmit` pair
+  `btw` and `rename` below — because the feature's value is entirely in
+  prompts the user is expected to edit.
 - **`/btw <question>` is a `UserPromptSubmit` template that always
   intervenes.** The answer comes back as the block reason, so the
   question and its answer are shown to the user and never enter the
