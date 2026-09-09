@@ -10,7 +10,7 @@ the clock or the host's local zone itself, so tests can pin both.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime, tzinfo
 
 #: Boundary, in seconds, at which a countdown switches from ``MM:SS`` to
@@ -60,6 +60,24 @@ def format_rewarm_write(
     return f"{tokens} cache-write tokens at {clock}"
 
 
+def format_breakpoint_summary(breakpoints: Sequence[Mapping[str, object]]) -> str | None:
+    """Format ``breakpoints`` (``{"at": ..., "ttl": ...}`` dicts) as a compact ``1h x3`` summary.
+
+    Groups by ``ttl`` in the order first seen and joins as ``TTL xN, TTL
+    xN`` (e.g. ``1h x2, 5m x1`` for a mixed body); ``None`` when
+    ``breakpoints`` is empty, so a body with no ``cache_control`` at all
+    shows no cache line rather than a misleading ``5m x0``.
+    """
+    if not breakpoints:
+        return None
+    counts: dict[str, int] = {}
+    for bp in breakpoints:
+        ttl = bp.get("ttl")
+        if isinstance(ttl, str):
+            counts[ttl] = counts.get(ttl, 0) + 1
+    return ", ".join(f"{ttl} x{count}" for ttl, count in counts.items())
+
+
 def format_status_times(
     *,
     cache_expires_at: float | None,
@@ -67,6 +85,7 @@ def format_status_times(
     now: float,
     tz: tzinfo | None = None,
     rewarm_write: Mapping[str, object] | None = None,
+    breakpoints: Sequence[Mapping[str, object]] = (),
 ) -> dict[str, str | None]:
     """Build the ``formatted`` block of a session status dict.
 
@@ -76,6 +95,7 @@ def format_status_times(
     ``None`` when no bump is scheduled. ``rewarm_write`` renders the
     session's ``rewarm_write`` record (see :func:`format_rewarm_write`), or
     ``None`` when the session has never had a rewarm-tolerated write.
+    ``cache`` renders ``breakpoints`` via :func:`format_breakpoint_summary`.
     """
     ttl_countdown: str | None = None
     expires_at: str | None = None
@@ -95,6 +115,7 @@ def format_status_times(
         "next_bump_countdown": next_bump_countdown,
         "next_bump_at": next_bump_at_formatted,
         "rewarm_write": format_rewarm_write(rewarm_write, tz),
+        "cache": format_breakpoint_summary(breakpoints),
     }
 
 
@@ -148,6 +169,7 @@ def format_deadline(until: float, now: float, tz: tzinfo | None = None) -> str:
 
 
 __all__ = [
+    "format_breakpoint_summary",
     "format_clock",
     "format_countdown",
     "format_deadline",

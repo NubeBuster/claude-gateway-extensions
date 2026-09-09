@@ -5,9 +5,15 @@ import json
 import pytest
 
 from claude_gateway_extensions.core.snapshot import (
+    CACHE_TTL_1H_S,
+    CACHE_TTL_5M_S,
+    Breakpoint,
     SnapshotError,
     Usage,
     body_is_subagent,
+    effective_ttl_label,
+    parse_breakpoints,
+    shortest_breakpoint_ttl_s,
     stream_key,
     wants_1h_ttl,
 )
@@ -56,7 +62,6 @@ def test_stream_key_non_object_raises() -> None:
         stream_key(b"[1, 2, 3]")
 
 
-@pytest.mark.invariant(decision="Interval derived from the snapshot's TTL")
 def test_wants_1h_ttl_true_when_present_nested() -> None:
     body = _body(
         model="m",
@@ -65,13 +70,11 @@ def test_wants_1h_ttl_true_when_present_nested() -> None:
     assert wants_1h_ttl(body) is True
 
 
-@pytest.mark.invariant(decision="Interval derived from the snapshot's TTL")
 def test_wants_1h_ttl_false_when_absent() -> None:
     body = _body(model="m", system="s")
     assert wants_1h_ttl(body) is False
 
 
-@pytest.mark.invariant(decision="Interval derived from the snapshot's TTL")
 def test_wants_1h_ttl_false_when_ttl_is_5m() -> None:
     body = _body(
         model="m",
@@ -83,6 +86,57 @@ def test_wants_1h_ttl_false_when_ttl_is_5m() -> None:
 def test_wants_1h_ttl_invalid_json_raises() -> None:
     with pytest.raises(SnapshotError):
         wants_1h_ttl(b"not json")
+
+
+def test_parse_breakpoints_orders_tools_system_messages() -> None:
+    body = _body(
+        model="m",
+        tools=[{"name": "bash", "cache_control": {"type": "ephemeral", "ttl": "1h"}}],
+        system=[{"type": "text", "text": "s", "cache_control": {"type": "ephemeral", "ttl": "1h"}}],
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "hi", "cache_control": {"type": "ephemeral"}},
+                ],
+            }
+        ],
+    )
+    assert parse_breakpoints(body) == [
+        Breakpoint("tools[0]", "1h"),
+        Breakpoint("system[0]", "1h"),
+        Breakpoint("messages[0].content[0]", "5m"),
+    ]
+
+
+def test_parse_breakpoints_empty_without_cache_control() -> None:
+    body = _body(model="m", system="s", messages=[{"role": "user", "content": "hi"}])
+    assert parse_breakpoints(body) == []
+
+
+def test_parse_breakpoints_invalid_json_raises() -> None:
+    with pytest.raises(SnapshotError):
+        parse_breakpoints(b"not json")
+
+
+@pytest.mark.invariant(decision="Interval derived from the snapshot's shortest breakpoint TTL")
+def test_shortest_breakpoint_ttl_s_mixed_is_5m() -> None:
+    breakpoints = [Breakpoint("system[0]", "1h"), Breakpoint("messages[0].content[0]", "5m")]
+    assert shortest_breakpoint_ttl_s(breakpoints) == CACHE_TTL_5M_S
+    assert effective_ttl_label(breakpoints) == "5m"
+
+
+@pytest.mark.invariant(decision="Interval derived from the snapshot's shortest breakpoint TTL")
+def test_shortest_breakpoint_ttl_s_all_1h_is_1h() -> None:
+    breakpoints = [Breakpoint("system[0]", "1h"), Breakpoint("system[1]", "1h")]
+    assert shortest_breakpoint_ttl_s(breakpoints) == CACHE_TTL_1H_S
+    assert effective_ttl_label(breakpoints) == "1h"
+
+
+@pytest.mark.invariant(decision="Interval derived from the snapshot's shortest breakpoint TTL")
+def test_shortest_breakpoint_ttl_s_empty_is_5m() -> None:
+    assert shortest_breakpoint_ttl_s([]) == CACHE_TTL_5M_S
+    assert effective_ttl_label([]) == "5m"
 
 
 def test_body_is_subagent_true_when_marker_present() -> None:

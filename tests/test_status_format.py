@@ -68,6 +68,7 @@ def test_format_status_times_full() -> None:
         "next_bump_countdown": "50:19",
         "next_bump_at": "08:33",
         "rewarm_write": None,
+        "cache": None,
     }
 
 

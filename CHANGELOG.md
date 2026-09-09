@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Fix: the bump interval and `cache_expires_at` are now derived from a
+  snapshot's *shortest* `cache_control` breakpoint TTL, not "any 1h
+  breakpoint present". A body can mix `1h` and `5m` breakpoints (`1h` ones
+  must precede `5m` ones), and the tail entry a bump has to keep alive
+  expires at the shortest one -- scheduling from the longest paid a
+  `cache_write` for it and stopped the session by the fail-closed rule.
+  `GET /cgx/sessions/{id}` now exposes the parsed `breakpoints` list and
+  the derived `effective_ttl`, and `formatted.cache`/`cgx status` show a
+  compact `1h x3` (or mixed `1h x2, 5m x1`) summary. See the "Interval
+  derived from the snapshot's shortest breakpoint TTL" decision in
+  `docs/DESIGN.md`.
 - Fix: `cgx serve` now probes the configured port's `/cgx/health` before
   binding it. Nothing answers: binds as before. A cgx daemon answers:
   refuses with a non-zero exit naming its pid unless `--handover` is given,

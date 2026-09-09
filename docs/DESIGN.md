@@ -71,9 +71,20 @@ deliberately absent from this release, not ruled out for the project.
   always says so plainly, including its size. Every session enabled
   without the flag keeps the fail-closed default unchanged: a
   `cache_write` still stops it.
-- **Interval derived from the snapshot's TTL.** A body requesting a 1 h TTL is
-  bumped at 50 min, otherwise at 4 min. The daemon reads this from the
-  captured request; nothing else is authoritative about the TTL.
+- **Interval derived from the snapshot's shortest breakpoint TTL.** A body
+  can carry several `cache_control` breakpoints at different TTLs -- `tools`,
+  `system` and each message's content blocks, in that prompt order, and any
+  1h breakpoints must precede the 5m ones -- and a bump has to keep the
+  *tail* entry alive, which expires at the shortest TTL present, not the
+  longest. Every breakpoint is parsed (`parse_breakpoints`) and the interval
+  and `cache_expires_at` are both derived from the shortest one: bumped at
+  50 min if it is 1h, at 4 min otherwise (including when no breakpoint
+  states a TTL at all, Anthropic's default 5-minute ephemeral cache). The
+  daemon reads this from the captured request; nothing else is authoritative
+  about the TTL. `GET /cgx/sessions/{id}` exposes the parsed list as
+  `breakpoints` (`{"at": "system[2]", "ttl": "1h"}`-shaped) and the derived
+  `effective_ttl` (`"1h"`/`"5m"`), and `formatted.cache` renders them as a
+  compact `1h x3` (or mixed `1h x2, 5m x1`) summary for `cgx status`.
 - **Absolute deadline, not an open-ended toggle.** Enabling always states
   when to stop (`/cache 2h`, `/cache 9PM`, `/cache tomorrow 10AM`). An
   unlimited "on" invites forgotten sessions that spend quota indefinitely.

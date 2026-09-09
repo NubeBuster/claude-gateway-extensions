@@ -104,9 +104,12 @@ def _format_status_line(session: Mapping[str, Any], now: float) -> str:
     formatted = session.get("formatted")
     rewarm_write = formatted.get("rewarm_write") if isinstance(formatted, dict) else None
     rewarm_suffix = f"  rewarm_write={rewarm_write}" if rewarm_write else ""
+    cache = formatted.get("cache") if isinstance(formatted, dict) else None
+    cache_suffix = f"  cache={cache}" if cache else ""
     return (
         f"{session_id}  enabled={enabled}  next_bump={next_bump}  until={until}  "
-        f"last_result={last_outcome or '-'}  stopped={stopped_reason}{rewarm_suffix}"
+        f"last_result={last_outcome or '-'}  stopped={stopped_reason}"
+        f"{cache_suffix}{rewarm_suffix}"
     )
 
 

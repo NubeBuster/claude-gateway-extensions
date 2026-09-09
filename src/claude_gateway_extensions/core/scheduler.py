@@ -25,10 +25,14 @@ from claude_gateway_extensions.core.selector import TargetSelector
 from claude_gateway_extensions.core.snapshot import (
     CACHE_TTL_1H_S,
     CACHE_TTL_5M_S,
+    Breakpoint,
     RewarmWrite,
     SessionState,
     Snapshot,
     SnapshotError,
+    effective_ttl_label,
+    parse_breakpoints,
+    shortest_breakpoint_ttl_s,
     wants_1h_ttl,
 )
 from claude_gateway_extensions.core.status_format import format_status_times
@@ -344,6 +348,9 @@ class Scheduler:
         rewarm_write = (
             dataclasses.asdict(state.rewarm_write) if state.rewarm_write is not None else None
         )
+        breakpoints = self._breakpoints_safe(snapshot) if snapshot is not None else []
+        breakpoints_json = [dataclasses.asdict(bp) for bp in breakpoints]
+        effective_ttl = effective_ttl_label(breakpoints) if snapshot is not None else None
         return {
             "session_id": state.session_id,
             "enabled": state.enabled,
@@ -361,11 +368,14 @@ class Scheduler:
             "last_result": dataclasses.asdict(last_result) if last_result is not None else None,
             "rewarm": state.rewarm,
             "rewarm_write": rewarm_write,
+            "breakpoints": breakpoints_json,
+            "effective_ttl": effective_ttl,
             "formatted": format_status_times(
                 cache_expires_at=cache_expires_at,
                 next_bump_at=next_bump_at,
                 now=now,
                 rewarm_write=rewarm_write,
+                breakpoints=breakpoints_json,
             ),
         }
 
@@ -418,12 +428,12 @@ class Scheduler:
         self._store.put_state(state)
 
     @staticmethod
-    def _wants_1h_safe(snapshot: Snapshot) -> bool:
-        """Return whether ``snapshot`` requested the 1h TTL, or ``False`` if unparseable."""
+    def _breakpoints_safe(snapshot: Snapshot) -> list[Breakpoint]:
+        """Return ``snapshot``'s breakpoints in prompt order, or ``[]`` if unparseable."""
         try:
-            return wants_1h_ttl(snapshot.body)
+            return parse_breakpoints(snapshot.body)
         except SnapshotError:
-            return False
+            return []
 
     def _max_duration_s(self, state: SessionState) -> int:
         """Return the configured per-session max duration, or the daemon default."""
@@ -432,11 +442,17 @@ class Scheduler:
         return self._config.max_duration_s
 
     def _effective_interval(self, state: SessionState, snapshot: Snapshot) -> int:
-        """Return the configured per-session interval, or the config default for this snapshot."""
+        """Return the configured per-session interval, or the config default for this snapshot.
+
+        The default is keyed on the snapshot's *shortest* breakpoint TTL
+        (see :meth:`_cache_ttl_s`), not "any 1h breakpoint present": a body
+        mixing `1h` and `5m` breakpoints expires its 5m tail well before an
+        interval sized for 1h would ever fire.
+        """
         if state.interval_s is not None:
             return state.interval_s
-        wants_1h = self._wants_1h_safe(snapshot)
-        return self._config.interval_1h_s if wants_1h else self._config.interval_5m_s
+        ttl_s = self._cache_ttl_s(snapshot)
+        return self._config.interval_1h_s if ttl_s == CACHE_TTL_1H_S else self._config.interval_5m_s
 
     def _next_bump_at(self, state: SessionState, snapshot: Snapshot | None) -> float | None:
         """Return the epoch time of the next bump, or ``None`` if there is no snapshot to bump."""
@@ -476,14 +492,16 @@ class Scheduler:
         await self._clock.wait_for_event(event, remaining)
 
     def _cache_ttl_s(self, snapshot: Snapshot) -> int:
-        """Return the actual prompt-cache TTL for ``snapshot`` (1 h or 5 min).
+        """Return the actual prompt-cache TTL for ``snapshot``: its shortest breakpoint TTL.
 
-        Uses the same 1h-vs-5m derivation as :meth:`_effective_interval`
-        (``wants_1h_ttl``), but the real Anthropic TTL rather than the
-        daemon's smaller, configurable bump-interval safety margin.
+        See the "Interval derived from the snapshot's shortest breakpoint
+        TTL" decision in ``docs/DESIGN.md``: a body may carry breakpoints at
+        more than one TTL (1h ones must precede 5m ones in the API), and
+        the tail entry a bump has to find alive is the one that expires
+        first. :meth:`_effective_interval` uses this same TTL to size the
+        bump interval, and :meth:`_cache_expires_at` to compute expiry.
         """
-        wants_1h = self._wants_1h_safe(snapshot)
-        return CACHE_TTL_1H_S if wants_1h else CACHE_TTL_5M_S
+        return shortest_breakpoint_ttl_s(self._breakpoints_safe(snapshot))
 
     def _cache_expires_at(self, state: SessionState, snapshot: Snapshot | None) -> float | None:
         """Return when the prompt cache is expected to expire, or ``None`` without a snapshot.

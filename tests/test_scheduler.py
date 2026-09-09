@@ -78,6 +78,24 @@ def _snapshot_1h(session_id: str = "sess-1") -> Snapshot:
     )
 
 
+def _snapshot_mixed_ttl(session_id: str = "sess-1") -> Snapshot:
+    """A body with a 1h breakpoint on ``system`` and a 5m one on the last message."""
+    return Snapshot(
+        session_id=session_id,
+        stream_key="stream-a",
+        model="claude-x",
+        headers={"authorization": "Bearer old", "content-type": "application/json"},
+        body=(
+            b'{"model": "claude-x", "max_tokens": 4096, "system": [{"type": "text", '
+            b'"text": "s", "cache_control": {"type": "ephemeral", "ttl": "1h"}}], '
+            b'"messages": [{"role": "user", "content": [{"type": "text", "text": "hi", '
+            b'"cache_control": {"type": "ephemeral", "ttl": "5m"}}]}]}'
+        ),
+        captured_at=1000.0,
+        usage=Usage(input_tokens=100),
+    )
+
+
 def _config(tmp_path: Path, **overrides: object) -> Config:
     fields: dict[str, object] = {
         "host": "127.0.0.1",
@@ -167,7 +185,7 @@ async def test_real_request_resets_timer(
     await scheduler.stop()
 
 
-@pytest.mark.invariant(decision="Interval derived from the snapshot's TTL")
+@pytest.mark.invariant(decision="Interval derived from the snapshot's shortest breakpoint TTL")
 async def test_interval_comes_from_the_captured_body_not_a_fixed_default(
     tmp_path: Path, clock: FakeClock, store: MemoryStore
 ) -> None:
@@ -187,6 +205,49 @@ async def test_interval_comes_from_the_captured_body_not_a_fixed_default(
 
     assert scheduler.status("sess-1h")["next_bump_at"] == pytest.approx(1000.0 + 3000.0)
     assert scheduler.status("sess-5m")["next_bump_at"] == pytest.approx(1000.0 + 240.0)
+    assert upstream.calls == []
+
+    status_1h = scheduler.status("sess-1h")
+    assert status_1h["effective_ttl"] == "1h"
+    assert status_1h["breakpoints"] == [{"at": "system[0]", "ttl": "1h"}]
+    assert _formatted(status_1h)["cache"] == "1h x1"
+
+    status_5m = scheduler.status("sess-5m")
+    assert status_5m["effective_ttl"] == "5m"
+    assert status_5m["breakpoints"] == []
+    assert _formatted(status_5m)["cache"] is None
+
+    await scheduler.stop()
+
+
+@pytest.mark.invariant(decision="Interval derived from the snapshot's shortest breakpoint TTL")
+async def test_mixed_ttl_body_schedules_and_expires_at_the_shortest_breakpoint(
+    tmp_path: Path, clock: FakeClock, store: MemoryStore
+) -> None:
+    """A body with 1h on ``system`` and 5m on the last message uses the 5m interval and expiry.
+
+    The tail entry a bump has to find alive is the 5m one; scheduling from
+    the longer TTL present would pay a cache write for it and, by the
+    fail-closed rule, stop the session.
+    """
+    upstream = ScriptedUpstream([])
+    config = _config(tmp_path, interval_1h_s=3000, interval_5m_s=240)
+    scheduler = Scheduler(config, store, LargestPrefixSelector(), upstream, clock)
+
+    scheduler.note_request(
+        "sess-mixed", _snapshot_mixed_ttl("sess-mixed"), ("authorization", "Bearer a")
+    )
+    scheduler.set_enabled("sess-mixed", True)
+
+    status = scheduler.status("sess-mixed")
+    assert status["next_bump_at"] == pytest.approx(1000.0 + 240.0)
+    assert status["cache_expires_at"] == pytest.approx(1000.0 + 300.0)
+    assert status["effective_ttl"] == "5m"
+    assert status["breakpoints"] == [
+        {"at": "system[0]", "ttl": "1h"},
+        {"at": "messages[0].content[0]", "ttl": "5m"},
+    ]
+    assert _formatted(status)["cache"] == "1h x1, 5m x1"
     assert upstream.calls == []
 
     await scheduler.stop()
@@ -724,6 +785,7 @@ async def test_status_cache_expires_at_none_without_snapshot(
         "next_bump_countdown": None,
         "next_bump_at": None,
         "rewarm_write": None,
+        "cache": None,
     }
 
 

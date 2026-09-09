@@ -42,12 +42,16 @@ Response `200`:
 ```json
 {"sessions": [{"session_id": "abc123", "enabled": true, "interval_s": null,
   "max_duration_s": null, "until": null, "last_request_at": 1700000000.0,
-  "last_bump_at": 1700003000.0, "bump_count": 3, "stopped_reason": null,
+  "last_bump_at": 1700003000.0, "bump_count": 3, "replays_seen": 0,
+  "stopped_reason": null,
   "next_bump_at": 1700006000.0, "cache_expires_at": 1700003300.0,
   "streams": 2, "last_result": null, "rewarm": false, "rewarm_write": null,
+  "breakpoints": [{"at": "system[0]", "ttl": "1h"},
+  {"at": "system[1]", "ttl": "1h"}, {"at": "system[2]", "ttl": "1h"}],
+  "effective_ttl": "1h",
   "formatted": {"ttl_countdown": "04:37", "expires_at": "20:18",
   "next_bump_countdown": "49:37", "next_bump_at": "21:06",
-  "rewarm_write": null}}]}
+  "rewarm_write": null, "cache": "1h x3"}}]}
 ```
 
 ## GET /cgx/sessions/{id}
@@ -57,13 +61,23 @@ One session's status dict (same shape as an entry above).
 Status codes: `200` on success, `400` on an invalid id, `404` with
 `{"error": "unknown_session"}` if the id is well-formed but unknown.
 
+`breakpoints` lists every `cache_control` block found in the session's
+selected snapshot, in prompt order (`tools`, then `system`, then
+`messages`), as `{"at": "<position>", "ttl": "1h"|"5m"}`; `<position>` is
+`tools[i]`, `system[i]` or `messages[i].content[j]`. `effective_ttl` is the
+*shortest* TTL among them (`"5m"` if `breakpoints` is empty, Anthropic's
+default ephemeral cache) — see the "Interval derived from the snapshot's
+shortest breakpoint TTL" decision in `docs/DESIGN.md`: a body mixing `1h`
+and `5m` breakpoints expires its shortest-lived entry well before an
+interval sized for the longest one would ever fire, so both the bump
+interval and `cache_expires_at` below are derived from it. Both are empty
+list / `null` when the session has no snapshot yet.
+
 `cache_expires_at` is the epoch time the prompt cache is expected to
-expire: the later of `last_request_at`/`last_bump_at`, plus the TTL
-Anthropic actually applies to the session's selected snapshot (1 hour or
-5 minutes, from the same `cache_control.ttl` check the scheduler uses to
-pick its bump interval — not the smaller, configurable bump interval
-itself). It is `null` only when the session has no snapshot yet, and is
-present whether or not bumping is enabled.
+expire: the later of `last_request_at`/`last_bump_at`, plus the real
+Anthropic TTL in seconds for `effective_ttl` above (3600 or 300). It is
+`null` only when the session has no snapshot yet, and is present whether or
+not bumping is enabled.
 
 `formatted` holds human-readable strings computed at request time in the
 daemon's local timezone: countdowns (`ttl_countdown`, `next_bump_countdown`)
@@ -75,6 +89,9 @@ statusline can always show the cache's time to live; `next_bump_countdown`/
 `next_bump_at` are `null` when no bump is scheduled. `formatted.rewarm_write`
 renders `rewarm_write` below (e.g. `"4096 cache-write tokens at 20:18"`), or
 `null` when the session has never had a rewarm-tolerated write.
+`formatted.cache` renders `breakpoints` as a compact summary grouped by
+ttl, e.g. `"1h x3"` for three 1h breakpoints or `"1h x2, 5m x1"` for a
+mixed body; `null` when `breakpoints` is empty.
 
 `rewarm` is `true` while the session's rewarm flag is armed (see `PUT
 /cgx/sessions/{id}` below): the next `cache_write` bump result is tolerated

@@ -41,6 +41,8 @@ STATUS_KEYS = {
     "last_result",
     "rewarm",
     "rewarm_write",
+    "breakpoints",
+    "effective_ttl",
     "formatted",
 }
 

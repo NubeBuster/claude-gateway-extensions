@@ -161,6 +161,88 @@ def wants_1h_ttl(body: bytes) -> bool:
     return False
 
 
+@dataclass(frozen=True)
+class Breakpoint:
+    """One ``cache_control`` block found in a captured request body.
+
+    ``at`` is a human-readable position label in prompt order (``tools[0]``,
+    ``system[2]``, ``messages[1].content[0]``); ``ttl`` is ``"1h"`` or
+    ``"5m"`` -- Anthropic's default ephemeral cache when a ``cache_control``
+    block omits ``ttl`` entirely.
+    """
+
+    at: str
+    ttl: str
+
+
+def _breakpoint_ttl_label(cache_control: Mapping[str, Any]) -> str:
+    """Return ``"1h"`` or ``"5m"`` for one ``cache_control`` block's ``ttl``."""
+    return "1h" if cache_control.get("ttl") == "1h" else "5m"
+
+
+def parse_breakpoints(body: bytes) -> list[Breakpoint]:
+    """Return every ``cache_control`` block in ``body``, in prompt order.
+
+    The API evaluates a request's cache in prompt order -- ``tools``, then
+    ``system``, then ``messages`` -- and 1h breakpoints must precede 5m ones
+    within that order, so a caller that needs the *last* (tail) breakpoint,
+    or the shortest TTL among them, can rely on this list's order rather
+    than re-deriving it. Only ``tools``/``system`` top-level blocks and
+    ``messages[i].content[j]`` blocks are considered -- the only places the
+    API accepts a ``cache_control``. Raises :class:`SnapshotError` if
+    ``body`` is not a JSON object.
+    """
+    data = _load_json(body)
+    if not isinstance(data, dict):
+        raise SnapshotError("request body is not a JSON object")
+    breakpoints: list[Breakpoint] = []
+    tools = data.get("tools")
+    if isinstance(tools, list):
+        for i, block in enumerate(tools):
+            cache_control = block.get("cache_control") if isinstance(block, dict) else None
+            if isinstance(cache_control, dict):
+                breakpoints.append(Breakpoint(f"tools[{i}]", _breakpoint_ttl_label(cache_control)))
+    system = data.get("system")
+    if isinstance(system, list):
+        for i, block in enumerate(system):
+            cache_control = block.get("cache_control") if isinstance(block, dict) else None
+            if isinstance(cache_control, dict):
+                breakpoints.append(Breakpoint(f"system[{i}]", _breakpoint_ttl_label(cache_control)))
+    messages = data.get("messages")
+    if isinstance(messages, list):
+        for mi, message in enumerate(messages):
+            content = message.get("content") if isinstance(message, dict) else None
+            if not isinstance(content, list):
+                continue
+            for ci, block in enumerate(content):
+                cache_control = block.get("cache_control") if isinstance(block, dict) else None
+                if isinstance(cache_control, dict):
+                    breakpoints.append(
+                        Breakpoint(
+                            f"messages[{mi}].content[{ci}]", _breakpoint_ttl_label(cache_control)
+                        )
+                    )
+    return breakpoints
+
+
+def shortest_breakpoint_ttl_s(breakpoints: list[Breakpoint]) -> int:
+    """Return the shortest TTL among ``breakpoints``, in seconds; ``CACHE_TTL_5M_S`` if empty.
+
+    See the "Interval derived from the snapshot's shortest breakpoint TTL"
+    decision in ``docs/DESIGN.md``: a body may mix ``1h`` and ``5m``
+    breakpoints, and the tail entry a bump has to find alive expires at the
+    shortest one present, not the longest.
+    """
+    if not breakpoints:
+        return CACHE_TTL_5M_S
+    return min(CACHE_TTL_1H_S if bp.ttl == "1h" else CACHE_TTL_5M_S for bp in breakpoints)
+
+
+def effective_ttl_label(breakpoints: list[Breakpoint]) -> str:
+    """Return ``"1h"`` or ``"5m"`` for :func:`shortest_breakpoint_ttl_s` of ``breakpoints``."""
+    return "1h" if shortest_breakpoint_ttl_s(breakpoints) == CACHE_TTL_1H_S else "5m"
+
+
 #: Marker text of the attribution/billing block Claude Code prepends as
 #: ``system[0]`` (a text block, not an HTTP header, despite the name).
 _ATTRIBUTION_HEADER_PREFIX = "x-anthropic-billing-header:"
