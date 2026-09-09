@@ -120,6 +120,29 @@
   write before the verdict was even read. The TTL is read from the
   snapshot's own body (`wants_1h_ttl`); an unparseable body is treated as
   stale.
+- Shadow review fork: a new side channel that asks one question about a
+  live session without that session learning it was asked. `POST
+  /cgx/sessions/{id}/fork` replays the session's captured snapshot with a
+  single review turn appended, parses a strict-JSON verdict
+  (`{"verdict": "ok"|"intervene", "reason", "mutation"}`) out of the
+  reply and discards the twin, so the parent pays a cache read plus the
+  twin's output tokens and never sees the exchange. Fail-open
+  throughout: every degradation (`no_snapshot`, `rate_limited`,
+  `unparseable_verdict`, `fork_failed`) answers `200` with `verdict:
+  "ok"`. New `CGX_FORK_MAX_TOKENS` (default 512) and
+  `CGX_FORK_MAX_PER_MIN` (default 6). A fork never touches the session's
+  bump state.
+- Shadow review fork: new `cgx fork-review --template NAME`, the
+  hook-side entry point for the above. It reads the hook JSON on stdin,
+  renders a template from `CGX_TEMPLATE_DIR` (default
+  `$XDG_CONFIG_HOME/cgx/templates`, falling back to the packaged copy),
+  calls the daemon and maps the verdict to the output shape of whichever
+  event the payload names -- `permissionDecision` at `PreToolUse`,
+  `decision: "block"` elsewhere, nothing at all for `ok`. `--prefix`
+  restricts it to prompts starting with a given word. Every failure the
+  hook itself hits exits 0 and emits a `systemMessage` naming the reason
+  (`CGX_FORK_REVIEW_QUIET=1` suppresses it). Packaged templates:
+  `task-assignment`, `permission-classifier` and `btw`.
 
 ## 1.0.0 - 2026-09-09
 
