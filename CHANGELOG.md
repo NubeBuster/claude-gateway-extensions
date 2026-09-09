@@ -16,6 +16,11 @@
   otherwise refuses to fall back to a bare `python`/`ruff`/`pyright`/
   `pytest` from `PATH`. `.github/workflows/ci.yml` sets it for the job
   that runs `make check`.
+- Makefile: `check`/`test` no longer pass their own `-q` to `pytest`.
+  `pyproject.toml`'s `addopts` already carries `-q`, so the doubled flag
+  became `-qq`, which drops pytest's "N passed" summary line entirely --
+  `make check` ended on a bare row of dots, forcing anyone reading the
+  output to count them for the pass/fail totals it exists to report.
 - Shadow review fork: a template's front matter can now declare
   `require:`, a comma-separated, ANDed list of conditions on the hook
   payload (`path` for "exists and is a non-empty string", `path=regex`
