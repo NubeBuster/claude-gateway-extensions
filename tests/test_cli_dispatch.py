@@ -170,6 +170,14 @@ def test_status_unknown_session_is_failure() -> None:
     assert "missing" in err
 
 
+def test_status_list_404_names_url_not_none() -> None:
+    client = _FakeClient("http://x", raise_api_error=ApiError(404, "not found"))
+    code, _, err = _run(["status"], client, environ={"CGX_URL": "http://x"})
+    assert code == EXIT_FAILED
+    assert "None" not in err
+    assert "http://x" in err
+
+
 def test_status_daemon_unreachable() -> None:
     client = _FakeClient("http://x", raise_unreachable=True)
     code, _, err = _run(["status"], client)

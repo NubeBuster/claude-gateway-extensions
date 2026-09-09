@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- `cgx status` (no `--session`) no longer prints "unknown session: None"
+  when the resolved daemon URL answers the session-list route with a 404
+  (e.g. `ANTHROPIC_BASE_URL` pointing at some other loopback HTTP server).
+  It now reports `no session list at <url> (is this the cgx daemon?)`.
 - Tests: the `--apply` tests in `tests/test_fork_review.py` now drive a
   `sys.executable` inline script instead of a `#!/bin/sh` fixture, so they
   run under Windows' `cmd.exe` shell (`_run_apply` always uses

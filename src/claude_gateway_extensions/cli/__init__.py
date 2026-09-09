@@ -146,7 +146,10 @@ def _cmd_status(args: argparse.Namespace, config: Config, ctx: _Context) -> int:
         return EXIT_UNREACHABLE
     except ApiError as exc:
         if exc.status == 404:
-            ctx.stderr.write(f"unknown session: {session_id}\n")
+            if session_id:
+                ctx.stderr.write(f"unknown session: {session_id}\n")
+            else:
+                ctx.stderr.write(f"no session list at {config.url} (is this the cgx daemon?)\n")
             return EXIT_FAILED
         ctx.stderr.write(f"{exc}\n")
         return EXIT_FAILED
