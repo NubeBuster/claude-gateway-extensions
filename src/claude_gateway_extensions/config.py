@@ -28,6 +28,36 @@ _FALSE_VALUES = {"false", "0", "no"}
 #: variable explicitly.
 DEFAULT_DRAIN_TIMEOUT_S = 600
 
+#: Every ``CGX_*`` variable :meth:`Config.from_env` reads -- the daemon-side
+#: half of the "Environment variables only, split by process" decision in
+#: ``docs/DESIGN.md``. The single source ``cli/service.py``'s
+#: ``render_unit`` filters against, so a systemd unit only ever gets
+#: variables ``cgx serve`` actually reads, never session/hook-side ones
+#: (``CGX_URL``, ``CGX_FORK_REVIEW_QUIET``, ``CGX_TEMPLATE_DIR``, ...) that
+#: happened to be set in the installing shell. Keep in sync with
+#: :meth:`Config.from_env` by hand -- there is no dataclass-field
+#: introspection here, since a field's name does not mechanically produce
+#: its ``CGX_*`` spelling.
+DAEMON_ENV_VARS: tuple[str, ...] = (
+    "CGX_HOST",
+    "CGX_PORT",
+    "CGX_UPSTREAM",
+    "CGX_STATE_DIR",
+    "CGX_PERSIST",
+    "CGX_DEFAULT_ENABLED",
+    "CGX_INTERVAL_1H_S",
+    "CGX_INTERVAL_5M_S",
+    "CGX_MAX_DURATION_S",
+    "CGX_ON_CACHE_WRITE",
+    "CGX_MAX_STREAMS_PER_SESSION",
+    "CGX_LOG_LEVEL",
+    "CGX_DRAIN_TIMEOUT_S",
+    "CGX_FORK_MAX_TOKENS",
+    "CGX_FORK_MAX_PER_MIN",
+    "CGX_FORK_THINKING_GUARD",
+    "CGX_FORK_MODEL",
+)
+
 
 class ConfigError(ValueError):
     """Raised when a ``CGX_*`` environment variable has an invalid value."""

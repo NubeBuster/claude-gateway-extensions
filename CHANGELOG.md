@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Fix: `cgx service install`'s systemd unit no longer bakes in
+  session/hook-side `CGX_*` variables from the installing shell (`CGX_URL`,
+  `CGX_FORK_REVIEW_QUIET`, `CGX_TEMPLATE_DIR`, ...) that `cgx serve` never
+  reads. `render_unit` now passes through only the new
+  `config.DAEMON_ENV_VARS` allow-list -- the single place every daemon-side
+  `CGX_*` variable is named, kept in sync by hand with `Config.from_env`.
 - `cgx doctor` now checks every `cgx fork-review --template X` hook entry it
   finds in any scope's settings: a template that cannot be resolved (moved
   or deleted since `cgx configure` wired it in) is a `fail`, and a

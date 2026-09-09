@@ -69,6 +69,24 @@ def test_render_unit_passes_through_cgx_env_vars(tmp_path: Path) -> None:
     assert "UNRELATED" not in text
 
 
+@pytest.mark.invariant(decision="Environment variables only, split by process")
+def test_render_unit_carries_every_daemon_var_and_no_session_var(tmp_path: Path) -> None:
+    """Every ``DAEMON_ENV_VARS`` entry is rendered; every session/hook-side var is not."""
+    from claude_gateway_extensions.config import DAEMON_ENV_VARS
+
+    environ = {"HOME": str(tmp_path), **{name: "1" for name in DAEMON_ENV_VARS}}
+    text = service.render_unit("/usr/local/bin/cgx", environ)
+    for name in DAEMON_ENV_VARS:
+        assert f"Environment={name}=1" in text
+
+    session_side = {"CGX_URL", "CGX_FORK_REVIEW_QUIET", "CGX_TEMPLATE_DIR"}
+    assert session_side.isdisjoint(DAEMON_ENV_VARS)
+    environ = {"HOME": str(tmp_path), **{name: "1" for name in session_side}}
+    text = service.render_unit("/usr/local/bin/cgx", environ)
+    for name in session_side:
+        assert name not in text
+
+
 def test_status_reports_absent_unit_without_querying(tmp_path: Path) -> None:
     environ = {"HOME": str(tmp_path)}
     calls: list[list[str]] = []

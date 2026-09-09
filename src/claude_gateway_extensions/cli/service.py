@@ -26,7 +26,7 @@ from pathlib import Path
 
 from claude_gateway_extensions.cli.confirm import PlannedChange
 from claude_gateway_extensions.cli.install import user_home
-from claude_gateway_extensions.config import DEFAULT_DRAIN_TIMEOUT_S
+from claude_gateway_extensions.config import DAEMON_ENV_VARS, DEFAULT_DRAIN_TIMEOUT_S
 
 #: Slack systemd gives the daemon beyond its own drain timeout before
 #: escalating from SIGTERM to SIGKILL (``TimeoutStopSec``), so a drain that
@@ -97,10 +97,14 @@ def render_unit(
 ) -> str:
     """Render the systemd user unit file content for ``executable``.
 
-    Passes through every ``CGX_*`` variable currently set in ``environ`` as
-    an ``Environment=`` line, so the service sees the same configuration the
-    installing shell had (documented in the README's "Daemon Environment
-    Variables" section). ``port``/``host``, when given, are written explicitly as
+    Passes through every variable in :data:`~claude_gateway_extensions.config.DAEMON_ENV_VARS`
+    currently set in ``environ`` as an ``Environment=`` line, so the service
+    sees the same daemon-side configuration the installing shell had
+    (documented in the README's "Daemon Environment Variables" section) --
+    never a session/hook-side ``CGX_*`` variable (``CGX_URL``,
+    ``CGX_FORK_REVIEW_QUIET``, ``CGX_TEMPLATE_DIR``, ...) that only happens
+    to be set in that shell and that ``cgx serve`` never reads.
+    ``port``/``host``, when given, are written explicitly as
     ``CGX_PORT``/``CGX_HOST``, overriding whatever those two happened to
     be in the installing shell — the whole point of ``--port``/``--host`` is
     to pin the unit's port independent of shell state.
@@ -113,7 +117,7 @@ def render_unit(
     before the daemon finishes draining. See the "Drain plus
     ``SO_REUSEPORT``..." decision in ``docs/DESIGN.md`` "Decisions".
     """
-    env_vars = {key: value for key, value in environ.items() if key.startswith("CGX_")}
+    env_vars = {key: value for key, value in environ.items() if key in DAEMON_ENV_VARS}
     if port is not None:
         env_vars["CGX_PORT"] = str(port)
     if host is not None:
