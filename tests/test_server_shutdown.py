@@ -27,6 +27,7 @@ from aiohttp import web
 from aiohttp.test_utils import TestServer
 
 from claude_gateway_extensions.server.app import (
+    PortOwnedError,
     install_shutdown_handlers,
     remove_shutdown_handlers,
     serve,
@@ -362,7 +363,10 @@ async def test_reuseport_lets_a_second_daemon_bind_before_the_first_stops(
     task_a = asyncio.create_task(serve(config_a))
     assert await _wait_until(lambda: _is_listening(port)), "first daemon never started listening"
 
-    task_b = asyncio.create_task(serve(config_b))
+    # handover=True: the port-probe guard (see the "The port is probed
+    # before it is bound" decision) now refuses to bind alongside a cgx
+    # daemon it can already reach unless told to replace it.
+    task_b = asyncio.create_task(serve(config_b, handover=True))
     await asyncio.sleep(0.3)
     assert not task_b.done(), (
         f"second daemon failed to bind: {task_b.exception() if task_b.done() else None}"
@@ -440,3 +444,67 @@ async def test_handover_signals_the_previous_daemon_and_takes_over_the_pid_file(
 
     os.kill(os.getpid(), signal.SIGTERM)
     await asyncio.wait_for(task, timeout=5)
+
+
+@pytest.mark.invariant(decision="The port is probed before it is bound")
+async def test_serve_refuses_a_foreign_listener_without_binding(tmp_path: Path) -> None:
+    """A fake foreign HTTP listener on the port must make serve() exit non-zero, never binding."""
+    port = _free_port()
+
+    async def foreign_handler(request: web.Request) -> web.Response:
+        del request
+        return web.Response(text="not cgx at all", status=200)
+
+    foreign_app = web.Application()
+    foreign_app.router.add_route("*", "/{tail:.*}", foreign_handler)
+    foreign_runner = web.AppRunner(foreign_app)
+    await foreign_runner.setup()
+    foreign_site = web.TCPSite(foreign_runner, "127.0.0.1", port)
+    await foreign_site.start()
+    try:
+        config = make_config(tmp_path, "http://127.0.0.1:1", port=port, persist=False)
+        with pytest.raises(PortOwnedError, match="owned by another program"):
+            await serve(config)
+
+        # serve() must never have bound: the foreign listener still answers.
+        async with (
+            aiohttp.ClientSession() as session,
+            session.get(f"http://127.0.0.1:{port}/cgx/health") as resp,
+        ):
+            assert await resp.text() == "not cgx at all"
+    finally:
+        await foreign_runner.cleanup()
+
+
+@_no_reuseport
+@pytest.mark.invariant(decision="The port is probed before it is bound")
+async def test_serve_refuses_a_cgx_owned_port_without_handover_and_proceeds_with_it(
+    tmp_path: Path,
+) -> None:
+    """A fake cgx health responder on the port refuses a plain serve(), but allows --handover."""
+    port = _free_port()
+    config_a = make_config(tmp_path / "a", "http://127.0.0.1:1", port=port, persist=False)
+    config_b = make_config(tmp_path / "b", "http://127.0.0.1:1", port=port, persist=False)
+
+    task_a = asyncio.create_task(serve(config_a))
+    try:
+        assert await _wait_until(lambda: _is_listening(port)), "first daemon never started"
+
+        with pytest.raises(PortOwnedError, match="already served by cgx"):
+            await serve(config_b)
+
+        task_b = asyncio.create_task(serve(config_b, handover=True))
+        try:
+            await asyncio.sleep(0.3)
+            assert not task_b.done(), (
+                "--handover must be allowed to bind alongside an existing cgx daemon: "
+                f"{task_b.exception() if task_b.done() else None}"
+            )
+        finally:
+            task_b.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task_b
+    finally:
+        task_a.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task_a

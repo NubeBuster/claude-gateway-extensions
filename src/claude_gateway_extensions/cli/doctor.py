@@ -60,13 +60,29 @@ def _dict_section(settings: dict, key: str) -> dict | None:
 
 
 def check_daemon(client: ControlClient, url: str) -> CheckResult:
-    """Check that the daemon answers ``GET /cgx/health``."""
+    """Check that the daemon answers ``GET /cgx/health`` as cgx itself, not a foreign program.
+
+    See the "The port is probed before it is bound" decision in
+    ``docs/DESIGN.md``: a 2xx response alone is not enough, because any
+    program could be listening on the configured port -- only a body
+    shaped like this daemon's own (``ok: true`` and a string ``version``)
+    counts.
+    """
     try:
-        client.health()
+        body = client.health()
     except DaemonUnreachable:
         return CheckResult("fail", f"daemon not reachable at {url} (is `cgx serve` running?)")
     except ApiError as exc:
         return CheckResult("fail", f"daemon at {url} returned HTTP {exc.status} for health check")
+    if (
+        not isinstance(body, dict)
+        or body.get("ok") is not True
+        or not isinstance(body.get("version"), str)
+    ):
+        return CheckResult(
+            "fail",
+            f"{url} answered, but not as cgx -- a different program may own this port",
+        )
     return CheckResult("ok", f"daemon healthy at {url}")
 
 

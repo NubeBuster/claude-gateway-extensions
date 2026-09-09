@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Fix: `cgx serve` now probes the configured port's `/cgx/health` before
+  binding it. Nothing answers: binds as before. A cgx daemon answers:
+  refuses with a non-zero exit naming its pid unless `--handover` is given,
+  instead of silently sharing the port via `SO_REUSEPORT`. Anything else
+  answers, or the bind still fails after a clear probe: refuses with a
+  non-zero exit naming what answered, never retries. `cgx doctor` applies
+  the same recognition to the configured port. See the "The port is probed
+  before it is bound" decision in `docs/DESIGN.md`.
 - Fix: a `POST /v1/messages` body with `max_tokens: 0` -- a bump or fork
   replay, this daemon's own or a chained upstream proxy's -- is now never
   captured as a session's snapshot; it is still forwarded untouched. It is

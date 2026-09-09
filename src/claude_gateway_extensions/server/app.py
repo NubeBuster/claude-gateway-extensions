@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import logging
 import os
 import signal
@@ -285,6 +286,85 @@ async def _wait_until_healthy(config: Config, timeout: float = 10.0) -> None:
             await asyncio.sleep(0.05)
 
 
+class PortOwnedError(RuntimeError):
+    """Raised by :func:`serve` when ``config.host:config.port`` cannot be bound.
+
+    See the "The port is probed before it is bound" decision in
+    ``docs/DESIGN.md`` "Decisions". Its message is meant to be printed to
+    the user as-is (``cgx serve``'s CLI wrapper does exactly that) rather
+    than wrapped in a traceback.
+    """
+
+
+def _is_cgx_health_body(status: int, text: str) -> bool:
+    """Whether a ``/cgx/health`` probe response looks like this daemon's own.
+
+    Deliberately narrow: a healthy response is a JSON object with ``ok:
+    true`` and a string ``version``; a draining one (503, see
+    :func:`~claude_gateway_extensions.server.control.health`) has ``status:
+    "draining"``. Anything else -- wrong shape, wrong status, not JSON at
+    all -- is a foreign program that merely happens to answer on this port,
+    never assumed to be a cgx daemon that is just having a bad day.
+    """
+    try:
+        data = json.loads(text)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return False
+    if not isinstance(data, dict):
+        return False
+    if status == 200:
+        return data.get("ok") is True and isinstance(data.get("version"), str)
+    if status == 503:
+        return data.get("status") == "draining"
+    return False
+
+
+#: Sentinel :func:`_probe_port_owner` returns for "a cgx daemon answered,
+#: but its pid could not be read" (a missing or foreign pid file) -- distinct
+#: from ``None`` ("nothing answered at all") so the caller still refuses to
+#: bind without ``--handover`` even when it cannot name the pid. Never a
+#: real pid (those are always positive).
+_CGX_OWNER_PID_UNKNOWN = 0
+
+
+async def _probe_port_owner(config: Config) -> int | None:
+    """Probe ``config.host:config.port``'s ``/cgx/health`` before this daemon binds it.
+
+    Returns the pid of a cgx daemon already serving the port -- read from
+    the state directory's pid file, since the health response carries no
+    pid of its own and the file is written by the very process that would
+    answer this probe -- or :data:`_CGX_OWNER_PID_UNKNOWN` if a cgx daemon
+    answered but no pid file names it. Returns ``None`` only if nothing
+    answered at all (a refused or timed-out connection): the port looks
+    free, though the caller still has to treat a subsequent bind failure as
+    a foreign, non-HTTP listener rather than retrying. Raises
+    :class:`PortOwnedError` if something answered that is not a
+    recognisable cgx health response.
+    """
+    url = _local_health_url(config)
+    try:
+        async with (
+            aiohttp.ClientSession() as session,
+            session.get(url, timeout=aiohttp.ClientTimeout(total=2)) as resp,
+        ):
+            status = resp.status
+            text = await resp.text()
+    except aiohttp.ClientConnectorError:
+        return None
+    except aiohttp.ClientError as exc:
+        raise PortOwnedError(
+            f"port {config.port} is owned by another program ({exc}); "
+            "cgx never shares a port with a foreign listener"
+        ) from exc
+    if _is_cgx_health_body(status, text):
+        return _read_pid_file(config) or _CGX_OWNER_PID_UNKNOWN
+    first_line = next((line for line in text.splitlines() if line.strip()), f"HTTP {status}")
+    raise PortOwnedError(
+        f"port {config.port} is owned by another program ({first_line}); "
+        "cgx never shares a port with a foreign listener"
+    )
+
+
 def _signal_old_daemon(pid: int) -> None:
     """Send ``SIGTERM`` to the daemon ``--handover`` is replacing; best-effort."""
     try:
@@ -346,7 +426,10 @@ async def serve(config: Config, *, handover: bool = False) -> None:
     succeed, then signals the previously running daemon (found via the pid
     file under ``config.state_dir``) to start its own drain — see the
     "Drain plus ``SO_REUSEPORT``..." decision in ``docs/DESIGN.md``
-    "Decisions".
+    "Decisions". Before any of that, the port is probed (see "The port is
+    probed before it is bound") and :class:`PortOwnedError` is raised
+    instead of binding if it is already owned by something other than a
+    cgx daemon that ``handover`` names replacing.
     """
     logging.basicConfig(level=config.log_level)
     logger.setLevel(config.log_level)
@@ -364,6 +447,16 @@ async def serve(config: Config, *, handover: bool = False) -> None:
         config.state_dir,
         config.persist,
     )
+    # See the "The port is probed before it is bound" decision: SO_REUSEPORT
+    # below would otherwise let this daemon silently share a port a foreign
+    # program already owns, or fail with a bare OS error that never says
+    # what is actually there.
+    owner_pid = await _probe_port_owner(config)
+    if owner_pid is not None and not handover:
+        pid_desc = str(owner_pid) if owner_pid != _CGX_OWNER_PID_UNKNOWN else "unknown"
+        raise PortOwnedError(
+            f"port {config.port} already served by cgx pid {pid_desc}; use --handover to replace it"
+        )
     # This daemon manages its own bounded drain wait (see _drain) using
     # DrainState.in_flight; by the time runner.cleanup() runs, any still-open
     # request has already had its full CGX_DRAIN_TIMEOUT_S (or was cut short
@@ -372,7 +465,14 @@ async def serve(config: Config, *, handover: bool = False) -> None:
     runner = web.AppRunner(app, access_log=None, shutdown_timeout=_FORCE_CLOSE_TIMEOUT_S)
     await runner.setup()
     site = web.TCPSite(runner, config.host, config.port, reuse_port=_reuse_port_supported())
-    await site.start()
+    try:
+        await site.start()
+    except OSError as exc:
+        await runner.cleanup()
+        raise PortOwnedError(
+            f"port {config.port} is owned by another program ({exc}); "
+            "cgx never shares a port with a foreign listener"
+        ) from exc
 
     stop = asyncio.Event()
     force = asyncio.Event()
@@ -401,6 +501,7 @@ async def serve(config: Config, *, handover: bool = False) -> None:
 
 __all__ = [
     "SHUTDOWN_SIGNALS",
+    "PortOwnedError",
     "install_shutdown_handlers",
     "make_app",
     "remove_shutdown_handlers",

@@ -48,7 +48,7 @@ class _FakeClient:
     def health(self) -> dict[str, Any]:
         self.calls.append(("health", ()))
         self._maybe_raise()
-        return {"status": "ok"}
+        return {"ok": True, "version": "0.0.0-test", "upstream": "http://example", "sessions": 0}
 
     def list_sessions(self) -> list[dict[str, Any]]:
         self.calls.append(("list_sessions", ()))

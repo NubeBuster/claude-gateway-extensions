@@ -144,6 +144,19 @@ deliberately absent from this release, not ruled out for the project.
   the systemd unit do it for `systemctl --user restart`. State is already
   flushed synchronously on every write (`FileStore`), so drain needs no
   separate flush step.
+- **The port is probed before it is bound.** `SO_REUSEPORT` lets a second
+  process share a port silently -- without a check first, `serve` could take
+  over a share of a foreign program's connections instead of refusing to
+  start, or fail with a bare OS error that never says what is actually
+  there. Before binding, `serve` probes `GET <host>:<port>/cgx/health`.
+  Nothing answers: proceed to bind, and if the bind itself then fails, exit
+  non-zero naming the OS error, never retry -- something not speaking HTTP
+  got there first. A cgx daemon answers (a recognisable health body): bind
+  only with `--handover`, replacing it; otherwise exit non-zero naming its
+  pid and pointing at `--handover`. Anything else answers: exit non-zero
+  naming the first line of its response; cgx never shares a port with a
+  foreign listener. `cgx doctor` applies the same recognition to the
+  configured port so a foreign program there is a `fail`, not a false `ok`.
 
 ## Extension points
 

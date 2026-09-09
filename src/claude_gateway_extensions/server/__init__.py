@@ -12,7 +12,7 @@ from __future__ import annotations
 import asyncio
 
 from claude_gateway_extensions.config import Config
-from claude_gateway_extensions.server.app import make_app, serve
+from claude_gateway_extensions.server.app import PortOwnedError, make_app, serve
 
 
 def run(config: Config, *, handover: bool = False) -> None:
@@ -22,6 +22,9 @@ def run(config: Config, *, handover: bool = False) -> None:
     loop of its own. ``Ctrl-C`` is a normal way to stop the daemon, so a
     ``KeyboardInterrupt`` returns rather than propagating a traceback.
     ``handover=True`` is ``cgx serve --handover``: see :func:`serve`.
+    :class:`PortOwnedError` (the port is already owned by something this
+    daemon must not bind alongside) propagates uncaught, for the CLI to
+    print and turn into a non-zero exit rather than a traceback.
     """
     try:
         asyncio.run(serve(config, handover=handover))
@@ -29,4 +32,4 @@ def run(config: Config, *, handover: bool = False) -> None:
         return
 
 
-__all__ = ["make_app", "run", "serve"]
+__all__ = ["PortOwnedError", "make_app", "run", "serve"]

@@ -132,7 +132,10 @@ def _cmd_serve(args: argparse.Namespace, config: Config, ctx: _Context) -> int:
     binds alongside (not instead of) an already-running daemon via
     ``SO_REUSEPORT`` and asks it to step aside once this process is healthy —
     a zero-gap manual upgrade path for anyone not using ``cgx service``; see
-    the README's "Running without systemd".
+    the README's "Running without systemd". A port already owned by
+    something else (another cgx daemon without ``--handover``, or any other
+    program) is reported here as ``PortOwnedError`` and turned into a plain
+    stderr line and a non-zero exit rather than a traceback.
     """
     if args.port is not None or args.host is not None:
         config = replace(
@@ -145,7 +148,11 @@ def _cmd_serve(args: argparse.Namespace, config: Config, ctx: _Context) -> int:
     except ModuleNotFoundError as exc:
         ctx.stderr.write(f"server module not available: {exc}\n")
         return EXIT_FAILED
-    server_module.run(config, handover=args.handover)
+    try:
+        server_module.run(config, handover=args.handover)
+    except server_module.PortOwnedError as exc:
+        ctx.stderr.write(f"{exc}\n")
+        return EXIT_FAILED
     return EXIT_OK
 
 

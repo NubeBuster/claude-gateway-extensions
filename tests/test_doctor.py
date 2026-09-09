@@ -27,7 +27,7 @@ class _FakeClient:
     def health(self) -> dict[str, Any]:
         if not self.healthy:
             raise DaemonUnreachable("nope")
-        return {"status": "ok"}
+        return {"ok": True, "version": "0.0.0-test", "upstream": "http://example", "sessions": 0}
 
 
 def _healthy_factory(base_url: str) -> _FakeClient:
@@ -73,6 +73,26 @@ def test_daemon_unreachable_is_a_failure(tmp_path: Path) -> None:
     code = doctor.run_doctor(config, environ, tmp_path, stdout, client_factory=_unhealthy_factory)
     assert code == 1
     assert "fail: daemon not reachable" in stdout.getvalue()
+
+
+@pytest.mark.invariant(decision="The port is probed before it is bound")
+def test_daemon_answers_but_not_as_cgx_is_a_failure(tmp_path: Path) -> None:
+    """A 2xx response that is not shaped like cgx's own health body is a failure, not `ok`."""
+
+    class _ForeignClient:
+        def __init__(self, base_url: str) -> None:
+            del base_url
+
+        def health(self) -> dict[str, Any]:
+            return {"status": "ok"}  # a foreign program's own idea of "healthy"
+
+    environ = {"HOME": str(tmp_path)}
+    config = Config.from_env({"CGX_URL": URL})
+    stdout = io.StringIO()
+    code = doctor.run_doctor(config, environ, tmp_path, stdout, client_factory=_ForeignClient)
+    assert code == 1
+    assert "fail: " in stdout.getvalue()
+    assert "not as cgx" in stdout.getvalue()
 
 
 def test_missing_hook_and_skill_are_warnings_not_failures(tmp_path: Path) -> None:
