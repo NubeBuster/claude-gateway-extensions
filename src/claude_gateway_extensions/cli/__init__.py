@@ -107,6 +107,18 @@ def _format_status_line(session: Mapping[str, Any], now: float) -> str:
     )
 
 
+def _client_error_exit(ctx: _Context, exc: DaemonUnreachable | ApiError) -> int:
+    """Write a control-client failure to stderr and return the matching exit code.
+
+    Shared by every ``_cmd_*`` handler that talks to the daemon so the
+    ``DaemonUnreachable``/``ApiError`` -> exit-code mapping lives in one
+    place; a handler with its own status-specific message (e.g.
+    :func:`_cmd_status`'s 404 handling) still calls this for the rest.
+    """
+    ctx.stderr.write(f"{exc}\n")
+    return EXIT_UNREACHABLE if isinstance(exc, DaemonUnreachable) else EXIT_FAILED
+
+
 def _cmd_serve(args: argparse.Namespace, config: Config, ctx: _Context) -> int:
     """Run the daemon by importing and calling ``server.run(config)`` lazily.
 
@@ -142,8 +154,7 @@ def _cmd_status(args: argparse.Namespace, config: Config, ctx: _Context) -> int:
         sessions: list[dict[str, Any]]
         sessions = [client.get_session(session_id)] if session_id else client.list_sessions()
     except DaemonUnreachable as exc:
-        ctx.stderr.write(f"{exc}\n")
-        return EXIT_UNREACHABLE
+        return _client_error_exit(ctx, exc)
     except ApiError as exc:
         if exc.status == 404:
             if session_id:
@@ -151,8 +162,7 @@ def _cmd_status(args: argparse.Namespace, config: Config, ctx: _Context) -> int:
             else:
                 ctx.stderr.write(f"no session list at {config.url} (is this the cgx daemon?)\n")
             return EXIT_FAILED
-        ctx.stderr.write(f"{exc}\n")
-        return EXIT_FAILED
+        return _client_error_exit(ctx, exc)
     if args.json:
         ctx.stdout.write(json.dumps(sessions, indent=2) + "\n")
         return EXIT_OK
@@ -191,12 +201,8 @@ def _cmd_set_enabled(args: argparse.Namespace, config: Config, ctx: _Context, en
             max_duration_s=args.max_duration,
             until=until,
         )
-    except DaemonUnreachable as exc:
-        ctx.stderr.write(f"{exc}\n")
-        return EXIT_UNREACHABLE
-    except ApiError as exc:
-        ctx.stderr.write(f"{exc}\n")
-        return EXIT_FAILED
+    except (DaemonUnreachable, ApiError) as exc:
+        return _client_error_exit(ctx, exc)
     ctx.stdout.write(_format_status_line(result, time.time()) + "\n")
     return EXIT_OK
 
@@ -207,12 +213,8 @@ def _cmd_now(args: argparse.Namespace, config: Config, ctx: _Context) -> int:
     client = ctx.client_factory(config.url)
     try:
         result = client.bump(session_id)
-    except DaemonUnreachable as exc:
-        ctx.stderr.write(f"{exc}\n")
-        return EXIT_UNREACHABLE
-    except ApiError as exc:
-        ctx.stderr.write(f"{exc}\n")
-        return EXIT_FAILED
+    except (DaemonUnreachable, ApiError) as exc:
+        return _client_error_exit(ctx, exc)
     outcome = result.get("outcome")
     usage = result.get("usage") or {}
     if outcome is None:
@@ -232,12 +234,8 @@ def _cmd_forget(args: argparse.Namespace, config: Config, ctx: _Context) -> int:
     client = ctx.client_factory(config.url)
     try:
         client.forget(session_id)
-    except DaemonUnreachable as exc:
-        ctx.stderr.write(f"{exc}\n")
-        return EXIT_UNREACHABLE
-    except ApiError as exc:
-        ctx.stderr.write(f"{exc}\n")
-        return EXIT_FAILED
+    except (DaemonUnreachable, ApiError) as exc:
+        return _client_error_exit(ctx, exc)
     ctx.stdout.write(f"forgot {session_id}\n")
     return EXIT_OK
 
