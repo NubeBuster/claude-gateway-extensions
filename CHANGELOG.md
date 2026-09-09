@@ -15,6 +15,19 @@
   entry is wired under -- so the hook fires but never matches -- is a
   `warn`. Previously such a template only failed at hook time, silently
   (fail-open) past a `systemMessage` easy to miss.
+- Live regression harness: `make live` drives one real interactive Claude
+  Code session in a detached tmux session through a real `cgx serve` to
+  the real API, and asserts what the offline suite structurally cannot --
+  that a bump and a shadow fork are cache *reads* with
+  `cache_creation_input_tokens: 0`, that a fork on a Haiku model is
+  refused unsent as `thinking_unsafe_model`, that the reviewed session's
+  next turn is unaffected, and that the daemon exits cleanly through its
+  drain path. It lives in `tests/live/` (stdlib plus tmux, no new runtime
+  dependency), is never collected by `pytest`, aborts past
+  `--budget-usd`, and prints its estimated spend. Assertions read the
+  control API and the subject's transcript JSONL; pane text is only a
+  failure diagnostic. `tests/test_live_harness.py` covers the harness's
+  own logic offline with a fake tmux and a fake control client.
 - `cgx status` (no `--session`) no longer prints "unknown session: None"
   when the resolved daemon URL answers the session-list route with a 404
   (e.g. `ANTHROPIC_BASE_URL` pointing at some other loopback HTTP server).
