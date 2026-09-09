@@ -125,9 +125,9 @@ async def fork_session(request: web.Request) -> web.Response:
     Always answers ``200`` with the verdict shape, including for the
     fail-open degradations (``no_snapshot``, ``rate_limited``,
     ``unparseable_verdict``, ``fork_failed``): a non-200 there would push
-    fail-open logic into every client. ``hook_event`` is accepted and
-    carried through for logging/templating context only; it does not
-    change engine behaviour.
+    fail-open logic into every client. ``hook_event`` is accepted for
+    forward compatibility and ignored server-side: the handler never reads
+    it, so it reaches neither the logs nor the engine.
     """
     session_id = request.match_info["id"]
     if not SESSION_ID_RE.match(session_id):
