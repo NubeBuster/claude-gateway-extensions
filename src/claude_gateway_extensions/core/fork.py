@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Literal
@@ -29,6 +30,21 @@ logger = logging.getLogger(__name__)
 ForkOutcome = Literal["ok", "intervene"]
 
 _FORK_PATH = "/v1/messages"
+
+#: Minimum (family, version) known to preserve signed thinking blocks when a
+#: non-tool-result user turn is appended -- measured behaviour, not a guess.
+#: Lowering an entry needs a new measurement, not a tidy-up; see the "Shadow
+#: review fork" section of docs/DESIGN.md. No Haiku model preserves them at
+#: any version, so ``haiku`` is deliberately absent rather than ``(0, 0)``.
+_THINKING_SAFE_MINIMUM: dict[str, tuple[int, ...]] = {
+    "opus": (4, 5),
+    "sonnet": (4, 6),
+    "fable": (5, 1),
+}
+
+#: An 8-digit release date in a model id (``claude-opus-4-5-20251101``).
+#: Never a version component, and it would otherwise dominate the comparison.
+_DATE_RE = re.compile(r"^\d{8}$")
 
 
 def _thinking_budget(data: Mapping[str, object]) -> int | None:
@@ -76,6 +92,128 @@ def build_fork_body(body: bytes, prompt: str, payload: object, max_tokens: int) 
     messages = data.setdefault("messages", [])
     messages.append({"role": "user", "content": content})
     return json.dumps(data, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+
+
+def _model_family(model: str | None) -> str | None:
+    """``opus``/``sonnet``/``haiku``/``fable`` for a model id, or ``None``.
+
+    ``None`` means "not a family this module knows", never "no family": a
+    family recognised here is a claim that its thinking-preservation
+    behaviour has been measured. An unrecognised model (e.g. a future
+    family) must fall through to the unknown path, not to safety.
+    """
+    lowered = (model or "").lower()
+    for family in ("opus", "sonnet", "haiku", "fable"):
+        if family in lowered:
+            return family
+    return None
+
+
+def _leading_numbers(tokens: list[str]) -> tuple[int, ...]:
+    """The run of non-date integers at the head of ``tokens``."""
+    numbers: list[int] = []
+    for token in tokens:
+        if not token.isdigit() or _DATE_RE.match(token):
+            break
+        numbers.append(int(token))
+    return tuple(numbers)
+
+
+def _model_version(model: str | None, family: str) -> tuple[int, ...] | None:
+    """The version numbers around ``family`` in a model id, or ``None``.
+
+    Both orderings Claude Code has been seen sending are read:
+    ``claude-opus-4-5-20251101`` puts the version after the family and
+    ``claude-3-7-sonnet-20250219`` puts it before. Numbers after the family
+    win when both are present -- the newer spelling -- and an 8-digit
+    release date is never a version component.
+    """
+    tokens = [t for t in re.split(r"[^0-9a-z]+", (model or "").lower()) if t]
+    try:
+        index = tokens.index(family)
+    except ValueError:
+        return None
+    after = _leading_numbers(tokens[index + 1 :])
+    if after:
+        return after
+    before = _leading_numbers(list(reversed(tokens[:index])))
+    return tuple(reversed(before)) if before else None
+
+
+def _pad(version: tuple[int, ...], length: int) -> tuple[int, ...]:
+    """``version`` zero-extended to ``length``, so ``(5,) >= (4, 6)`` compares."""
+    return tuple(list(version) + [0] * length)[:length]
+
+
+def _preserves_thinking_blocks(model: str | None) -> bool | None:
+    """Whether appending a user turn to ``model`` keeps its signed thinking blocks.
+
+    Three-valued, and the third value is the point: ``None`` means the
+    model id could not be placed in a known family/version at all, which is
+    neither a licence to spend nor evidence of harm -- the caller refuses on
+    it under its own reason code rather than treating unknown as safe.
+    """
+    family = _model_family(model)
+    if family is None:
+        return None
+    if family == "haiku":
+        # Every Haiku model invalidates, at every version -- a decision,
+        # not a lookup, and must not fall through to the table.
+        return False
+    version = _model_version(model, family)
+    if version is None:
+        return None
+    minimum = _THINKING_SAFE_MINIMUM.get(family)
+    if minimum is None:
+        return None
+    return _pad(version, len(minimum)) >= minimum
+
+
+def _body_has_thinking_blocks(data: object) -> bool:
+    """Whether a parsed captured body carries an assistant thinking block."""
+    if not isinstance(data, dict):
+        return False
+    messages = data.get("messages")
+    if not isinstance(messages, list):
+        return False
+    for message in messages:
+        if not isinstance(message, dict):
+            continue
+        content = message.get("content")
+        if not isinstance(content, list):
+            continue
+        for block in content:
+            if isinstance(block, dict) and block.get("type") in (
+                "thinking",
+                "redacted_thinking",
+            ):
+                return True
+    return False
+
+
+def _check_thinking_safety(body: bytes, model: str | None) -> ForkVerdict | None:
+    """Return a fail-open refusal if replaying ``body`` on ``model`` would strip thinking.
+
+    ``None`` means proceed: either the body carries no thinking blocks (so
+    there is nothing for an invalidating model to strip and refusing would
+    rule out the whole non-thinking half of the traffic for no gain), the
+    body could not be parsed (``build_fork_body`` will raise its own error
+    on the same body), or the model is known to preserve them.
+    """
+    try:
+        data = json.loads(body)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return None
+    if not _body_has_thinking_blocks(data):
+        return None
+    verdict = _preserves_thinking_blocks(model)
+    if verdict is True:
+        return None
+    if verdict is None:
+        logger.warning("fork refused: reason=thinking_model_unknown model=%s", model)
+        return _fail_open("thinking_model_unknown")
+    logger.warning("fork refused: reason=thinking_unsafe_model model=%s", model)
+    return _fail_open("thinking_unsafe_model")
 
 
 @dataclass
@@ -204,12 +342,24 @@ async def fork_once(
     prompt: str,
     payload: object,
     max_tokens: int,
+    thinking_guard: bool = True,
 ) -> ForkVerdict:
     """Replay ``snapshot`` as a review fork against ``upstream_base`` and classify the reply.
 
-    Network exceptions are caught and turned into the fail-open ``ok``
-    verdict so callers never need a separate exception path.
+    When ``thinking_guard`` is true (``CGX_FORK_THINKING_GUARD``, default
+    on) and the captured snapshot carries thinking blocks, the snapshot's
+    model is checked against the measured thinking-preservation table before
+    anything is sent: a model below its family's minimum, in a family with
+    no entry (every Haiku model), or unrecognised entirely refuses with the
+    existing fail-open shape rather than paying a full cold write of the
+    conversation. Network exceptions are caught and turned into the
+    fail-open ``ok`` verdict so callers never need a separate exception
+    path.
     """
+    if thinking_guard:
+        refusal = _check_thinking_safety(snapshot.body, snapshot.model)
+        if refusal is not None:
+            return refusal
     url = f"{upstream_base.rstrip('/')}{_FORK_PATH}"
     headers = build_bump_headers(snapshot.headers, credential)
     body = build_fork_body(snapshot.body, prompt, payload, max_tokens)

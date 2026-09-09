@@ -172,6 +172,7 @@ class Config:
     drain_timeout_s: int
     fork_max_tokens: int
     fork_max_per_min: int
+    fork_thinking_guard: bool
 
     @classmethod
     def from_env(cls, environ: Mapping[str, str] | None = None) -> Config:
@@ -208,6 +209,9 @@ class Config:
         )
         fork_max_tokens = _parse_int("CGX_FORK_MAX_TOKENS", env.get("CGX_FORK_MAX_TOKENS", "512"))
         fork_max_per_min = _parse_int("CGX_FORK_MAX_PER_MIN", env.get("CGX_FORK_MAX_PER_MIN", "6"))
+        fork_thinking_guard = _parse_bool(
+            "CGX_FORK_THINKING_GUARD", env.get("CGX_FORK_THINKING_GUARD", "true")
+        )
 
         return cls(
             host=host,
@@ -226,6 +230,7 @@ class Config:
             drain_timeout_s=drain_timeout_s,
             fork_max_tokens=fork_max_tokens,
             fork_max_per_min=fork_max_per_min,
+            fork_thinking_guard=fork_thinking_guard,
         )
 
     def is_local_host(self) -> bool:

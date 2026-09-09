@@ -77,6 +77,31 @@ def _snapshot(session_id: str = "sess-1", total_input: int = 100) -> Snapshot:
     )
 
 
+def _thinking_snapshot(model: str, session_id: str = "sess-1") -> Snapshot:
+    """A snapshot whose captured body carries an assistant thinking block."""
+    return Snapshot(
+        session_id=session_id,
+        stream_key="stream-a",
+        model=model,
+        headers={"authorization": "Bearer old", "content-type": "application/json"},
+        body=json.dumps(
+            {
+                "model": model,
+                "max_tokens": 4096,
+                "messages": [
+                    {"role": "user", "content": "hi"},
+                    {
+                        "role": "assistant",
+                        "content": [{"type": "thinking", "thinking": "hmm", "signature": "s"}],
+                    },
+                ],
+            }
+        ).encode(),
+        captured_at=1000.0,
+        usage=Usage(input_tokens=100),
+    )
+
+
 def _config(tmp_path: Path, **overrides: object) -> Config:
     fields: dict[str, object] = {
         "host": "127.0.0.1",
@@ -95,6 +120,7 @@ def _config(tmp_path: Path, **overrides: object) -> Config:
         "drain_timeout_s": 600,
         "fork_max_tokens": 512,
         "fork_max_per_min": 6,
+        "fork_thinking_guard": True,
     }
     fields.update(overrides)
     return Config(**fields)  # type: ignore[arg-type]
@@ -310,6 +336,80 @@ async def test_fork_once_returns_the_parsed_verdict() -> None:
     assert result.verdict == "ok"
     assert result.reason == "fine"
     assert upstream.calls[0][2]["authorization"] == "Bearer new"
+
+
+# -- thinking guard -----------------------------------------------------------
+
+
+async def test_fork_once_proceeds_when_body_has_no_thinking_blocks() -> None:
+    # _snapshot()'s body has no thinking block; the model ("claude-x") is
+    # unrecognisable, which would refuse if thinking were present, but there
+    # is nothing for it to strip so the guard must never fire.
+    upstream = ScriptedUpstream([_verdict_response({"verdict": "ok", "reason": "fine"})])
+    result = await fork_once(
+        upstream, "https://api.anthropic.com", _snapshot(), None, "review", None, 100
+    )
+    assert result.reason == "fine"
+    assert len(upstream.calls) == 1
+
+
+@pytest.mark.parametrize(
+    "model",
+    ["claude-haiku-4-5-20251001", "claude-opus-4-1-20250805"],
+)
+async def test_fork_once_refuses_thinking_unsafe_model(model: str) -> None:
+    upstream = ScriptedUpstream([])
+    result = await fork_once(
+        upstream, "https://api.anthropic.com", _thinking_snapshot(model), None, "review", None, 100
+    )
+    assert result.verdict == "ok"
+    assert result.reason == "thinking_unsafe_model"
+    assert upstream.calls == []
+
+
+@pytest.mark.parametrize(
+    "model",
+    ["claude-opus-4-5-20251101", "claude-sonnet-4-6-20251101"],
+)
+async def test_fork_once_proceeds_for_thinking_safe_model(model: str) -> None:
+    upstream = ScriptedUpstream([_verdict_response({"verdict": "ok", "reason": "fine"})])
+    result = await fork_once(
+        upstream, "https://api.anthropic.com", _thinking_snapshot(model), None, "review", None, 100
+    )
+    assert result.reason == "fine"
+    assert len(upstream.calls) == 1
+
+
+async def test_fork_once_refuses_unrecognisable_model_as_unknown() -> None:
+    upstream = ScriptedUpstream([])
+    result = await fork_once(
+        upstream,
+        "https://api.anthropic.com",
+        _thinking_snapshot("claude-mythos-1-0"),
+        None,
+        "review",
+        None,
+        100,
+    )
+    assert result.verdict == "ok"
+    assert result.reason == "thinking_model_unknown"
+    assert upstream.calls == []
+
+
+async def test_fork_once_thinking_guard_off_proceeds_for_unsafe_model() -> None:
+    upstream = ScriptedUpstream([_verdict_response({"verdict": "ok", "reason": "fine"})])
+    result = await fork_once(
+        upstream,
+        "https://api.anthropic.com",
+        _thinking_snapshot("claude-haiku-4-5-20251001"),
+        None,
+        "review",
+        None,
+        100,
+        False,
+    )
+    assert result.reason == "fine"
+    assert len(upstream.calls) == 1
 
 
 # -- Scheduler.fork_now --------------------------------------------------------

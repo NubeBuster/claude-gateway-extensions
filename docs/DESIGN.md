@@ -205,6 +205,22 @@ review" roadmap line; no part of it ships in 1.0.
   the captured `thinking` block is replayed untouched like every other
   prefix-affecting field; the cap still bounds only the reviewer's
   visible answer, the budget is headroom the API demands on top of it.
+- **A fork whose captured body carries thinking blocks is refused ahead
+  of the request when the target model is not known to preserve them**
+  (`CGX_FORK_THINKING_GUARD`, default on). On some models the API strips
+  signed thinking blocks when a non-tool-result user turn is appended,
+  invalidating the message cache and rewriting the whole conversation as
+  `cache_creation` -- the single most expensive thing this feature can
+  do, and otherwise only visible after the fact via `paid_write`. The
+  minimum version known (measured) to preserve them per family is Opus
+  4.5, Sonnet 4.6, Fable 5.1; no Haiku model preserves them at any
+  version. A model below its family's minimum, in a family with no
+  entry, or unrecognised entirely refuses with the existing fail-open
+  shape (reason `thinking_unsafe_model` or `thinking_model_unknown`) --
+  unknown must never resolve as safe. The guard is silent when the body
+  carries no thinking blocks: there is then nothing for an invalidating
+  model to strip. The version table is a record of measurement, not a
+  guess; lowering an entry needs a new measurement, not a tidy-up.
 - **The verdict is strict JSON: `{"verdict": "ok" | "intervene",
   "reason": str, "mutation": object | null}`.** A fixed contract is what
   lets one hook CLI serve every template without each one inventing its

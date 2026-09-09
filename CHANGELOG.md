@@ -24,6 +24,14 @@
   `tests/test_cli_dispatch.py` tests exercised `cgx service` (Linux-only
   by design) without the `skipif(sys.platform == "win32")` marker every
   other `service` test in the file already carries.
+- Shadow review fork: a fork whose captured body carries thinking blocks
+  now refuses ahead of the request, with reason `thinking_unsafe_model` or
+  `thinking_model_unknown`, when the target model is not known to preserve
+  them across the appended turn -- some models strip signed thinking
+  blocks on a non-tool-result user turn, which invalidates the message
+  cache and pays a full `cache_creation` write of the whole conversation.
+  New `CGX_FORK_THINKING_GUARD` (default `true`) opts a session out for a
+  user who has measured their own model.
 - Makefile: `check`/`fix`/`test`/`lint`/`types` now fail loudly with a
   one-line error when `.venv` is missing instead of silently falling back
   to a bare `python`/`ruff`/`pyright`/`pytest` from `PATH`. New `venv`

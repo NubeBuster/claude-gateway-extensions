@@ -214,7 +214,14 @@ class Scheduler:
         credential = state.last_credential if state is not None else None
         cap = max_tokens if max_tokens is not None else self._config.fork_max_tokens
         return await fork_once(
-            self._upstream, self._config.upstream, snapshot, credential, prompt, payload, cap
+            self._upstream,
+            self._config.upstream,
+            snapshot,
+            credential,
+            prompt,
+            payload,
+            cap,
+            self._config.fork_thinking_guard,
         )
 
     def _fork_rate_limited(self, session_id: str) -> bool:
