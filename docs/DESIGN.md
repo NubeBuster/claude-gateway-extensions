@@ -180,10 +180,20 @@ review" roadmap line; no part of it ships in 1.0.
   stream worth keeping warm is the stream worth reviewing — the main
   conversation — and a second selection rule would silently drift from
   the first.
-- **The appended turn is one user message: the rendered prompt, then the
-  hook payload as a fenced JSON block.** Keeping the data verbatim and
-  clearly delimited means a template author writes instructions, not an
-  escaping scheme.
+- **The appended turn is one message, `user` unless the captured body's
+  last message is `system`: the rendered prompt, then the hook payload as
+  a fenced JSON block.** Keeping the data verbatim and clearly delimited
+  means a template author writes instructions, not an escaping scheme.
+- **A trailing `system` run gets a `system` append, never a `user` one
+  ahead of it.** The API requires an inline `system` message to precede
+  an assistant turn or end the array, so a `user` turn appended behind
+  one is a hard 400; Claude Code's own trailing system runs already hold
+  more than one consecutive `system` message, so extending the run by
+  one more is the same shape, not a new one. The appended message is
+  identical in both branches and never carries a `cache_control` of its
+  own -- it always lands after every breakpoint the captured body has,
+  so a marker there buys nothing, and nothing before it changes either
+  way.
 - **The fork body preserves the cached prefix: `tools` and `tool_choice`
   are kept by value, never stripped.** Anthropic hashes the cache prefix
   in the fixed order `tools`, then `system`, then `messages`; dropping

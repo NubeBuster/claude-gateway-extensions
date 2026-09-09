@@ -32,6 +32,12 @@
   cache and pays a full `cache_creation` write of the whole conversation.
   New `CGX_FORK_THINKING_GUARD` (default `true`) opts a session out for a
   user who has measured their own model.
+- Shadow review fork: the appended review turn is now `system`, not
+  `user`, when the captured body's last message is itself `system` --
+  the API requires an inline `system` message to precede an assistant
+  turn or end the array, so a `user` turn appended behind Claude Code's
+  own trailing system runs was a hard 400 that `parse_verdict`
+  fail-opened into a silent `ok`.
 - Makefile: `check`/`fix`/`test`/`lint`/`types` now fail loudly with a
   one-line error when `.venv` is missing instead of silently falling back
   to a bare `python`/`ruff`/`pyright`/`pytest` from `PATH`. New `venv`

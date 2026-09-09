@@ -72,15 +72,22 @@ def build_fork_body(body: bytes, prompt: str, payload: object, max_tokens: int) 
     ``tools`` and ``tool_choice`` are preserved by value, not dropped:
     Anthropic hashes the cache prefix over ``tools``, then ``system``, then
     ``messages``, so removing either key invalidates the whole prefix and
-    turns every fork into a full ``cache_creation`` write. One user message
-    is appended: ``prompt`` followed by ``payload`` pretty-printed as a
-    fenced JSON block. A twin must still never act on the parent's behalf,
-    so that guarantee now comes from the prompt instructing the reviewer
-    never to call a tool, plus :func:`parse_verdict` treating a ``tool_use``
-    reply as fail-open. Everything else, including every nested
-    ``cache_control`` block, is preserved by value exactly as
-    :func:`~.bump.build_bump_body` preserves it, so the fork hits the same
-    cached prefix.
+    turns every fork into a full ``cache_creation`` write. One message is
+    appended: ``prompt`` followed by ``payload`` pretty-printed as a fenced
+    JSON block. Its role is ``user``, unless the captured body's last
+    message is itself ``system`` -- the API requires an inline ``system``
+    message to precede an assistant turn or end the array, so a ``user``
+    turn appended behind one is a hard 400; extending the run with another
+    ``system`` message satisfies the same rule Claude Code's own trailing
+    system runs already do. The appended message never carries a
+    ``cache_control`` of its own: it always lands after every breakpoint
+    the captured body already has, so a marker there buys nothing. A twin
+    must still never act on the parent's behalf, so that guarantee now
+    comes from the prompt instructing the reviewer never to call a tool,
+    plus :func:`parse_verdict` treating a ``tool_use`` reply as fail-open.
+    Everything else, including every nested ``cache_control`` block, is
+    preserved by value exactly as :func:`~.bump.build_bump_body` preserves
+    it, so the fork hits the same cached prefix.
     """
     data = json.loads(body)
     budget = _thinking_budget(data)
@@ -90,7 +97,9 @@ def build_fork_body(body: bytes, prompt: str, payload: object, max_tokens: int) 
     payload_text = json.dumps(payload, indent=2, ensure_ascii=False)
     content = f"{prompt}\n\n```json\n{payload_text}\n```"
     messages = data.setdefault("messages", [])
-    messages.append({"role": "user", "content": content})
+    last = messages[-1] if messages else None
+    role = "system" if isinstance(last, dict) and last.get("role") == "system" else "user"
+    messages.append({"role": role, "content": content})
     return json.dumps(data, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
 
 

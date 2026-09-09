@@ -178,6 +178,62 @@ def test_build_fork_body_appends_exactly_one_message_when_messages_absent() -> N
     assert data["messages"][0]["role"] == "user"
 
 
+def test_build_fork_body_appends_user_after_user_message() -> None:
+    original = {
+        "model": "m",
+        "max_tokens": 10,
+        "messages": [{"role": "user", "content": "hi"}],
+    }
+    body = json.dumps(original).encode()
+    data = json.loads(build_fork_body(body, "review", {"a": 1}, 100))
+    assert len(data["messages"]) == 2
+    assert data["messages"][0] == original["messages"][0]
+    appended = data["messages"][1]
+    assert appended["role"] == "user"
+    assert "cache_control" not in appended
+
+
+def test_build_fork_body_appends_user_after_assistant_message() -> None:
+    original = {
+        "model": "m",
+        "max_tokens": 10,
+        "messages": [
+            {"role": "user", "content": "hi"},
+            {"role": "assistant", "content": "hello"},
+        ],
+    }
+    body = json.dumps(original).encode()
+    data = json.loads(build_fork_body(body, "review", {"a": 1}, 100))
+    assert len(data["messages"]) == 3
+    assert data["messages"][:2] == original["messages"]
+    appended = data["messages"][2]
+    assert appended["role"] == "user"
+    assert "cache_control" not in appended
+
+
+def test_build_fork_body_appends_system_after_trailing_system_run() -> None:
+    original = {
+        "model": "m",
+        "max_tokens": 10,
+        "messages": [
+            {"role": "user", "content": "hi"},
+            {"role": "assistant", "content": "hello"},
+            {"role": "system", "content": "reminder one"},
+            {"role": "system", "content": "reminder two"},
+        ],
+    }
+    body = json.dumps(original).encode()
+    data = json.loads(build_fork_body(body, "review", {"a": 1}, 100))
+    assert len(data["messages"]) == 5
+    # Every preceding message is byte-identical -- nothing before the
+    # appended message changes.
+    assert data["messages"][:4] == original["messages"]
+    appended = data["messages"][4]
+    assert appended["role"] == "system"
+    assert "cache_control" not in appended
+    assert appended["content"].startswith("review\n\n```json\n")
+
+
 @pytest.mark.invariant(decision="the fork body preserves the cached prefix")
 def test_build_fork_body_preserves_tools_and_tool_choice_when_present() -> None:
     body = json.dumps(
