@@ -467,3 +467,215 @@ def test_configure_writes_no_env_key_beyond_the_documented_two(tmp_path: Path) -
 
     env = json.loads(path.read_text())["env"]
     assert set(env) == {"ANTHROPIC_BASE_URL", "CGX_URL"}
+
+
+# --- --fork-review NAME[:PREFIX]: wiring fork-review hooks into settings.json
+
+
+def test_parse_fork_review_spec_without_prefix() -> None:
+    spec = install.parse_fork_review_spec("permission-classifier")
+    assert spec == install.ForkReviewSpec(name="permission-classifier", prefix=None)
+
+
+def test_parse_fork_review_spec_with_prefix() -> None:
+    spec = install.parse_fork_review_spec("btw:/btw")
+    assert spec == install.ForkReviewSpec(name="btw", prefix="/btw")
+
+
+def test_fork_review_command_includes_quoted_prefix() -> None:
+    spec = install.ForkReviewSpec(name="btw", prefix="/btw")
+    assert install.fork_review_command(spec) == "cgx fork-review --template btw --prefix /btw"
+
+
+def test_fork_review_command_quotes_prefix_with_spaces() -> None:
+    spec = install.ForkReviewSpec(name="btw", prefix="/btw please")
+    command = install.fork_review_command(spec)
+    assert command == "cgx fork-review --template btw --prefix '/btw please'"
+
+
+def test_no_fork_review_flag_writes_todays_settings_exactly(tmp_path: Path) -> None:
+    """No ``--fork-review`` means the hook set is exactly what it is today."""
+    environ = {"HOME": str(tmp_path)}
+    install.install(
+        scope="user", url=URL, force=False, dry_run=False, environ=environ, cwd=tmp_path
+    )
+    path = install.settings_path("user", environ, tmp_path)
+    data = json.loads(path.read_text())
+    assert set(data["hooks"]) == {"UserPromptSubmit"}
+    assert len(data["hooks"]["UserPromptSubmit"]) == 1
+
+
+def test_fork_review_userpromptsubmit_template_adds_entry_with_prefix(tmp_path: Path) -> None:
+    environ = {"HOME": str(tmp_path)}
+    spec = install.ForkReviewSpec(name="btw", prefix="/btw")
+    install.install(
+        scope="user",
+        url=URL,
+        force=False,
+        dry_run=False,
+        environ=environ,
+        cwd=tmp_path,
+        fork_reviews=[spec],
+    )
+    path = install.settings_path("user", environ, tmp_path)
+    data = json.loads(path.read_text())
+    entries = data["hooks"]["UserPromptSubmit"]
+    assert len(entries) == 2
+    fork_entry = next(e for e in entries if e["hooks"][0]["command"] != install.HOOK_COMMAND)
+    assert fork_entry["hooks"][0]["command"] == "cgx fork-review --template btw --prefix /btw"
+    assert fork_entry["hooks"][0]["timeout"] == 5
+    assert "matcher" not in fork_entry
+
+
+def test_fork_review_pretooluse_template_adds_entry_with_matcher(tmp_path: Path) -> None:
+    environ = {"HOME": str(tmp_path)}
+    spec = install.ForkReviewSpec(name="permission-classifier", prefix=None)
+    install.install(
+        scope="user",
+        url=URL,
+        force=False,
+        dry_run=False,
+        environ=environ,
+        cwd=tmp_path,
+        fork_reviews=[spec],
+    )
+    path = install.settings_path("user", environ, tmp_path)
+    data = json.loads(path.read_text())
+    entries = data["hooks"]["PreToolUse"]
+    assert len(entries) == 1
+    assert entries[0]["matcher"] == "Bash"
+    assert entries[0]["hooks"][0]["command"] == "cgx fork-review --template permission-classifier"
+
+
+def test_two_fork_review_flags_add_two_entries(tmp_path: Path) -> None:
+    environ = {"HOME": str(tmp_path)}
+    specs = [
+        install.ForkReviewSpec(name="btw", prefix="/btw"),
+        install.ForkReviewSpec(name="permission-classifier", prefix=None),
+    ]
+    install.install(
+        scope="user",
+        url=URL,
+        force=False,
+        dry_run=False,
+        environ=environ,
+        cwd=tmp_path,
+        fork_reviews=specs,
+    )
+    path = install.settings_path("user", environ, tmp_path)
+    data = json.loads(path.read_text())
+    assert set(data["hooks"]) == {"UserPromptSubmit", "PreToolUse"}
+    assert len(data["hooks"]["UserPromptSubmit"]) == 2
+    assert len(data["hooks"]["PreToolUse"]) == 1
+
+
+def test_fork_review_repeat_run_is_idempotent(tmp_path: Path) -> None:
+    environ = {"HOME": str(tmp_path)}
+    specs = [install.ForkReviewSpec(name="btw", prefix="/btw")]
+    for _ in range(2):
+        install.install(
+            scope="user",
+            url=URL,
+            force=False,
+            dry_run=False,
+            environ=environ,
+            cwd=tmp_path,
+            fork_reviews=specs,
+        )
+    path = install.settings_path("user", environ, tmp_path)
+    data = json.loads(path.read_text())
+    assert len(data["hooks"]["UserPromptSubmit"]) == 2
+
+
+def test_unconfigure_fork_review_removes_entry_leaves_handwritten_entry(tmp_path: Path) -> None:
+    environ = {"HOME": str(tmp_path)}
+    spec = install.ForkReviewSpec(name="btw", prefix="/btw")
+    install.install(
+        scope="user",
+        url=URL,
+        force=False,
+        dry_run=False,
+        environ=environ,
+        cwd=tmp_path,
+        fork_reviews=[spec],
+    )
+    path = install.settings_path("user", environ, tmp_path)
+    data = json.loads(path.read_text())
+    # A hand-written entry at the same event, never added by this installer.
+    data["hooks"]["UserPromptSubmit"].append(
+        {"hooks": [{"type": "command", "command": "my-own-hook"}]}
+    )
+    path.write_text(json.dumps(data, indent=2) + "\n")
+
+    install.uninstall(scope="user", url=URL, environ=environ, cwd=tmp_path, fork_reviews=[spec])
+    data = json.loads(path.read_text())
+    commands = {e["hooks"][0]["command"] for e in data["hooks"]["UserPromptSubmit"]}
+    assert commands == {"my-own-hook"}
+
+
+def test_fork_review_template_without_event_raises_install_error(tmp_path: Path) -> None:
+    environ = {"HOME": str(tmp_path)}
+    template_dir = tmp_path / "templates"
+    template_dir.mkdir()
+    (template_dir / "no-event.txt").write_text("intervene: deny\n\nreview\n", encoding="utf-8")
+    environ["CGX_TEMPLATE_DIR"] = str(template_dir)
+    spec = install.ForkReviewSpec(name="no-event", prefix=None)
+
+    with pytest.raises(install.InstallError, match="no-event"):
+        install.install(
+            scope="user",
+            url=URL,
+            force=False,
+            dry_run=False,
+            environ=environ,
+            cwd=tmp_path,
+            fork_reviews=[spec],
+        )
+    path = install.settings_path("user", environ, tmp_path)
+    assert not path.exists()
+
+
+def test_fork_review_unknown_template_raises_install_error(tmp_path: Path) -> None:
+    environ = {"HOME": str(tmp_path)}
+    spec = install.ForkReviewSpec(name="does-not-exist-at-all", prefix=None)
+    with pytest.raises(install.InstallError, match="does-not-exist-at-all"):
+        install.install(
+            scope="user",
+            url=URL,
+            force=False,
+            dry_run=False,
+            environ=environ,
+            cwd=tmp_path,
+            fork_reviews=[spec],
+        )
+
+
+def test_plan_install_copies_packaged_template_into_user_dir(tmp_path: Path) -> None:
+    environ = {"HOME": str(tmp_path)}
+    spec = install.ForkReviewSpec(name="btw", prefix="/btw")
+    user_template_path = tmp_path / ".config" / "cgx" / "templates" / "btw.txt"
+    assert not user_template_path.exists()
+
+    changes = install.plan_install(
+        scope="user", url=URL, force=False, environ=environ, cwd=tmp_path, fork_reviews=[spec]
+    )
+    template_change = next(c for c in changes if c.path == user_template_path)
+    assert template_change.old_content is None
+    assert "intervene:" in (template_change.new_content or "")
+
+    for change in changes:
+        change.apply()
+    assert user_template_path.is_file()
+
+
+def test_plan_install_does_not_overwrite_existing_user_template(tmp_path: Path) -> None:
+    environ = {"HOME": str(tmp_path)}
+    user_template_path = tmp_path / ".config" / "cgx" / "templates" / "btw.txt"
+    user_template_path.parent.mkdir(parents=True)
+    user_template_path.write_text("intervene: ask\nevent: UserPromptSubmit\n\ncustom\n")
+
+    spec = install.ForkReviewSpec(name="btw", prefix="/btw")
+    changes = install.plan_install(
+        scope="user", url=URL, force=False, environ=environ, cwd=tmp_path, fork_reviews=[spec]
+    )
+    assert all(c.path != user_template_path for c in changes)

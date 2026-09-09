@@ -68,7 +68,7 @@ _DECISION_BLOCK_EVENTS = {"UserPromptSubmit", "PostToolUse"}
 _MAPPABLE_EVENTS = {"PreToolUse", *_DECISION_BLOCK_EVENTS}
 
 
-class _TemplateError(Exception):
+class TemplateError(Exception):
     """Raised when a named template cannot be found or read."""
 
 
@@ -100,7 +100,7 @@ def _template_dir(environ: Mapping[str, str]) -> Path:
 def _load_template(name: str, environ: Mapping[str, str]) -> str:
     """Return the named template's raw text: the user directory first, then packaged examples.
 
-    Raises :class:`_TemplateError` if neither location has it or the user
+    Raises :class:`TemplateError` if neither location has it or the user
     copy cannot be read.
     """
     user_path = _template_dir(environ) / f"{name}.txt"
@@ -108,14 +108,51 @@ def _load_template(name: str, environ: Mapping[str, str]) -> str:
         try:
             return user_path.read_text(encoding="utf-8")
         except OSError as exc:
-            raise _TemplateError(f"cannot read template {name!r} ({exc})") from exc
+            raise TemplateError(f"cannot read template {name!r} ({exc})") from exc
     packaged = resources.files("claude_gateway_extensions").joinpath("templates", f"{name}.txt")
     try:
         if packaged.is_file():
             return packaged.read_text(encoding="utf-8")
     except OSError as exc:
-        raise _TemplateError(f"cannot read packaged template {name!r} ({exc})") from exc
-    raise _TemplateError(f"template not found: {name!r}")
+        raise TemplateError(f"cannot read packaged template {name!r} ({exc})") from exc
+    raise TemplateError(f"template not found: {name!r}")
+
+
+def packaged_template_text(name: str) -> str:
+    """Return the packaged example template's raw text, ignoring any user override.
+
+    Raises :class:`TemplateError` if no packaged template named ``name``
+    exists. Used by ``cgx configure --fork-review`` to seed the user's
+    template directory with an editable copy -- never to decide what to load
+    at review time, which stays :func:`_load_template`'s job.
+    """
+    packaged = resources.files("claude_gateway_extensions").joinpath("templates", f"{name}.txt")
+    try:
+        if packaged.is_file():
+            return packaged.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise TemplateError(f"cannot read packaged template {name!r} ({exc})") from exc
+    raise TemplateError(f"packaged template not found: {name!r}")
+
+
+def user_template_path(name: str, environ: Mapping[str, str]) -> Path:
+    """Return where template ``name`` would live in the user's template directory."""
+    return _template_dir(environ) / f"{name}.txt"
+
+
+def load_template_declaration(
+    name: str, environ: Mapping[str, str]
+) -> tuple[str | None, str | None]:
+    """Return the ``(event, matcher)`` template ``name`` declares in its front matter.
+
+    Resolves the same way :func:`run_fork_review` does (user directory
+    first, then the packaged copy). Raises :class:`TemplateError` if the
+    template cannot be found or read -- ``cgx configure --fork-review``
+    turns that into an ``InstallError`` naming the template.
+    """
+    text = _load_template(name, environ)
+    _intervene, event, matcher, _body = _parse_template(text)
+    return event, matcher
 
 
 def _parse_template(text: str) -> tuple[str, str | None, str | None, str]:
@@ -308,7 +345,7 @@ def run_fork_review(
 
     try:
         template_text = _load_template(template, environ)
-    except _TemplateError as exc:
+    except TemplateError as exc:
         return _skip(str(exc))
 
     intervene_mode, declared_event, _matcher, body = _parse_template(template_text)
@@ -360,4 +397,10 @@ def run_fork_review(
     return 0
 
 
-__all__ = ["run_fork_review"]
+__all__ = [
+    "TemplateError",
+    "load_template_declaration",
+    "packaged_template_text",
+    "run_fork_review",
+    "user_template_path",
+]

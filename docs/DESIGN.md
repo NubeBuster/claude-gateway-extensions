@@ -383,3 +383,25 @@ review" roadmap line; no part of it ships in 1.0.
   packaged `rename` template (`intervene: deny`, so the prompt itself is
   always swallowed) pairs with `cgx fork-review --template rename --prefix
   /rename --apply '<user command>'` as a `UserPromptSubmit` hook.
+- **`cgx configure --fork-review NAME[:PREFIX]` wires that pairing into
+  `settings.json` itself, repeatable, off unless given.** Each value
+  resolves the template the same way `cli/fork_review.py::_load_template`
+  does (user directory, then the packaged copy), reads its declared
+  `event`/`matcher`, and merges one `hooks.<event>` entry running `cgx
+  fork-review --template NAME` (plus `--prefix PREFIX` when given) --
+  `merge_hook`/`remove_hook`/`hook_entry_has_command` take the event (and
+  an optional `matcher`, set on the entry for `PreToolUse`/`PostToolUse`)
+  instead of hard-coding `UserPromptSubmit`, so the same idempotent
+  "already present, do nothing" merge and the same exact-command-string
+  removal marker now serve every event, not just the one this installer
+  has always written. A template with no declared `event` is an
+  `InstallError` naming it, never a guess -- `cgx configure` must know
+  which hook to attach to. Configure also copies the packaged template
+  into the user's template directory when not already there (a
+  `PlannedChange`, diffed and confirmed like every other write), since the
+  point of the feature is a prompt the user is expected to edit; it is
+  never overwritten once present, so an edit survives a later `configure`
+  run. `cgx unconfigure --fork-review NAME[:PREFIX]` reverses exactly the
+  entry the matching `configure` call added and leaves everything else
+  (including a hand-written entry at the same event) untouched; it never
+  removes the copied template file, since the user may have edited it.

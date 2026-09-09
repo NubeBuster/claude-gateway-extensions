@@ -312,6 +312,7 @@ def _cmd_configure(args: argparse.Namespace, config: Config, ctx: _Context) -> i
         return EXIT_USAGE
     installed_port = service.installed_port(ctx.environ)
     url = install.resolve_install_url(args.port, ctx.environ, installed_port)
+    fork_reviews = [install.parse_fork_review_spec(v) for v in (args.fork_review or [])]
     try:
         changes = install.plan_install(
             scope=args.scope,
@@ -319,6 +320,7 @@ def _cmd_configure(args: argparse.Namespace, config: Config, ctx: _Context) -> i
             force=args.force,
             environ=ctx.environ,
             cwd=ctx.cwd,
+            fork_reviews=fork_reviews,
         )
     except install.InstallError as exc:
         ctx.stderr.write(f"{exc}\n")
@@ -340,12 +342,14 @@ def _cmd_unconfigure(args: argparse.Namespace, config: Config, ctx: _Context) ->
     if args.service:
         ctx.stderr.write(_SERVICE_FLAG_REMOVED.format(cmd="unconfigure", service_cmd="uninstall"))
         return EXIT_USAGE
+    fork_reviews = [install.parse_fork_review_spec(v) for v in (args.fork_review or [])]
     try:
         changes = install.plan_uninstall(
             scope=args.scope,
             url=config.url,
             environ=ctx.environ,
             cwd=ctx.cwd,
+            fork_reviews=fork_reviews,
         )
     except install.InstallError as exc:
         ctx.stderr.write(f"{exc}\n")
@@ -594,6 +598,19 @@ def _build_parser() -> argparse.ArgumentParser:
         "(default: CGX_PORT/CGX_URL, then the installed service's port, then 8787)",
     )
     configure_parser.add_argument("--service", action="store_true", help=argparse.SUPPRESS)
+    configure_parser.add_argument(
+        "--fork-review",
+        action="append",
+        dest="fork_review",
+        metavar="NAME[:PREFIX]",
+        default=None,
+        help=(
+            "wire a `cgx fork-review --template NAME` hook, using the "
+            "template's own `event`/`matcher` front matter to place it; "
+            "repeatable. PREFIX restricts a UserPromptSubmit template to "
+            "prompts starting with it, e.g. `btw:/btw`"
+        ),
+    )
 
     unconfigure_parser = subparsers.add_parser(
         "unconfigure", help="remove the Claude Code integration, confirming each file"
@@ -604,6 +621,14 @@ def _build_parser() -> argparse.ArgumentParser:
     unconfigure_parser.add_argument("--dry-run", action="store_true", dest="dry_run")
     unconfigure_parser.add_argument("--yes", "-y", action="store_true", help=_YES_HELP)
     unconfigure_parser.add_argument("--service", action="store_true", help=argparse.SUPPRESS)
+    unconfigure_parser.add_argument(
+        "--fork-review",
+        action="append",
+        dest="fork_review",
+        metavar="NAME[:PREFIX]",
+        default=None,
+        help="remove exactly the hook entry the matching `configure --fork-review` added",
+    )
 
     subparsers.add_parser("doctor", help="check the environment")
 

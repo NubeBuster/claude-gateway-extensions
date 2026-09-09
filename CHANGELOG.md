@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- `cgx configure`/`cgx unconfigure` gained a repeatable `--fork-review
+  NAME[:PREFIX]` flag (off unless given), wiring a `cgx fork-review
+  --template NAME` hook into `settings.json` using the named template's
+  own `event`/`matcher` front matter to place it, plus `--prefix PREFIX`
+  on a `UserPromptSubmit` template. `merge_hook`/`remove_hook`/
+  `hook_entry_has_command` now take the event (and an optional `matcher`)
+  instead of hard-coding `UserPromptSubmit`, so the existing idempotent
+  merge and exact-command-string removal now serve every event.
+  `configure` also copies the packaged template into the user's template
+  directory the first time, confirmed like every other write, and never
+  overwrites it again; `unconfigure` removes exactly the entry the
+  matching `configure` call added and leaves a hand-written entry at the
+  same event untouched. A template with no declared `event` is an
+  `InstallError` naming it.
 - Shadow review fork: a template's front matter can now declare `event`
   and `matcher`, the hook event and Claude Code hook matcher it was
   written for. A payload's `hook_event_name` disagreeing with a declared

@@ -14,10 +14,10 @@ everything under "Roadmap" is designed into that file before code is written.
   `cache_creation_input_tokens` via the shared classifier, not a status code.
 - The daemon listens on `127.0.0.1` by default; a non-local `CGX_HOST` is
   the user's explicit choice and logs a warning, it is never refused.
-- `cgx configure`/`unconfigure` write only `env.ANTHROPIC_BASE_URL`,
-  `env.CGX_URL` (non-default port only) and `hooks.UserPromptSubmit` in the
-  scoped settings file, plus the skill copy; `managed` is not a scope. Record
-  any further key in `docs/DESIGN.md` and the README Configuration tables.
+- `configure`/`unconfigure` write only `env.ANTHROPIC_BASE_URL`,
+  `env.CGX_URL` (non-default port only), `hooks.UserPromptSubmit`, one
+  `hooks.<event>` per `--fork-review NAME[:PREFIX]` (event and matcher from
+  the template), and the skill and template copies. `managed` is not a scope.
 - `configure`, `unconfigure` and `service install`/`uninstall` show a diff of
   every file they would write and apply it only on consent; `--yes` is the
   sole bypass, and a non-TTY stdin without it writes nothing.
