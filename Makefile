@@ -1,4 +1,4 @@
-.PHONY: check fix test lint types venv check-venv
+.PHONY: check fix test lint types venv check-venv live
 
 VENV_PY := .venv/bin/python
 BIN := $(if $(wildcard $(VENV_PY)),.venv/bin/,)
@@ -25,3 +25,10 @@ types: check-venv
 
 venv:
 	python3 -m venv .venv && .venv/bin/pip install -e '.[dev]'
+
+# Not part of `check`: this one drives a real Claude Code session through a
+# real daemon to the real API and spends money on whatever account that
+# session is signed in with. Needs tmux. Pass arguments through LIVE_ARGS,
+# e.g. `make live LIVE_ARGS="--model sonnet --budget-usd 0.50"`.
+live: check-venv
+	PYTHONPATH=tests $(BIN)python -m live $(LIVE_ARGS)
