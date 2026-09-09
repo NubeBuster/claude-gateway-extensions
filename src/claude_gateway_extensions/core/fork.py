@@ -315,6 +315,43 @@ def _extract_text(data: Mapping[str, object]) -> str | None:
     return "".join(parts)
 
 
+def _unparseable(
+    usage: Usage | None = None, model: str | None = None, stream_key: str | None = None
+) -> ForkVerdict:
+    """Log and return the fail-open verdict shared by every unparseable-reply path."""
+    logger.warning("fork verdict unparseable: reason=unparseable_verdict")
+    return _fail_open("unparseable_verdict", usage, model, stream_key)
+
+
+def _parse_verdict_payload(
+    text: str,
+) -> tuple[Literal["ok", "intervene"], str, dict[str, object] | None] | None:
+    """Return the reviewer's ``(verdict, reason, mutation)``, or ``None`` on any contract miss.
+
+    The contract: strict JSON, a top-level object, ``verdict`` one of
+    ``ok``/``intervene``, ``reason`` a string, and ``mutation`` either
+    absent/``None`` or an object. Any other shape is treated identically to
+    unparseable JSON -- the caller cannot trust a fork with any part of the
+    contract violated.
+    """
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    verdict = parsed.get("verdict")
+    reason = parsed.get("reason")
+    mutation = parsed.get("mutation")
+    if verdict not in ("ok", "intervene"):
+        return None
+    if not isinstance(reason, str):
+        return None
+    if mutation is not None and not isinstance(mutation, dict):
+        return None
+    return verdict, reason, mutation
+
+
 def parse_verdict(
     status: int, body: bytes, model: str | None = None, stream_key: str | None = None
 ) -> ForkVerdict:
@@ -337,14 +374,12 @@ def parse_verdict(
     try:
         data = json.loads(body)
     except (json.JSONDecodeError, UnicodeDecodeError):
-        logger.warning("fork verdict unparseable: reason=unparseable_verdict")
-        return _fail_open("unparseable_verdict", model=model, stream_key=stream_key)
+        return _unparseable(model=model, stream_key=stream_key)
 
     usage = _extract_usage(data)
 
     if not isinstance(data, dict):
-        logger.warning("fork verdict unparseable: reason=unparseable_verdict")
-        return _fail_open("unparseable_verdict", usage, model, stream_key)
+        return _unparseable(usage, model, stream_key)
 
     if _has_tool_use(data):
         logger.warning("fork verdict rejected: reason=tool_use_reply")
@@ -352,32 +387,12 @@ def parse_verdict(
 
     text = _extract_text(data)
     if text is None:
-        logger.warning("fork verdict unparseable: reason=unparseable_verdict")
-        return _fail_open("unparseable_verdict", usage, model, stream_key)
+        return _unparseable(usage, model, stream_key)
 
-    try:
-        parsed = json.loads(text)
-    except json.JSONDecodeError:
-        logger.warning("fork verdict unparseable: reason=unparseable_verdict")
-        return _fail_open("unparseable_verdict", usage, model, stream_key)
-
-    if not isinstance(parsed, dict):
-        logger.warning("fork verdict unparseable: reason=unparseable_verdict")
-        return _fail_open("unparseable_verdict", usage, model, stream_key)
-
-    verdict = parsed.get("verdict")
-    reason = parsed.get("reason")
-    mutation = parsed.get("mutation")
-
-    if verdict not in ("ok", "intervene"):
-        logger.warning("fork verdict unparseable: reason=unparseable_verdict")
-        return _fail_open("unparseable_verdict", usage, model, stream_key)
-    if not isinstance(reason, str):
-        logger.warning("fork verdict unparseable: reason=unparseable_verdict")
-        return _fail_open("unparseable_verdict", usage, model, stream_key)
-    if mutation is not None and not isinstance(mutation, dict):
-        logger.warning("fork verdict unparseable: reason=unparseable_verdict")
-        return _fail_open("unparseable_verdict", usage, model, stream_key)
+    parsed = _parse_verdict_payload(text)
+    if parsed is None:
+        return _unparseable(usage, model, stream_key)
+    verdict, reason, mutation = parsed
 
     paid_write = usage is not None and usage.cache_creation_input_tokens > 0
     return ForkVerdict(
