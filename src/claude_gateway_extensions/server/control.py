@@ -35,6 +35,10 @@ def _unknown_session() -> web.Response:
     return web.json_response({"error": "unknown_session"}, status=404)
 
 
+def _invalid_body() -> web.Response:
+    return web.json_response({"error": "invalid_body"}, status=400)
+
+
 async def health(request: web.Request) -> web.Response:
     """``GET /cgx/health``: liveness, version, upstream target and session count.
 
@@ -87,17 +91,17 @@ async def put_session(request: web.Request) -> web.Response:
 
     body = await _read_json_object(request)
     if body is None or "enabled" not in body or not isinstance(body["enabled"], bool):
-        return web.json_response({"error": "invalid_body"}, status=400)
+        return _invalid_body()
 
     interval_s = body.get("interval_s")
     if not _is_optional_positive_int(interval_s):
-        return web.json_response({"error": "invalid_body"}, status=400)
+        return _invalid_body()
     max_duration_s = body.get("max_duration_s")
     if not _is_optional_positive_int(max_duration_s):
-        return web.json_response({"error": "invalid_body"}, status=400)
+        return _invalid_body()
     until = body.get("until")
     if not _is_optional_number(until):
-        return web.json_response({"error": "invalid_body"}, status=400)
+        return _invalid_body()
 
     scheduler: Scheduler = request.app[SCHEDULER_KEY]
     scheduler.set_enabled(session_id, body["enabled"], interval_s, max_duration_s, until)
@@ -135,16 +139,16 @@ async def fork_session(request: web.Request) -> web.Response:
 
     body = await _read_json_object(request)
     if body is None:
-        return web.json_response({"error": "invalid_body"}, status=400)
+        return _invalid_body()
     prompt = body.get("prompt")
     if not isinstance(prompt, str):
-        return web.json_response({"error": "invalid_body"}, status=400)
+        return _invalid_body()
     max_tokens = body.get("max_tokens")
     if not _is_optional_positive_int(max_tokens):
-        return web.json_response({"error": "invalid_body"}, status=400)
+        return _invalid_body()
     model = body.get("model")
     if not _is_optional_nonempty_str(model):
-        return web.json_response({"error": "invalid_body"}, status=400)
+        return _invalid_body()
     payload = body.get("payload")
 
     scheduler: Scheduler = request.app[SCHEDULER_KEY]
