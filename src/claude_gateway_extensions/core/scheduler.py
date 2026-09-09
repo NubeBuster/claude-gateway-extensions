@@ -210,6 +210,10 @@ class Scheduler:
             return ForkVerdict(
                 verdict="ok", reason="rate_limited", mutation=None, usage=None, paid_write=False
             )
+        if self._snapshot_is_stale(snapshot):
+            return ForkVerdict(
+                verdict="ok", reason="snapshot_stale", mutation=None, usage=None, paid_write=False
+            )
         self._record_fork(session_id)
         credential = state.last_credential if state is not None else None
         cap = max_tokens if max_tokens is not None else self._config.fork_max_tokens
@@ -223,6 +227,18 @@ class Scheduler:
             cap,
             self._config.fork_thinking_guard,
         )
+
+    def _snapshot_is_stale(self, snapshot: Snapshot) -> bool:
+        """Return whether ``snapshot`` is older than the TTL its own body requested.
+
+        An unparseable body is treated as stale rather than fresh: a fork
+        must never spend money to replay a snapshot it cannot classify.
+        """
+        try:
+            ttl_s = CACHE_TTL_1H_S if wants_1h_ttl(snapshot.body) else CACHE_TTL_5M_S
+        except SnapshotError:
+            return True
+        return self._clock.now() - snapshot.captured_at > ttl_s
 
     def _fork_rate_limited(self, session_id: str) -> bool:
         """Return whether ``session_id`` has already made the max forks in the trailing 60s."""

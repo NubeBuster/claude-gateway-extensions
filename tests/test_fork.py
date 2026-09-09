@@ -521,6 +521,128 @@ async def test_fork_now_rate_limits_then_recovers_after_a_minute(tmp_path: Path)
     assert len(upstream.calls) == 3
 
 
+def _ttl_snapshot(session_id: str, ttl: str, captured_at: float) -> Snapshot:
+    """A snapshot whose body requests ``ttl`` (``"1h"`` or ``"5m"``) via cache_control."""
+    return Snapshot(
+        session_id=session_id,
+        stream_key="stream-a",
+        model="claude-x",
+        headers={"authorization": "Bearer old", "content-type": "application/json"},
+        body=json.dumps(
+            {
+                "model": "claude-x",
+                "max_tokens": 4096,
+                "system": [
+                    {
+                        "type": "text",
+                        "text": "sys",
+                        "cache_control": {"type": "ephemeral", "ttl": ttl},
+                    }
+                ],
+                "messages": [{"role": "user", "content": "hi"}],
+            }
+        ).encode(),
+        captured_at=captured_at,
+        usage=Usage(input_tokens=100),
+    )
+
+
+async def test_fork_now_forks_a_fresh_5m_snapshot(tmp_path: Path) -> None:
+    clock = FakeClock(start=1000.0)
+    store = MemoryStore(max_streams_per_session=8)
+    store.put_snapshot(_ttl_snapshot("sess-1", "5m", captured_at=1000.0))
+    store.put_state(
+        SessionState(session_id="sess-1", last_credential=("authorization", "Bearer a"))
+    )
+    upstream = ScriptedUpstream([_verdict_response({"verdict": "ok", "reason": "fine"})])
+    scheduler = Scheduler(_config(tmp_path), store, LargestPrefixSelector(), upstream, clock)
+
+    clock.advance(299.0)
+    result = await scheduler.fork_now("sess-1", "review", {}, None)
+
+    assert result.reason == "fine"
+    assert len(upstream.calls) == 1
+
+
+async def test_fork_now_refuses_a_stale_5m_snapshot(tmp_path: Path) -> None:
+    clock = FakeClock(start=1000.0)
+    store = MemoryStore(max_streams_per_session=8)
+    store.put_snapshot(_ttl_snapshot("sess-1", "5m", captured_at=1000.0))
+    store.put_state(
+        SessionState(session_id="sess-1", last_credential=("authorization", "Bearer a"))
+    )
+    upstream = ScriptedUpstream([])
+    scheduler = Scheduler(_config(tmp_path), store, LargestPrefixSelector(), upstream, clock)
+
+    clock.advance(301.0)
+    result = await scheduler.fork_now("sess-1", "review", {}, None)
+
+    assert result == ForkVerdict(
+        verdict="ok", reason="snapshot_stale", mutation=None, usage=None, paid_write=False
+    )
+    assert upstream.calls == []
+
+
+async def test_fork_now_forks_a_fresh_1h_snapshot(tmp_path: Path) -> None:
+    clock = FakeClock(start=1000.0)
+    store = MemoryStore(max_streams_per_session=8)
+    store.put_snapshot(_ttl_snapshot("sess-1", "1h", captured_at=1000.0))
+    store.put_state(
+        SessionState(session_id="sess-1", last_credential=("authorization", "Bearer a"))
+    )
+    upstream = ScriptedUpstream([_verdict_response({"verdict": "ok", "reason": "fine"})])
+    scheduler = Scheduler(_config(tmp_path), store, LargestPrefixSelector(), upstream, clock)
+
+    clock.advance(3599.0)
+    result = await scheduler.fork_now("sess-1", "review", {}, None)
+
+    assert result.reason == "fine"
+    assert len(upstream.calls) == 1
+
+
+async def test_fork_now_refuses_a_stale_1h_snapshot(tmp_path: Path) -> None:
+    clock = FakeClock(start=1000.0)
+    store = MemoryStore(max_streams_per_session=8)
+    store.put_snapshot(_ttl_snapshot("sess-1", "1h", captured_at=1000.0))
+    store.put_state(
+        SessionState(session_id="sess-1", last_credential=("authorization", "Bearer a"))
+    )
+    upstream = ScriptedUpstream([])
+    scheduler = Scheduler(_config(tmp_path), store, LargestPrefixSelector(), upstream, clock)
+
+    clock.advance(3601.0)
+    result = await scheduler.fork_now("sess-1", "review", {}, None)
+
+    assert result == ForkVerdict(
+        verdict="ok", reason="snapshot_stale", mutation=None, usage=None, paid_write=False
+    )
+    assert upstream.calls == []
+
+
+async def test_fork_now_refused_stale_leaves_rate_limit_window_untouched(tmp_path: Path) -> None:
+    clock = FakeClock(start=1000.0)
+    store = MemoryStore(max_streams_per_session=8)
+    store.put_snapshot(_ttl_snapshot("sess-1", "5m", captured_at=1000.0))
+    store.put_state(
+        SessionState(session_id="sess-1", last_credential=("authorization", "Bearer a"))
+    )
+    upstream = ScriptedUpstream([_verdict_response({"verdict": "ok", "reason": "fine"})])
+    scheduler = Scheduler(
+        _config(tmp_path, fork_max_per_min=1), store, LargestPrefixSelector(), upstream, clock
+    )
+
+    clock.advance(301.0)
+    stale = await scheduler.fork_now("sess-1", "review", {}, None)
+    assert stale.reason == "snapshot_stale"
+
+    # A refused-for-staleness fork must not have consumed the rate-limit
+    # budget: the one allowed fork per minute is still available.
+    store.put_snapshot(_ttl_snapshot("sess-1", "5m", captured_at=clock.now()))
+    fresh = await scheduler.fork_now("sess-1", "review", {}, None)
+    assert fresh.reason == "fine"
+    assert len(upstream.calls) == 1
+
+
 @pytest.mark.invariant(decision="A fork must not touch bump bookkeeping")
 async def test_fork_now_leaves_bump_bookkeeping_untouched(tmp_path: Path) -> None:
     clock = FakeClock(start=1000.0)

@@ -251,6 +251,18 @@ review" roadmap line; no part of it ships in 1.0.
 - **No snapshot is `ok` with reason `no_snapshot`, not an error.** A
   session whose first request has not landed yet cannot be reviewed, and
   a hook failure there would break a session that has done nothing wrong.
+- **A snapshot older than its own cache TTL is refused before any request,
+  `ok` with reason `snapshot_stale`, and does not count against
+  `CGX_FORK_MAX_PER_MIN`.** The TTL is read from the snapshot's own body
+  (`wants_1h_ttl` selects the 1h window, else 5m) rather than assumed,
+  since a captured request may have asked for either. Bumping needs no
+  such check because a bumped session is by definition kept warm; a fork
+  fires on a hook against whatever session happens to be there, including
+  one idle for hours with bumping off, so past the TTL the cached prefix
+  is already gone upstream and replaying it pays for the full
+  conversation as `cache_creation` before the verdict is even read. An
+  unparseable body is treated as stale, not fresh, so a fork never spends
+  money on a snapshot it cannot classify.
 - **`POST /cgx/sessions/{id}/fork`**, body `{prompt, hook_event, payload,
   max_tokens?}`, answering `200 {verdict, reason, mutation, usage,
   paid_write}` — including for the `ok` degradations above, since a

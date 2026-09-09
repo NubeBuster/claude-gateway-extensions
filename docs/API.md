@@ -225,6 +225,13 @@ branch of its own the way `POST .../bump`'s `409` requires one:
 - `rate_limited`: the session has already made `CGX_FORK_MAX_PER_MIN`
   forks in the trailing 60 seconds (`usage: null`, `paid_write: false`).
   No request reaches the upstream.
+- `snapshot_stale`: the selected snapshot is older than the TTL its own
+  body requested (`ttl: "1h"` selects the 1h window, otherwise 5m); past
+  that TTL the cached prefix is gone upstream and replaying it would pay
+  for a full cache write instead of a read (`usage: null`,
+  `paid_write: false`). No request reaches the upstream, and the refusal
+  does not count against `CGX_FORK_MAX_PER_MIN`. A snapshot whose body
+  cannot be parsed is treated as stale.
 - `fork_failed`: the fork request itself failed -- a network error or a
   non-200 status from the upstream.
 - `unparseable_verdict`: the upstream request succeeded but the reply was

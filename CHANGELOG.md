@@ -42,6 +42,14 @@
   one-line error when `.venv` is missing instead of silently falling back
   to a bare `python`/`ruff`/`pyright`/`pytest` from `PATH`. New `venv`
   target bootstraps it.
+- Shadow review fork: a fork now refuses a snapshot older than its own
+  cache TTL, reason `snapshot_stale`, before any request reaches the
+  upstream and without counting against `CGX_FORK_MAX_PER_MIN`. Past the
+  TTL the cached prefix is already gone upstream, so the previous
+  behaviour replayed the whole conversation as a paid `cache_creation`
+  write before the verdict was even read. The TTL is read from the
+  snapshot's own body (`wants_1h_ttl`); an unparseable body is treated as
+  stale.
 
 ## 1.0.0 - 2026-09-09
 
