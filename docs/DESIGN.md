@@ -4,9 +4,9 @@ This file records the decisions behind claude-gateway-extensions and why they
 were made. It is not a description of the code; the code, `README.md` and
 `docs/API.md` own that.
 
-## Scope of 0.1
+## Scope of 1.0
 
-0.1 does cache bumping only: capture the last `/v1/messages` request per
+1.0 does cache bumping only: capture the last `/v1/messages` request per
 Claude Code session, replay it with `max_tokens: 0` before the prompt cache
 TTL lapses, stop on the documented conditions. Everything under "Roadmap" is
 deliberately absent from this release, not ruled out for the project.
