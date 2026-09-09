@@ -473,22 +473,34 @@ numbers, deliberately outside `make check`.
   `GET /cgx/sessions` before the first turn and after it yields exactly one
   new id -- the session that just sent `x-claude-code-session-id` through
   the passthrough -- which is the same identity every control call uses.
-- **First-run interaction is removed by configuration, never by typing at
-  the dialog.** The scratch cwd is fresh, so Claude Code would show the
-  workspace trust dialog; the harness marks the path trusted in
-  `~/.claude.json` (`projects.<cwd>.hasTrustDialogAccepted`) before launch,
-  by re-reading the file, adding only that key and replacing it atomically,
-  and it removes the entry it created on teardown. Answering a dialog with
-  `send-keys` would encode one build's exact key order into the harness and
-  silently mis-answer the next one. Onboarding and theme are not seeded:
-  they are per-installation state a machine that can run this harness at
-  all already has.
+- **First-run interaction is waited out and asserted, never typed at and
+  never configured around.** Two candidate mechanisms were measured
+  against Claude Code 2.1.266 before choosing (2026-09-09): a `claude -p`
+  warm-up in the scratch cwd left no `projects.<cwd>` entry in
+  `~/.claude.json` at all, so it cannot persist trust for a following
+  interactive launch; and an interactive `--safe-mode` launch from a
+  never-registered scratch cwd -- empty, and again with a file in it --
+  showed no workspace trust dialog, reaching the input prompt directly.
+  So the harness seeds nothing: it waits for the input prompt and fails
+  with the captured pane if anything else is on screen when the timeout
+  expires. Writing `projects.<cwd>.hasTrustDialogAccepted` was rejected
+  even as a fallback: `~/.claude.json` is rewritten by every live Claude
+  Code process, so an add-only atomic replace still races one of the
+  user's own sessions, and the measurement says nothing needs it.
+  Answering a dialog with `send-keys` is rejected separately -- it would
+  encode one build's exact key order into the harness and silently
+  mis-answer the next one. If a future build does gate a fresh cwd, the
+  harness must fail loudly on it rather than grow either workaround.
 - **The subject is isolated the way every test subject here is**: an empty
   scratch cwd under `/tmp`, `--safe-mode`, `--name T-cgx-live-<tag>`,
   `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`, `ANTHROPIC_API_KEY` and
   `ANTHROPIC_AUTH_TOKEN` unset so the subject cannot reach a
   pay-as-you-go organisation, and `ANTHROPIC_BASE_URL` pointed at the
   harness's own daemon on an ephemeral port with its own `CGX_STATE_DIR`.
+  The subject's environment is built from an explicit allowlist rather
+  than inherited: measured on 2026-09-09, a subject launched with the
+  full environment of an agent session inherits that session's role and
+  answers as it, which is a contaminated subject, not an isolated one.
   Embedding these rules in the harness is deliberate: a user of this
   public repo gets the isolation for free instead of reconstructing it.
 - **Haiku is the default subject model; the fork assertions that need a
