@@ -7,14 +7,14 @@ check-venv:
 	@test -x "$(VENV_PY)" || { echo "no .venv: run \`python -m venv .venv && .venv/bin/pip install -e '.[dev]'\`" >&2; exit 1; }
 
 check: check-venv lint types
-	$(BIN)pytest -q
+	$(BIN)pytest
 
 fix: check-venv
 	$(BIN)ruff format src tests
 	$(BIN)ruff check --fix src tests
 
 test: check-venv
-	$(BIN)pytest -q
+	$(BIN)pytest
 
 lint: check-venv
 	$(BIN)ruff check src tests
