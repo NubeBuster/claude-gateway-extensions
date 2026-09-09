@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- Shadow review fork: a template's front matter can now declare
+  `require:`, a comma-separated, ANDed list of conditions on the hook
+  payload (`path` for "exists and is a non-empty string", `path=regex`
+  for "exists and matches"), evaluated before the template is rendered
+  or the daemon is called. A requirement that does not hold is silent
+  (no fork, no message); a malformed value is the usual fail-open skip
+  with a `systemMessage`. Without this, a template's only filter was the
+  settings `matcher` (a tool name), so a hook on a hot event like
+  `TaskUpdate` fired on every status flip and description edit, not just
+  the ones worth a review -- each one a full replay of the largest
+  prompt prefix on the machine, with `CGX_FORK_MAX_PER_MIN` dropping
+  whichever reviews landed after the noise rather than the noise itself.
+  The packaged `task-assignment` template now declares `require:
+  tool_input.owner`.
 - `cgx configure`/`cgx unconfigure` gained a repeatable `--fork-review
   NAME[:PREFIX]` flag (off unless given), wiring a `cgx fork-review
   --template NAME` hook into `settings.json` using the named template's

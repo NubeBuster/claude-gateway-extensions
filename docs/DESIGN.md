@@ -345,6 +345,28 @@ review" roadmap line; no part of it ships in 1.0.
   a fork is ever requested — previously a template wired to the wrong
   event evaporated silently, since `_map_verdict` already returned
   `None` for it after paying for the fork.
+- **A template may also declare `require:`, a comma-separated,
+  ANDed list of conditions on the hook payload evaluated before the
+  template is rendered or the daemon is called.** `path` means "this
+  field exists and is a non-empty string"; `path=regex` means "this
+  field exists and `re.search` matches it" (rendered as compact JSON
+  first when the value is not already a string, same as a non-string
+  `{placeholder}`). `matcher` alone can only see a tool name, so a hook
+  on a hot event like `TaskUpdate` would otherwise fire on every status
+  flip and description edit, not just the ones a template has anything
+  to say about — each one a full replay of the largest prompt prefix on
+  the machine, and `CGX_FORK_MAX_PER_MIN` does not help, since it drops
+  whichever reviews land after the noise rather than the noise itself.
+  A requirement that does not hold is the same "does not apply here"
+  class as a `--prefix` mismatch: silent, exit 0, no fork requested,
+  never a `systemMessage` — a guard that narrated every ordinary event
+  would fill the log with the non-event it exists to produce. A
+  malformed `require:` value (an invalid dotted path or an unparseable
+  regex) is a broken template, not a non-match, so it is the usual
+  fail-open skip with the visible `systemMessage` instead. The packaged
+  `task-assignment` template declares `require: tool_input.owner`, since
+  its `TaskCreate|TaskUpdate` matcher alone cannot express "an owner is
+  being set".
 - **Templates are plain text files in the user's config directory**
   (`CGX_TEMPLATE_DIR`, default `$XDG_CONFIG_HOME/cgx/templates`),
   `{placeholder}` substituted from the hook payload's top-level fields,

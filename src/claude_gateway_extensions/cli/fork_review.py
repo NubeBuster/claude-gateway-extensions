@@ -25,6 +25,15 @@ A template may also declare the ``event`` (and, informationally, the
 ``hook_event_name`` disagrees with a declared ``event`` is a configuration
 mistake -- the hook exits 0 with the same fail-open skip ``systemMessage``,
 naming both, rather than the review silently evaporating.
+
+A ``require:`` front-matter line gates a template on the hook payload
+itself -- e.g. ``require: tool_input.owner`` -- so a hot event (every
+``TaskUpdate``, not just ones that set an owner) does not burn the fork
+budget on payloads the template has nothing to say about. A requirement
+that does not hold is the same "does not apply here" class as a ``--prefix``
+mismatch: silent, no fork requested. A malformed ``require:`` value is a
+broken template, not a non-match, so it is the usual fail-open skip with a
+visible ``systemMessage`` instead.
 """
 
 from __future__ import annotations
@@ -44,7 +53,7 @@ from claude_gateway_extensions.config import Config, resolve_home
 #: inside the same hook invocation, so it gets the same budget.
 _APPLY_TIMEOUT_S = 5
 
-#: The template front matter's only recognised key, and its allowed values.
+#: The ``intervene:`` front-matter key's allowed values.
 _INTERVENE_VALUES = {"deny", "ask", "context"}
 
 #: Matches one front-matter line, e.g. ``intervene: ask``.
@@ -66,6 +75,9 @@ _DECISION_BLOCK_EVENTS = {"UserPromptSubmit", "PostToolUse"}
 #: Every event a template's ``event:`` front-matter line may declare --
 #: exactly the events :func:`_map_verdict` knows how to map.
 _MAPPABLE_EVENTS = {"PreToolUse", *_DECISION_BLOCK_EVENTS}
+
+#: Matches one dotted field path in a ``require:`` value, e.g. ``tool_input.owner``.
+_REQUIRE_PATH_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$")
 
 
 class TemplateError(Exception):
@@ -151,15 +163,15 @@ def load_template_declaration(
     turns that into an ``InstallError`` naming the template.
     """
     text = _load_template(name, environ)
-    _intervene, event, matcher, _body = _parse_template(text)
+    _intervene, event, matcher, _require, _body = _parse_template(text)
     return event, matcher
 
 
-def _parse_template(text: str) -> tuple[str, str | None, str | None, str]:
-    """Split ``text`` into its ``intervene`` mode, declared ``event``, ``matcher`` and body.
+def _parse_template(text: str) -> tuple[str, str | None, str | None, str | None, str]:
+    """Split ``text`` into ``intervene``, declared ``event``, ``matcher``, ``require`` and body.
 
     Optional ``key: value`` lines at the top, then a blank separator line,
-    then the body. Three keys are recognised:
+    then the body. Four keys are recognised:
 
     - ``intervene`` (``deny`` by default): an absent header, or a value
       outside ``deny``/``ask``/``context``, both fall back to ``deny``.
@@ -170,10 +182,16 @@ def _parse_template(text: str) -> tuple[str, str | None, str | None, str]:
     - ``matcher`` (``None`` by default): a free string, the Claude Code hook
       matcher (e.g. ``Bash``); never validated, since the set of valid tool
       names is not this module's to know.
+    - ``require`` (``None`` by default): the raw, still-unparsed value of a
+      comma-separated list of hook-payload requirements; see
+      :func:`_parse_requirements` for its shape. Kept raw here so a
+      malformed value can be reported once, at the point it is evaluated,
+      rather than silently swallowed at parse time like an unrecognised
+      ``intervene``/``event``.
 
     Any other key is ignored. A template with no front matter at all (no
     line matching the ``key: value`` shape) is used verbatim as the body,
-    with all three fields at their defaults.
+    with all four fields at their defaults.
     """
     lines = text.splitlines()
     front_matter: dict[str, str] = {}
@@ -194,7 +212,74 @@ def _parse_template(text: str) -> tuple[str, str | None, str | None, str]:
     if event not in _MAPPABLE_EVENTS:
         event = None
     matcher = front_matter.get("matcher") or None
-    return intervene, event, matcher, body
+    require = front_matter.get("require") or None
+    return intervene, event, matcher, require, body
+
+
+def _get_path(payload: Mapping[str, Any], path: str) -> Any:
+    """Return the value at dotted ``path`` in ``payload``, or ``None`` if any segment is absent.
+
+    Only descends through mappings (JSON objects); a path segment past a
+    list, a scalar, or a genuinely-``null`` field all collapse to the same
+    ``None`` "absent" result, since a ``require:`` requirement never needs
+    to distinguish them.
+    """
+    value: Any = payload
+    for segment in path.split("."):
+        if not isinstance(value, Mapping):
+            return None
+        value = value.get(segment)
+        if value is None:
+            return None
+    return value
+
+
+def _parse_requirements(raw: str) -> list[tuple[str, re.Pattern[str] | None]]:
+    """Parse a ``require:`` value into ``(path, pattern)`` pairs, all of which must hold.
+
+    ``raw`` is a comma-separated list of ``path`` (existence, non-empty
+    string) or ``path=regex`` (existence, :func:`re.search` match) items.
+    Raises :class:`ValueError` on an empty item, an invalid dotted path, or
+    an unparseable regex -- the caller turns that into the fail-open skip,
+    since a malformed ``require:`` is a broken template, not a non-match.
+    """
+    requirements: list[tuple[str, re.Pattern[str] | None]] = []
+    for item in raw.split(","):
+        item = item.strip()
+        if not item:
+            raise ValueError("empty requirement")
+        path, sep, pattern_text = item.partition("=")
+        path = path.strip()
+        if not _REQUIRE_PATH_RE.match(path):
+            raise ValueError(f"invalid field path {path!r}")
+        pattern: re.Pattern[str] | None = None
+        if sep:
+            try:
+                pattern = re.compile(pattern_text)
+            except re.error as exc:
+                raise ValueError(f"invalid regex {pattern_text!r} ({exc})") from exc
+        requirements.append((path, pattern))
+    return requirements
+
+
+def _requirement_holds(
+    payload: Mapping[str, Any], path: str, pattern: re.Pattern[str] | None
+) -> bool:
+    """Return whether one parsed ``require:`` item holds against ``payload``.
+
+    Without a ``pattern``, holds iff the field is present and a non-empty
+    string. With one, holds iff the field is present and :func:`re.search`
+    matches its value -- rendered as compact JSON first if it is not
+    already a string, the same rendering :func:`_build_fields` uses for a
+    non-string placeholder, so the regex sees what the template would.
+    """
+    value = _get_path(payload, path)
+    if pattern is None:
+        return isinstance(value, str) and value != ""
+    if value is None:
+        return False
+    text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
+    return pattern.search(text) is not None
 
 
 def _build_fields(payload: Mapping[str, Any], argument: str) -> dict[str, str]:
@@ -294,10 +379,11 @@ def run_fork_review(
     """Read a hook event from ``stdin``, review it via a shadow fork, and print the mapped verdict.
 
     Always returns 0. Unparseable/non-object stdin, a missing or empty
-    ``session_id``, and a ``--prefix`` that does not match the payload's
-    ``prompt`` all exit silently (empty stdout) -- these are "this hook does
-    not apply here", not failures. Every failure past that point (missing
-    template, unreachable daemon, a non-2xx API response, or any other
+    ``session_id``, a ``--prefix`` that does not match the payload's
+    ``prompt``, and a template's ``require:`` condition that does not hold
+    against the payload all exit silently (empty stdout) -- these are "this
+    hook does not apply here", not failures. Every failure past that point
+    (missing template, unreachable daemon, a non-2xx API response, or any other
     exception) is fail-open: no decision fields, and a ``systemMessage``
     (unless ``CGX_FORK_REVIEW_QUIET`` is set) naming the reason. An ``ok``
     verdict from the daemon is also silent -- only ``intervene`` produces
@@ -348,9 +434,7 @@ def run_fork_review(
     except TemplateError as exc:
         return _skip(str(exc))
 
-    intervene_mode, declared_event, _matcher, body = _parse_template(template_text)
-    fields = _build_fields(payload, argument)
-    rendered_prompt = _render(body, fields)
+    intervene_mode, declared_event, _matcher, require_raw, body = _parse_template(template_text)
 
     hook_event = payload.get("hook_event_name")
     if declared_event is not None and hook_event != declared_event:
@@ -358,6 +442,17 @@ def run_fork_review(
             f"template {template!r} declares event {declared_event!r}, "
             f"hook fired for {hook_event!r}"
         )
+
+    if require_raw is not None:
+        try:
+            requirements = _parse_requirements(require_raw)
+        except ValueError as exc:
+            return _skip(f"template {template!r} has a malformed `require:` value ({exc})")
+        if not all(_requirement_holds(payload, path, pattern) for path, pattern in requirements):
+            return 0
+
+    fields = _build_fields(payload, argument)
+    rendered_prompt = _render(body, fields)
 
     config = Config.from_env(environ)
     client = ControlClient(config.url)

@@ -1,8 +1,9 @@
 intervene: context
 event: PreToolUse
 matcher: TaskCreate|TaskUpdate
+require: tool_input.owner
 
-Review the `TaskCreate` tool call below for a model-to-task mismatch: does
+Review the task assignment below for a model-to-task mismatch: does
 the task's complexity (interpretation, ambiguity, debugging depth) match
 the model tier named in its `model` field, if one is set? Sonnet is the
 floor for anything involving interpretation; Haiku is for pure lookup

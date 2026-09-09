@@ -375,38 +375,50 @@ def test_absent_front_matter_defaults_to_deny(
 
 
 def test_parse_template_reads_event_and_matcher() -> None:
-    intervene, event, matcher, body = fork_review._parse_template(
+    intervene, event, matcher, require, body = fork_review._parse_template(
         "intervene: ask\nevent: PreToolUse\nmatcher: Bash\n\nreview {tool_name}\n"
     )
     assert intervene == "ask"
     assert event == "PreToolUse"
     assert matcher == "Bash"
+    assert require is None
     assert body == "review {tool_name}"
 
 
 def test_parse_template_ignores_unknown_key() -> None:
-    intervene, event, matcher, body = fork_review._parse_template(
+    intervene, event, matcher, require, body = fork_review._parse_template(
         "intervene: deny\nauthor: someone\n\nreview\n"
     )
     assert intervene == "deny"
     assert event is None
     assert matcher is None
+    assert require is None
     assert body == "review"
 
 
 def test_parse_template_invalid_event_falls_back_to_undeclared() -> None:
-    _intervene, event, _matcher, _body = fork_review._parse_template(
+    _intervene, event, _matcher, _require, _body = fork_review._parse_template(
         "intervene: deny\nevent: NotARealEvent\n\nreview\n"
     )
     assert event is None
 
 
 def test_parse_template_no_front_matter_leaves_event_and_matcher_unset() -> None:
-    intervene, event, matcher, body = fork_review._parse_template("review, no header at all\n")
+    intervene, event, matcher, require, body = fork_review._parse_template(
+        "review, no header at all\n"
+    )
     assert intervene == "deny"
     assert event is None
     assert matcher is None
+    assert require is None
     assert body == "review, no header at all"
+
+
+def test_parse_template_reads_require() -> None:
+    _intervene, _event, _matcher, require, _body = fork_review._parse_template(
+        "intervene: deny\nrequire: tool_input.owner\n\nreview\n"
+    )
+    assert require == "tool_input.owner"
 
 
 def test_declared_event_mismatch_skips_with_message(
@@ -457,6 +469,172 @@ def test_declared_event_match_proceeds_normally(
     assert code == 0
     assert len(calls) == 1
     assert json.loads(out)["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+# --- require: a payload guard that runs before rendering or the daemon call --
+
+
+def test_require_field_present_reaches_the_daemon(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    env = _write_template(
+        tmp_path, "t", "intervene: deny\nrequire: tool_input.owner\n\nreview {tool_input}\n"
+    )
+    calls = _install_client(monkeypatch, result=_INTERVENE_RESULT)
+    code, out = _run(
+        {
+            "session_id": "s1",
+            "hook_event_name": "PreToolUse",
+            "tool_input": {"owner": "sonnet"},
+        },
+        env,
+        "t",
+    )
+    assert code == 0
+    assert len(calls) == 1
+    assert json.loads(out)["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+def test_require_field_missing_is_silent_with_no_daemon_call(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    env = _write_template(
+        tmp_path, "t", "intervene: deny\nrequire: tool_input.owner\n\nreview {tool_input}\n"
+    )
+    calls = _install_client(monkeypatch, result=_INTERVENE_RESULT)
+    code, out = _run(
+        {"session_id": "s1", "hook_event_name": "PreToolUse", "tool_input": {"status": "done"}},
+        env,
+        "t",
+    )
+    assert code == 0
+    assert out == ""
+    assert calls == []
+
+
+def test_require_empty_string_field_counts_as_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    env = _write_template(
+        tmp_path, "t", "intervene: deny\nrequire: tool_input.owner\n\nreview {tool_input}\n"
+    )
+    calls = _install_client(monkeypatch, result=_INTERVENE_RESULT)
+    code, out = _run(
+        {"session_id": "s1", "hook_event_name": "PreToolUse", "tool_input": {"owner": ""}},
+        env,
+        "t",
+    )
+    assert code == 0
+    assert out == ""
+    assert calls == []
+
+
+def test_require_regex_matches(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    env = _write_template(
+        tmp_path,
+        "t",
+        "intervene: deny\nrequire: tool_name=^Task(Create|Update)$\n\nreview {tool_name}\n",
+    )
+    calls = _install_client(monkeypatch, result=_INTERVENE_RESULT)
+    code, out = _run(
+        {"session_id": "s1", "hook_event_name": "PreToolUse", "tool_name": "TaskUpdate"},
+        env,
+        "t",
+    )
+    assert code == 0
+    assert len(calls) == 1
+    assert json.loads(out)["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+def test_require_regex_rejects(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    env = _write_template(
+        tmp_path,
+        "t",
+        "intervene: deny\nrequire: tool_name=^Task(Create|Update)$\n\nreview {tool_name}\n",
+    )
+    calls = _install_client(monkeypatch, result=_INTERVENE_RESULT)
+    code, out = _run(
+        {"session_id": "s1", "hook_event_name": "PreToolUse", "tool_name": "Bash"}, env, "t"
+    )
+    assert code == 0
+    assert out == ""
+    assert calls == []
+
+
+def test_require_multiple_requirements_are_anded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    env = _write_template(
+        tmp_path,
+        "t",
+        "intervene: deny\nrequire: tool_input.owner,tool_name=^Task(Create|Update)$\n\n"
+        "review {tool_input}\n",
+    )
+    calls = _install_client(monkeypatch, result=_INTERVENE_RESULT)
+    # tool_name matches but tool_input.owner is absent: must not reach the daemon.
+    code, out = _run(
+        {
+            "session_id": "s1",
+            "hook_event_name": "PreToolUse",
+            "tool_name": "TaskUpdate",
+            "tool_input": {"status": "done"},
+        },
+        env,
+        "t",
+    )
+    assert code == 0
+    assert out == ""
+    assert calls == []
+
+    # Both hold: reaches the daemon.
+    code, out = _run(
+        {
+            "session_id": "s1",
+            "hook_event_name": "PreToolUse",
+            "tool_name": "TaskUpdate",
+            "tool_input": {"owner": "sonnet"},
+        },
+        env,
+        "t",
+    )
+    assert code == 0
+    assert len(calls) == 1
+    assert json.loads(out)["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+def test_require_malformed_value_skips_with_message(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    env = _write_template(
+        tmp_path, "t", "intervene: deny\nrequire: tool_input.[owner]\n\nreview {tool_input}\n"
+    )
+    calls = _install_client(monkeypatch, result=_INTERVENE_RESULT)
+    code, out = _run(
+        {"session_id": "s1", "hook_event_name": "PreToolUse", "tool_input": {"owner": "x"}},
+        env,
+        "t",
+    )
+    assert code == 0
+    data = json.loads(out)
+    assert set(data) == {"systemMessage"}
+    assert data["systemMessage"].startswith("cgx fork-review skipped")
+    assert calls == []
+
+
+def test_require_malformed_regex_skips_with_message(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    env = _write_template(
+        tmp_path, "t", "intervene: deny\nrequire: tool_name=[unterminated\n\nreview\n"
+    )
+    calls = _install_client(monkeypatch, result=_INTERVENE_RESULT)
+    code, out = _run(
+        {"session_id": "s1", "hook_event_name": "PreToolUse", "tool_name": "Bash"}, env, "t"
+    )
+    assert code == 0
+    data = json.loads(out)
+    assert data["systemMessage"].startswith("cgx fork-review skipped")
+    assert calls == []
 
 
 def test_unknown_placeholder_survives_literally(
@@ -718,7 +896,8 @@ def test_packaged_templates_are_loadable(
     (rather than just that *something* was produced) confirms the packaged
     template's own ``intervene:`` front matter was actually parsed.
     ``hook_event_name`` matches each template's own declared ``event:`` line,
-    since a mismatch now skips instead of reviewing.
+    since a mismatch now skips instead of reviewing. ``tool_input`` carries
+    an ``owner`` field so ``task-assignment``'s ``require:`` guard holds too.
     """
     empty_home = tmp_path / "empty-home"
     empty_home.mkdir()
@@ -731,7 +910,7 @@ def test_packaged_templates_are_loadable(
             "session_id": "s1",
             "hook_event_name": hook_event_name,
             "tool_name": "Bash",
-            "tool_input": {"command": "ls"},
+            "tool_input": {"command": "ls", "owner": "sonnet"},
             "cwd": "/tmp",
             "prompt": "hello",
         },
