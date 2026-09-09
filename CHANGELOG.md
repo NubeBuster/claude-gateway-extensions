@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Documented and tested that the daemon tunnels every non-`/cgx/` path to
+  the upstream verbatim -- method, path, query and body untouched -- so a
+  chained upstream proxy's own control calls pass through unmolested. See
+  the "Every non-`/cgx/` path is tunnelled verbatim" decision in
+  `docs/DESIGN.md`.
 - Feature: rewarm -- an explicit, opt-in way to bring a cold session back.
   `rewarm: true` on `PUT /cgx/sessions/{id}` (`cgx on ... --rewarm`,
   `/cache <deadline> rewarm`) tolerates exactly one `cache_write` bump

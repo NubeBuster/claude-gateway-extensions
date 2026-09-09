@@ -45,6 +45,39 @@ async def test_forwards_method_path_query_and_headers(harness: ServerHarness) ->
     assert "connection" not in recorded.headers
 
 
+@pytest.mark.invariant(decision="Every non-/cgx/ path is tunnelled verbatim")
+async def test_arbitrary_path_tunnelled_verbatim_and_never_snapshotted(
+    harness: ServerHarness,
+) -> None:
+    """A request to an unfamiliar path -- e.g. a chained upstream's own control call --
+
+    reaches the fake upstream with its method, path, query and body intact,
+    and is never captured as a snapshot: only /v1/messages is tee'd.
+    """
+
+    async def handler(request: web.Request) -> web.Response:
+        return web.json_response({"ok": True})
+
+    harness.fake.script(handler)
+
+    payload = b'{"weird": "shape", "n": 1}'
+    resp = await harness.client.post(
+        "/_some-other-proxy/control/reload?scope=all",
+        data=payload,
+        headers={"x-claude-code-session-id": "sess-tunnel"},
+    )
+    assert resp.status == 200
+
+    recorded = harness.fake.requests[0]
+    assert recorded.method == "POST"
+    assert recorded.path == "/_some-other-proxy/control/reload"
+    assert recorded.query == "scope=all"
+    assert recorded.body == payload
+
+    store = harness.app[STORE_KEY]
+    assert store.get_snapshots("sess-tunnel") == []
+
+
 @pytest.mark.invariant(decision="Byte-transparent forwarding")
 async def test_forwards_repeated_header_without_collapsing(harness: ServerHarness) -> None:
     """A repeated request header must reach upstream with every value intact."""

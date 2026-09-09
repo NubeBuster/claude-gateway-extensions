@@ -16,6 +16,12 @@ deliberately absent from this release, not ruled out for the project.
 - **Byte-transparent forwarding.** Headers (minus RFC hop-by-hop) and bodies
   pass through unmodified in both directions. The daemon must be safe to leave
   in the request path permanently, so it interprets nothing it does not need.
+- **Every non-`/cgx/` path is tunnelled verbatim.** The daemon forwards
+  every request whose path is not under `/cgx/` to the upstream unchanged --
+  method, path, query and body untouched -- because the upstream itself may
+  be a chained proxy with its own control plane, and byte-transparency
+  includes the URL, not just headers and bodies. Only `/cgx/` is reserved;
+  every other path, however unfamiliar, is the upstream's to interpret.
 - **Bodies never reach a log.** Request and response bodies are written to no
   log at any level; headers and bodies are only ever tee'd into the daemon's
   private snapshot. They carry the user's credential and whole conversations,
