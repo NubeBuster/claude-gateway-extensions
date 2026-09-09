@@ -334,6 +334,10 @@ edit claude-gateway-extensions.service`.
 | `CGX_MAX_STREAMS_PER_SESSION` | `8`                                                           | how many separate conversation branches to remember per session                            |
 | `CGX_LOG_LEVEL`               | `INFO`                                                        | how much detail the daemon logs                                                            |
 | `CGX_DRAIN_TIMEOUT_S`         | `600`                                                         | on shutdown, how long to wait for in-flight requests (incl. SSE streams) before exiting     |
+| `CGX_FORK_MAX_TOKENS`         | `512`                                                         | `max_tokens` cap for a review-fork reply, on top of any thinking budget                    |
+| `CGX_FORK_MAX_PER_MIN`        | `6`                                                            | how many review forks a single session may fire in a trailing 60s window                   |
+| `CGX_FORK_THINKING_GUARD`     | `true`                                                         | refuse a fork against a thinking snapshot on a model below its measured thinking-preservation minimum, instead of paying a full cold write |
+| `CGX_FORK_MODEL`              | unset                                                          | send review forks to this model instead of the snapshot's own; forfeits the cached prefix, since Anthropic namespaces the cache per model |
 
 If a table and the code ever disagree, `config.py` is the source of truth.
 
