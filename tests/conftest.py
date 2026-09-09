@@ -143,6 +143,17 @@ class ServerHarness:
     app: web.Application
 
 
+@pytest.fixture
+def state_dir(tmp_path: Path) -> Path:
+    """A sandboxed state directory, asserted to be inside pytest's ``tmp_path``."""
+    path = tmp_path / "state"
+    resolved = path.resolve()
+    assert resolved.is_relative_to(tmp_path.resolve()), (
+        f"state dir {resolved} escaped the test sandbox {tmp_path}"
+    )
+    return path
+
+
 @pytest_asyncio.fixture
 async def harness(
     tmp_path: Path, fake_upstream: tuple[FakeUpstream, TestServer]

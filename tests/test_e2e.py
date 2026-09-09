@@ -144,17 +144,6 @@ async def _wait_for(predicate: Any, timeout: float = 10.0) -> bool:
     return False
 
 
-@pytest.fixture
-def state_dir(tmp_path: Path) -> Path:
-    """A sandboxed state directory, asserted to be inside pytest's tmp_path."""
-    path = tmp_path / "state"
-    resolved = path.resolve()
-    assert resolved.is_relative_to(tmp_path.resolve()), (
-        f"state dir {resolved} escaped the test sandbox {tmp_path}"
-    )
-    return path
-
-
 @pytest.mark.invariant(decision="Byte-transparent forwarding")
 async def test_full_lifecycle(state_dir: Path, tmp_path: Path) -> None:
     """Capture, bump, stop-on-cache-write and reload, end to end over real sockets."""
