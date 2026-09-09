@@ -21,7 +21,12 @@ import pytest
 from live.budget import Budget, BudgetExceeded, price_for, usage_cost_usd
 from live.harness import LiveRun, LiveRunError, Report, RunConfig
 from live.subject import ENV_ALLOWLIST, SubjectError, TmuxSubject, pane_is_ready
-from live.transcript import Transcript, TranscriptError, project_slug
+from live.transcript import (
+    Transcript,
+    TranscriptError,
+    existing_transcripts,
+    project_slug,
+)
 
 
 class FakeTmux:
@@ -199,6 +204,20 @@ def test_completed_turns_ignores_tool_use_stops_and_torn_lines(tmp_path):
     assert transcript.reply_text(turns[0]) == "banana"
     assert transcript.model(turns[0]) == "claude-haiku-4-5"
     assert transcript.session_id() == "sid-1"
+
+
+def test_a_past_runs_transcript_is_never_read_as_this_runs_progress(tmp_path):
+    stale = tmp_path / "old-session.jsonl"
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    stale.write_text(assistant_line("stale") + "\n", encoding="utf-8")
+    before = existing_transcripts(tmp_path)
+
+    transcript = Transcript(directory=tmp_path, ignore=before)
+    assert transcript.path() is None
+    assert transcript.completed_turns() == []
+
+    write_transcript(tmp_path, [assistant_line("fresh")])
+    assert transcript.reply_text(transcript.completed_turns()[0]) == "fresh"
 
 
 def test_entries_are_empty_before_the_subject_writes_anything(tmp_path):

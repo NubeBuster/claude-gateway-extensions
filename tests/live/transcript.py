@@ -36,23 +36,39 @@ def project_dir(home: Path, cwd: Path) -> Path:
     return home / ".claude" / "projects" / project_slug(cwd)
 
 
+def existing_transcripts(directory: Path) -> frozenset[Path]:
+    """Return the transcript files already in ``directory``.
+
+    Called before the subject launches, so everything it returns belongs to
+    an earlier session and must not be mistaken for this run's progress.
+    """
+    if not directory.is_dir():
+        return frozenset()
+    return frozenset(directory.glob("*.jsonl"))
+
+
 @dataclass
 class Transcript:
-    """The transcript files Claude Code writes for one scratch cwd.
+    """The transcript file Claude Code writes for one live run's session.
 
-    A run creates exactly one session in its own scratch directory, so the
-    newest ``.jsonl`` there is that session's transcript. The file is
-    resolved lazily rather than at construction: it does not exist until the
-    subject's first turn.
+    The scratch cwd is stable across runs, so its transcript directory
+    accumulates one file per past session -- and a past session's file has
+    completed turns in it. Counting those as this run's progress makes the
+    run wait for turns that already happened and then time out, so the
+    files present before the subject launched are recorded in ``ignore``
+    and never read. The file is resolved lazily: this run's own transcript
+    does not exist until its first turn.
     """
 
     directory: Path
+    ignore: frozenset[Path] = frozenset()
 
     def path(self) -> Path | None:
-        """Return the newest transcript file, or None if none exists yet."""
+        """Return this run's transcript file, or None if it does not exist yet."""
         if not self.directory.is_dir():
             return None
-        files = sorted(self.directory.glob("*.jsonl"), key=lambda p: p.stat().st_mtime)
+        candidates = [p for p in self.directory.glob("*.jsonl") if p not in self.ignore]
+        files = sorted(candidates, key=lambda p: p.stat().st_mtime)
         return files[-1] if files else None
 
     def entries(self) -> list[dict[str, object]]:
@@ -159,4 +175,10 @@ class Transcript:
             sleep(poll_s)
 
 
-__all__ = ["Transcript", "TranscriptError", "project_dir", "project_slug"]
+__all__ = [
+    "Transcript",
+    "TranscriptError",
+    "existing_transcripts",
+    "project_dir",
+    "project_slug",
+]

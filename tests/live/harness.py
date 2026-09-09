@@ -20,7 +20,7 @@ from claude_gateway_extensions.cli.client import ControlClient
 from .budget import Budget
 from .daemon import Daemon
 from .subject import TmuxSubject
-from .transcript import Transcript
+from .transcript import Transcript, existing_transcripts, project_dir
 
 #: What a fork is expected to do, per subject model family. A fork can only
 #: read the parent's cached prefix on a model that preserves signed thinking
@@ -187,12 +187,7 @@ class LiveRun:
         self.sleep = sleep
         self.budget = Budget(cap_usd=config.budget_usd)
         self.report = Report(cap_usd=config.budget_usd, model=config.model)
-        self.transcript = Transcript(
-            directory=config.home
-            / ".claude"
-            / "projects"
-            / str(config.subject_cwd).replace("/", "-")
-        )
+        self.transcript = Transcript(directory=project_dir(config.home, config.subject_cwd))
 
     def execute(self) -> Report:
         """Run everything, then tear down whatever was started, always."""
@@ -212,6 +207,11 @@ class LiveRun:
         self.daemon.start(self.parent_env)
         client = self.client_factory(self.daemon.base_url)
         before = self._session_ids(client)
+
+        # Pinned before launch: the scratch cwd is stable, so its transcript
+        # directory still holds every past run's file, and a past run's
+        # completed turns would be counted as this one's progress.
+        self.transcript.ignore = existing_transcripts(self.transcript.directory)
 
         self.subject.start(self.parent_env)
         self.subject.wait_ready(self.config.ready_timeout_s)
