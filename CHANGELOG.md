@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Tests: the `--apply` tests in `tests/test_fork_review.py` now drive a
+  `sys.executable` inline script instead of a `#!/bin/sh` fixture, so they
+  run under Windows' `cmd.exe` shell (`_run_apply` always uses
+  `subprocess.run(..., shell=True)`, which is portable already; only the
+  test fixture was POSIX-only).
 - Makefile: `check-venv` now honours `CGX_SYSTEM_PYTHON=1` as an explicit
   opt-out, letting a runner with no `.venv` (CI) pass the same guard that
   otherwise refuses to fall back to a bare `python`/`ruff`/`pyright`/

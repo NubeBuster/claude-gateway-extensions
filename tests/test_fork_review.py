@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import json
+import sys
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -732,24 +733,29 @@ def test_template_dir_prefers_cgx_template_dir_over_xdg(
 # --- --apply: act on an intervene verdict without touching the conversation --
 
 
-def _write_apply_script(tmp_path: Path, *, exit_code: int = 0, sleep_s: float = 0.0) -> Path:
-    """Write a shell script that records its stdin, echoes a leak marker, then exits.
+def _write_apply_script(tmp_path: Path, *, exit_code: int = 0, sleep_s: float = 0.0) -> str:
+    """Return a command that records its stdin, echoes a leak marker, then exits.
 
-    The echoed ``APPLY-STDOUT-LEAK`` line lets a test assert the command's own
-    stdout never reaches ``run_fork_review``'s stdout.
+    ``_run_apply`` always invokes the command via ``subprocess.run(...,
+    shell=True)``, which is ``/bin/sh`` on POSIX and ``cmd.exe`` on Windows.
+    Rather than a ``#!/bin/sh`` script (POSIX-only: shebangs, ``chmod``,
+    ``cat`` are not portable to ``cmd.exe``), this writes an inline Python
+    script and returns a command that runs it via ``sys.executable``, which
+    both shells can invoke identically. The echoed ``APPLY-STDOUT-LEAK`` line
+    lets a test assert the command's own stdout never reaches
+    ``run_fork_review``'s stdout.
     """
-    script = tmp_path / "apply.sh"
+    script = tmp_path / "apply.py"
     stdin_capture = tmp_path / "apply-stdin.txt"
     script.write_text(
-        "#!/bin/sh\n"
-        f"sleep {sleep_s}\n"
-        f"cat > {stdin_capture}\n"
-        "echo APPLY-STDOUT-LEAK\n"
-        f"exit {exit_code}\n",
+        "import sys, time\n"
+        f"time.sleep({sleep_s})\n"
+        f"open({str(stdin_capture)!r}, 'w', encoding='utf-8').write(sys.stdin.read())\n"
+        "print('APPLY-STDOUT-LEAK')\n"
+        f"sys.exit({exit_code})\n",
         encoding="utf-8",
     )
-    script.chmod(0o755)
-    return script
+    return f'"{sys.executable}" "{script}"'
 
 
 def test_apply_runs_on_intervene_with_verdict_json_on_stdin(
