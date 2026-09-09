@@ -15,5 +15,7 @@ Working directory: {cwd}
 Reply `ok` for anything ordinary; reserve `intervene` for a command you
 would actually stop the user's session over.
 
+Answer with JSON only. Never call a tool.
+
 Reply with strict JSON and nothing else:
 {"verdict": "ok"|"intervene", "reason": "<why this is safe, or the specific risk>", "mutation": null}

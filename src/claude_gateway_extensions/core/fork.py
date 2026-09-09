@@ -34,19 +34,25 @@ _FORK_PATH = "/v1/messages"
 def build_fork_body(body: bytes, prompt: str, payload: object, max_tokens: int) -> bytes:
     """Return ``body`` re-serialised as a one-shot review fork request.
 
-    ``max_tokens`` is forced to ``max_tokens``, ``stream`` is forced to
-    ``false``, ``tools``/``tool_choice`` are dropped (a twin must never be
-    able to act on the parent's behalf), and one user message is appended:
-    ``prompt`` followed by ``payload`` pretty-printed as a fenced JSON block.
+    ``max_tokens`` is forced to ``max_tokens`` and ``stream`` is set to
+    ``false`` only if the key is already present, exactly as
+    :func:`~.bump.build_bump_body` treats it. ``tools`` and ``tool_choice``
+    are preserved by value, not dropped: Anthropic hashes the cache prefix
+    over ``tools``, then ``system``, then ``messages``, so removing either
+    key invalidates the whole prefix and turns every fork into a full
+    ``cache_creation`` write. One user message is appended: ``prompt``
+    followed by ``payload`` pretty-printed as a fenced JSON block. A twin
+    must still never act on the parent's behalf, so that guarantee now
+    comes from the prompt instructing the reviewer never to call a tool,
+    plus :func:`parse_verdict` treating a ``tool_use`` reply as fail-open.
     Everything else, including every nested ``cache_control`` block, is
     preserved by value exactly as :func:`~.bump.build_bump_body` preserves
     it, so the fork hits the same cached prefix.
     """
     data = json.loads(body)
     data["max_tokens"] = max_tokens
-    data["stream"] = False
-    data.pop("tools", None)
-    data.pop("tool_choice", None)
+    if "stream" in data:
+        data["stream"] = False
     payload_text = json.dumps(payload, indent=2, ensure_ascii=False)
     content = f"{prompt}\n\n```json\n{payload_text}\n```"
     messages = data.setdefault("messages", [])
@@ -81,6 +87,14 @@ def _extract_usage(data: object) -> Usage | None:
     if not isinstance(raw_usage, dict):
         return None
     return Usage.from_dict(raw_usage)
+
+
+def _has_tool_use(data: Mapping[str, object]) -> bool:
+    """Return whether ``content`` carries any block of type ``tool_use``."""
+    content = data.get("content")
+    if not isinstance(content, list):
+        return False
+    return any(isinstance(block, dict) and block.get("type") == "tool_use" for block in content)
 
 
 def _extract_text(data: Mapping[str, object]) -> str | None:
@@ -124,6 +138,10 @@ def parse_verdict(status: int, body: bytes) -> ForkVerdict:
     if not isinstance(data, dict):
         logger.warning("fork verdict unparseable: reason=unparseable_verdict")
         return _fail_open("unparseable_verdict", usage)
+
+    if _has_tool_use(data):
+        logger.warning("fork verdict rejected: reason=tool_use_reply")
+        return _fail_open("tool_use_reply", usage)
 
     text = _extract_text(data)
     if text is None:

@@ -127,12 +127,12 @@ def test_build_fork_body_preserves_values_and_sets_cap() -> None:
 
     assert data["max_tokens"] == 256
     assert data["stream"] is False
-    assert "tools" not in data
-    assert "tool_choice" not in data
-    # Everything else, including cache_control and the system prompt, is
-    # preserved by value exactly.
+    # Everything else, including cache_control, tools/tool_choice and the
+    # system prompt, is preserved by value exactly.
     assert data["model"] == original["model"]
     assert data["system"] == original["system"]
+    assert data["tools"] == original["tools"]
+    assert data["tool_choice"] == original["tool_choice"]
 
     assert len(data["messages"]) == 2
     assert data["messages"][0] == original["messages"][0]
@@ -152,14 +152,20 @@ def test_build_fork_body_appends_exactly_one_message_when_messages_absent() -> N
     assert data["messages"][0]["role"] == "user"
 
 
-@pytest.mark.invariant(decision="`tools` are stripped from the fork body")
-def test_build_fork_body_drops_tools_and_tool_choice_when_present() -> None:
+@pytest.mark.invariant(decision="the fork body preserves the cached prefix")
+def test_build_fork_body_preserves_tools_and_tool_choice_when_present() -> None:
     body = json.dumps(
         {"model": "m", "max_tokens": 10, "tools": [{"name": "x"}], "tool_choice": "auto"}
     ).encode()
     data = json.loads(build_fork_body(body, "review", None, 100))
-    assert "tools" not in data
-    assert "tool_choice" not in data
+    assert data["tools"] == [{"name": "x"}]
+    assert data["tool_choice"] == "auto"
+
+
+def test_build_fork_body_does_not_add_stream_key_when_absent() -> None:
+    body = json.dumps({"model": "m", "max_tokens": 10}).encode()
+    data = json.loads(build_fork_body(body, "review", None, 100))
+    assert "stream" not in data
 
 
 # -- parse_verdict ------------------------------------------------------------
@@ -218,6 +224,19 @@ def test_parse_verdict_accepts_valid_intervene_with_mutation() -> None:
     assert result.reason == "risky"
     assert result.mutation == {"x": 1}
     assert result.paid_write is False
+
+
+def test_parse_verdict_tool_use_reply_is_fail_open() -> None:
+    body = json.dumps(
+        {
+            "content": [{"type": "tool_use", "id": "t1", "name": "Bash", "input": {}}],
+            "usage": {"input_tokens": 5, "cache_creation_input_tokens": 0},
+        }
+    ).encode()
+    result = parse_verdict(200, body)
+    assert result.verdict == "ok"
+    assert result.reason == "tool_use_reply"
+    assert result.usage is not None
 
 
 @pytest.mark.invariant(decision="Every fork is expected to be a cache read")

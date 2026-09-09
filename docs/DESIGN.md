@@ -184,9 +184,17 @@ review" roadmap line; no part of it ships in 1.0.
   hook payload as a fenced JSON block.** Keeping the data verbatim and
   clearly delimited means a template author writes instructions, not an
   escaping scheme.
-- **`tools` are stripped from the fork body.** A twin with tools could
-  edit files or spawn agents on the parent's behalf while the parent
-  believes it is merely thinking, and the review needs none of them.
+- **The fork body preserves the cached prefix: `tools` and `tool_choice`
+  are kept by value, never stripped.** Anthropic hashes the cache prefix
+  in the fixed order `tools`, then `system`, then `messages`; dropping
+  either key is the maximum-cost cache miss, turning every shadow review
+  into a full `cache_creation` write of the whole conversation instead of
+  the cache read the feature is premised on. A twin must still never act
+  on the parent's behalf, so that guarantee comes from the prompt instead
+  of the body: every packaged template instructs the reviewer to answer
+  with JSON only and never call a tool, and `parse_verdict` treats any
+  reply whose `content` carries a `tool_use` block as the fail-open `ok`
+  result with reason `tool_use_reply`, logging only the reason code.
 - **`stream` is false and `max_tokens` is capped per fork** (request
   field, else `CGX_FORK_MAX_TOKENS`, default 512). A verdict is a
   sentence and a label, so a runaway twin is a bug, not a use case, and a

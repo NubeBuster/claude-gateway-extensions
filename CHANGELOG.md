@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Shadow review fork: the fork body no longer strips `tools`/`tool_choice`
+  before replay -- Anthropic hashes the cache prefix over `tools`, then
+  `system`, then `messages`, so dropping either key invalidated the whole
+  prefix and turned every fork into a full `cache_creation` write. A twin
+  is now kept from acting on the parent's behalf by the prompt (every
+  packaged template instructs the reviewer to answer with JSON only and
+  never call a tool) and by `parse_verdict`, which now treats a reply
+  whose `content` carries a `tool_use` block as the fail-open `ok` result
+  with reason `tool_use_reply`.
 - Makefile: `check`/`fix`/`test`/`lint`/`types` now fail loudly with a
   one-line error when `.venv` is missing instead of silently falling back
   to a bare `python`/`ruff`/`pyright`/`pytest` from `PATH`. New `venv`
