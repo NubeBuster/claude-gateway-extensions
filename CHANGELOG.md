@@ -17,6 +17,13 @@
   strictly greater than the thinking budget; a thinking-enabled session
   previously hit a hard 400 that `parse_verdict` fail-opened into a silent
   `ok` with no verdict and no logged reason.
+- Windows CI: fixed the windows-latest test job, which was failing on
+  `main` and `dev`. `tests/test_confirm.py` compared rendered headers
+  against POSIX path literals instead of the same `Path` object's own
+  string form, which renders with backslashes on Windows; three
+  `tests/test_cli_dispatch.py` tests exercised `cgx service` (Linux-only
+  by design) without the `skipif(sys.platform == "win32")` marker every
+  other `service` test in the file already carries.
 - Makefile: `check`/`fix`/`test`/`lint`/`types` now fail loudly with a
   one-line error when `.venv` is missing instead of silently falling back
   to a bare `python`/`ruff`/`pyright`/`pytest` from `PATH`. New `venv`

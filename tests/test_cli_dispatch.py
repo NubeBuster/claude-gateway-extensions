@@ -495,6 +495,7 @@ def test_configure_writes_url_for_explicit_port(tmp_path: Path) -> None:
     assert data["env"]["CGX_URL"] == "http://127.0.0.1:9999"
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="cgx service is Linux-only")
 @pytest.mark.invariant(decision="The port is written down, never assumed")
 def test_configure_port_falls_back_to_installed_service_port(tmp_path: Path) -> None:
     client = _FakeClient("http://x")
@@ -660,6 +661,7 @@ def test_unconfigure_non_tty_stdin_without_yes_aborts(tmp_path: Path) -> None:
     assert (tmp_path / ".claude" / "settings.json").exists()
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="cgx service is Linux-only")
 def test_service_status_reports_not_installed_and_daemon_health() -> None:
     client = _FakeClient("http://x")
     code, out, _ = _run(["service", "status"], client, environ={"HOME": "/nonexistent-home"})
@@ -669,6 +671,7 @@ def test_service_status_reports_not_installed_and_daemon_health() -> None:
     assert client.calls == [("health", ())]
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="cgx service is Linux-only")
 def test_service_status_daemon_unreachable_is_a_failure() -> None:
     client = _FakeClient("http://x", raise_unreachable=True)
     code, out, _ = _run(["service", "status"], client, environ={"HOME": "/nonexistent-home"})

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import io
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 import pytest
 
@@ -50,17 +50,30 @@ def test_render_change_colorizes_additions_removals_and_hunks() -> None:
 
 
 def test_render_change_create_has_will_create_header() -> None:
-    change = PlannedChange(Path("/x/new.json"), None, "content\n", _noop)
+    path = Path("/x/new.json")
+    change = PlannedChange(path, None, "content\n", _noop)
     text = render_change(change, color=False)
-    assert text.startswith("will create /x/new.json\n")
+    assert text.startswith(f"will create {path}\n")
     assert "+content" in text
 
 
 def test_render_change_remove_has_will_remove_header() -> None:
-    change = PlannedChange(Path("/x/SKILL.md"), "content\n", None, _noop)
+    path = Path("/x/SKILL.md")
+    change = PlannedChange(path, "content\n", None, _noop)
     text = render_change(change, color=False)
-    assert text.startswith("will remove /x/SKILL.md\n")
+    assert text.startswith(f"will remove {path}\n")
     assert "-content" in text
+
+
+def test_render_change_header_matches_path_under_windows_path_flavour() -> None:
+    # Simulates a Windows path flavour (backslash rendering) without needing
+    # to actually run on Windows: the header is built from ``str(path)``, so
+    # it must track whatever separator the path object itself renders with.
+    path = PureWindowsPath(r"C:\x\new.json")
+    change = PlannedChange(path, None, "content\n", _noop)  # type: ignore[arg-type]
+    text = render_change(change, color=False)
+    assert text.startswith(f"will create {path}\n")
+    assert str(path) in text
 
 
 def test_apply_changes_no_pending_prints_no_changes_and_prompts_nothing() -> None:
@@ -166,8 +179,9 @@ def test_apply_changes_interactive_n_skips() -> None:
 
 def test_apply_changes_partial_acceptance_summary_and_exit_code() -> None:
     applied = []
-    accepted = PlannedChange(Path("/x/a.json"), "a\n", "b\n", lambda: applied.append("a"))
-    rejected = PlannedChange(Path("/x/b.json"), "c\n", "d\n", lambda: applied.append("b"))
+    path_a, path_b = Path("/x/a.json"), Path("/x/b.json")
+    accepted = PlannedChange(path_a, "a\n", "b\n", lambda: applied.append("a"))
+    rejected = PlannedChange(path_b, "c\n", "d\n", lambda: applied.append("b"))
     stdout = io.StringIO()
     code = apply_changes(
         [accepted, rejected],
@@ -182,9 +196,9 @@ def test_apply_changes_partial_acceptance_summary_and_exit_code() -> None:
     assert applied == ["a"]
     out = stdout.getvalue()
     assert "applied:" in out
-    assert "/x/a.json" in out
+    assert str(path_a) in out
     assert "skipped:" in out
-    assert "/x/b.json" in out
+    assert str(path_b) in out
 
 
 def test_color_disabled_when_stdout_is_not_a_tty() -> None:
