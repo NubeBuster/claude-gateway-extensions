@@ -222,15 +222,16 @@ def _state_to_json(state: SessionState) -> dict[str, object]:
         "last_credential": list(state.last_credential) if state.last_credential else None,
         "rewarm": state.rewarm,
         "rewarm_write": _rewarm_write_to_json(state.rewarm_write),
+        "replays_seen": state.replays_seen,
     }
 
 
 def _state_from_json(data: dict[str, object]) -> SessionState:
     """Deserialise a session-state dict previously produced by :func:`_state_to_json`.
 
-    ``rewarm``/``rewarm_write`` default to ``False``/``None`` when absent, so
-    a state persisted before this feature existed loads exactly as if it had
-    never been armed.
+    ``rewarm``/``rewarm_write`` default to ``False``/``None`` when absent, and
+    ``replays_seen`` to ``0``, so a state persisted before these fields
+    existed loads exactly as if they had never applied.
     """
     credential = data.get("last_credential")
     return SessionState(
@@ -246,6 +247,7 @@ def _state_from_json(data: dict[str, object]) -> SessionState:
         last_credential=tuple(credential) if credential else None,  # type: ignore[assignment]
         rewarm=bool(data.get("rewarm", False)),
         rewarm_write=_rewarm_write_from_json(data.get("rewarm_write")),
+        replays_seen=int(data.get("replays_seen", 0)),  # type: ignore[arg-type]
     )
 
 

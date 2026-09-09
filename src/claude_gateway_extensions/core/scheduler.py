@@ -126,6 +126,22 @@ class Scheduler:
         if snapshot is not None:
             self._wake(session_id)
 
+    def note_replay(self, session_id: str) -> None:
+        """Record a captured-and-discarded replay body for ``session_id``.
+
+        See the "Replays are never snapshots" decision in ``docs/DESIGN.md``.
+        Only increments ``replays_seen`` and persists it -- unlike
+        :meth:`note_request`, this must not reset ``last_request_at``,
+        touch the credential, or start the session's bump task: a replay is
+        by definition not a real turn, so it must not look like one to the
+        scheduler.
+        """
+        state = self._store.get_state(session_id)
+        if state is None:
+            state = SessionState(session_id=session_id, enabled=self._config.default_enabled)
+        state = dataclasses.replace(state, replays_seen=state.replays_seen + 1)
+        self._store.put_state(state)
+
     def set_enabled(
         self,
         session_id: str,
@@ -337,6 +353,7 @@ class Scheduler:
             "last_request_at": state.last_request_at,
             "last_bump_at": state.last_bump_at,
             "bump_count": state.bump_count,
+            "replays_seen": state.replays_seen,
             "stopped_reason": state.stopped_reason,
             "next_bump_at": next_bump_at,
             "cache_expires_at": cache_expires_at,

@@ -33,6 +33,7 @@ STATUS_KEYS = {
     "last_request_at",
     "last_bump_at",
     "bump_count",
+    "replays_seen",
     "stopped_reason",
     "next_bump_at",
     "cache_expires_at",

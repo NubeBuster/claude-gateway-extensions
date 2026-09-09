@@ -37,6 +37,13 @@ deliberately absent from this release, not ruled out for the project.
   decoded logs one WARNING per session, naming the encoding and the failure,
   never the body, so a session stuck sending an uncapturable body is visible
   without a warning per request.
+- **Replays are never snapshots.** A `/v1/messages` body with `max_tokens: 0`
+  is by definition a bump or fork replay -- this daemon's own, or a chained
+  upstream proxy's that also bumps -- never a real turn. It is forwarded
+  untouched like any other request, but never captured: capturing it would
+  overwrite the session's latest real snapshot with a copy of a copy. It is
+  counted per session instead, as `replays_seen` on the session status, so
+  the user can tell a chained bumper is active.
 - **Session identity is `x-claude-code-session-id`.** It is the documented
   per-session header. Requests without it are forwarded but never captured.
 - **Streams keyed by model + system + tools, largest prefix wins.** One

@@ -13,7 +13,7 @@ from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
 from claude_gateway_extensions.server.app import make_app
-from claude_gateway_extensions.server.keys import STORE_KEY
+from claude_gateway_extensions.server.keys import SCHEDULER_KEY, STORE_KEY
 from conftest import ServerHarness, make_config
 
 
@@ -284,6 +284,62 @@ async def test_non_messages_path_never_snapshotted(harness: ServerHarness) -> No
     store = harness.app[STORE_KEY]
     assert store.get_state("sess-c") is None
     assert store.get_snapshots("sess-c") == []
+
+
+@pytest.mark.invariant(decision="Replays are never snapshots")
+async def test_incoming_replay_body_forwarded_not_captured_and_counted(
+    harness: ServerHarness,
+) -> None:
+    """A chained upstream proxy's own max_tokens: 0 replay must reach upstream
+
+    byte for byte, never overwrite the session's snapshot, and be counted on
+    the session status as ``replays_seen`` -- while a real body afterwards is
+    still captured normally.
+    """
+
+    async def handler(request: web.Request) -> web.Response:
+        return web.json_response({"usage": {"input_tokens": 3}})
+
+    harness.fake.script(handler)
+    harness.fake.script(handler)
+    harness.fake.script(handler)
+
+    real_body = b'{"model": "claude-x", "max_tokens": 10, "messages": [{"role": "user"}]}'
+    resp1 = await harness.client.post(
+        "/v1/messages", data=real_body, headers={"x-claude-code-session-id": "sess-replay"}
+    )
+    assert resp1.status == 200
+
+    replay_body = b'{"model": "claude-x", "max_tokens": 0, "messages": [], "stream": false}'
+    resp2 = await harness.client.post(
+        "/v1/messages", data=replay_body, headers={"x-claude-code-session-id": "sess-replay"}
+    )
+    assert resp2.status == 200
+
+    # Forwarded byte for byte, exactly like any other request.
+    assert harness.fake.requests[1].body == replay_body
+
+    store = harness.app[STORE_KEY]
+    snapshots = store.get_snapshots("sess-replay")
+    assert len(snapshots) == 1
+    assert snapshots[0].body == real_body  # not overwritten by the replay
+
+    scheduler = harness.app[SCHEDULER_KEY]
+    status = scheduler.status("sess-replay")
+    assert status["replays_seen"] == 1
+
+    # A following real body is still captured normally.
+    another_real_body = b'{"model": "claude-x", "max_tokens": 20, "messages": [{"role": "u"}]}'
+    resp3 = await harness.client.post(
+        "/v1/messages",
+        data=another_real_body,
+        headers={"x-claude-code-session-id": "sess-replay"},
+    )
+    assert resp3.status == 200
+    snapshots = store.get_snapshots("sess-replay")
+    assert len(snapshots) == 1
+    assert snapshots[0].body == another_real_body
+    assert scheduler.status("sess-replay")["replays_seen"] == 1
 
 
 @pytest.mark.invariant(decision="Byte-transparent forwarding")

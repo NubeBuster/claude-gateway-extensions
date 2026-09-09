@@ -66,6 +66,19 @@ async def handle(request: web.Request) -> web.StreamResponse:
     else:
         outbound_data = request.content
 
+    # A max_tokens: 0 body is a bump/fork replay -- the daemon's own, or a
+    # chained upstream proxy's -- never a real turn. See the "Replays are
+    # never snapshots" decision in docs/DESIGN.md: it is forwarded like any
+    # other request but never captured, and counted per session so the user
+    # can tell a chained bumper is active.
+    is_replay = (
+        is_messages
+        and request_body is not None
+        and _is_replay_body(request_body, outbound_headers.get("content-encoding"))
+    )
+    if is_replay and session_id is not None:
+        scheduler.note_replay(session_id)
+
     # Only a real /v1/messages request with a session id defers that
     # session's scheduled bump; every other request passes through untracked.
     tracking_id = session_id if is_messages else None
@@ -83,6 +96,7 @@ async def handle(request: web.Request) -> web.StreamResponse:
             headers=outbound_headers,
             data=outbound_data,
             is_messages=is_messages,
+            is_replay=is_replay,
             session_id=session_id,
             request_body=request_body,
             warned_sessions=warned_sessions,
@@ -112,6 +126,7 @@ async def _forward(
     headers: Mapping[str, str],
     data: bytes | aiohttp.StreamReader,
     is_messages: bool,
+    is_replay: bool,
     session_id: str | None,
     request_body: bytes | None,
     warned_sessions: set[str],
@@ -147,7 +162,12 @@ async def _forward(
         )
         await resp.prepare(request)
 
-        should_tee = is_messages and upstream_resp.status < 400 and request_body is not None
+        should_tee = (
+            is_messages
+            and not is_replay
+            and upstream_resp.status < 400
+            and request_body is not None
+        )
         tee_buffer = bytearray() if should_tee else None
         content_type = upstream_resp.headers.get("content-type", "")
         content_encoding = upstream_resp.headers.get("content-encoding")
@@ -182,6 +202,25 @@ async def _forward(
             warned_sessions,
         )
     return resp
+
+
+def _is_replay_body(body: bytes, content_encoding: str | None) -> bool:
+    """Whether ``body`` is a bump/fork replay: a ``/v1/messages`` body with ``max_tokens: 0``.
+
+    Anthropic never accepts ``max_tokens: 0`` from a real client, and every
+    replay this daemon (or a chained upstream proxy also bumping) sends sets
+    it deliberately (see :func:`~claude_gateway_extensions.core.bump.build_bump_body`)
+    to spend nothing on the reply. Any decode or parse failure returns
+    ``False``: a body this cannot classify is treated as ordinary traffic,
+    so it still gets the normal capture-parse-failure warning instead of
+    being silently discarded as if it were a replay.
+    """
+    try:
+        decoded = _decode_request_body(body, content_encoding)
+        data = json.loads(decoded)
+    except Exception:
+        return False
+    return isinstance(data, dict) and data.get("max_tokens") == 0
 
 
 def _decode_request_body(body: bytes, content_encoding: str | None) -> bytes:

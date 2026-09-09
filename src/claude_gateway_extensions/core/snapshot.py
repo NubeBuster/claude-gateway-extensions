@@ -108,6 +108,7 @@ class SessionState:
     last_credential: tuple[str, str] | None = field(default=None)
     rewarm: bool = False
     rewarm_write: RewarmWrite | None = None
+    replays_seen: int = 0
 
 
 def _load_json(body: bytes) -> Any:

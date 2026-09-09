@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Fix: a `POST /v1/messages` body with `max_tokens: 0` -- a bump or fork
+  replay, this daemon's own or a chained upstream proxy's -- is now never
+  captured as a session's snapshot; it is still forwarded untouched. It is
+  counted per session as `replays_seen` on the session status, so a chained
+  proxy that also bumps is visible instead of silently overwriting real
+  conversation snapshots with replay bodies. See the "Replays are never
+  snapshots" decision in `docs/DESIGN.md`.
 - Fix: a gzip- or deflate-encoded `POST /v1/messages` request body (sent by
   a chained upstream proxy or the SDK) is now decoded before capture instead
   of silently never producing a snapshot. The forwarded bytes are untouched;
