@@ -124,7 +124,6 @@ def test_missing_session_id_is_silent() -> None:
     assert out == ""
 
 
-@pytest.mark.invariant(decision="Anything unparseable is `ok`")
 def test_prefix_non_match_is_silent(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = _install_client(monkeypatch, result=_INTERVENE_RESULT)
     code, out = _run(
@@ -154,7 +153,7 @@ def test_prefix_suffix_without_boundary_does_not_match(monkeypatch: pytest.Monke
 # --- fail-open, but visible: missing template / unreachable daemon ----------
 
 
-@pytest.mark.invariant(decision="Anything unparseable is `ok`")
+@pytest.mark.invariant(decision="Fail-open, but visible")
 def test_missing_template_skips_with_system_message() -> None:
     code, out = _run({"session_id": "s1", "hook_event_name": "PreToolUse"}, {}, "does-not-exist")
     assert code == 0
@@ -165,7 +164,7 @@ def test_missing_template_skips_with_system_message() -> None:
     assert "hookSpecificOutput" not in data
 
 
-@pytest.mark.invariant(decision="Anything unparseable is `ok`")
+@pytest.mark.invariant(decision="Fail-open, but visible")
 def test_missing_template_quiet_env_suppresses_message() -> None:
     code, out = _run(
         {"session_id": "s1", "hook_event_name": "PreToolUse"},
@@ -176,7 +175,7 @@ def test_missing_template_quiet_env_suppresses_message() -> None:
     assert out == ""
 
 
-@pytest.mark.invariant(decision="Anything unparseable is `ok`")
+@pytest.mark.invariant(decision="Fail-open, but visible")
 def test_unreachable_daemon_skips_with_system_message(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -191,7 +190,7 @@ def test_unreachable_daemon_skips_with_system_message(
     assert data["systemMessage"].startswith("cgx fork-review skipped")
 
 
-@pytest.mark.invariant(decision="Anything unparseable is `ok`")
+@pytest.mark.invariant(decision="Fail-open, but visible")
 def test_unreachable_daemon_quiet_env_suppresses_message(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

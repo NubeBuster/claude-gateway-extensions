@@ -196,7 +196,7 @@ def test_build_fork_body_preserves_values_and_sets_cap() -> None:
     assert '"count": 2' in appended["content"]
 
 
-@pytest.mark.invariant(decision="a fork runs on the reviewed session's own model")
+@pytest.mark.invariant(decision="A fork runs on the reviewed session's own model by default")
 def test_build_fork_body_never_changes_model_by_default() -> None:
     body = json.dumps({"model": "claude-x", "max_tokens": 10}).encode()
     data = json.loads(build_fork_body(body, "review", {}, 100))
@@ -273,7 +273,7 @@ def test_build_fork_body_appends_system_after_trailing_system_run() -> None:
     assert appended["content"].startswith("review\n\n```json\n")
 
 
-@pytest.mark.invariant(decision="the fork body preserves the cached prefix")
+@pytest.mark.invariant(decision="The fork body preserves the cached prefix")
 def test_build_fork_body_preserves_tools_and_tool_choice_when_present() -> None:
     body = json.dumps(
         {"model": "m", "max_tokens": 10, "tools": [{"name": "x"}], "tool_choice": "auto"}
@@ -768,7 +768,10 @@ async def test_fork_now_config_default_model_applies_when_no_request_override(
 # -- Scheduler.fork_now: never a subagent snapshot -------------------------
 
 
-@pytest.mark.invariant(decision="never review a session against a subagent's snapshot")
+@pytest.mark.invariant(
+    decision="The snapshot is chosen by the same `TargetSelector` as bumping, "
+    "but only after excluding known subagent traffic"
+)
 async def test_fork_now_prefers_main_conversation_over_a_larger_subagent_snapshot(
     tmp_path: Path,
 ) -> None:
@@ -836,7 +839,7 @@ async def test_fork_now_treats_unparseable_subagent_status_as_unknown_never_pref
     assert result.subagent_snapshot is False
 
 
-@pytest.mark.invariant(decision="A fork must not touch bump bookkeeping")
+@pytest.mark.invariant(decision="A fork is one replay, never a session")
 async def test_fork_now_leaves_bump_bookkeeping_untouched(tmp_path: Path) -> None:
     clock = FakeClock(start=1000.0)
     store = MemoryStore(max_streams_per_session=8)
