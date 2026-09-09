@@ -294,6 +294,25 @@ def test_skill_source_dir_falls_back_to_repo_checkout(
     assert source.parts[-3:] == ("claude", "skills", "cache")
 
 
+@pytest.mark.invariant(decision="Skill as pure fall-through, hook does the work")
+def test_skill_is_pure_fall_through() -> None:
+    """The packaged SKILL.md must not let the model act on ``/cache`` itself.
+
+    Guards against a rewrite that quietly turns the skill into something
+    that toggles bumping or reports cache state on its own -- the model
+    must never invoke it (``disable-model-invocation: true``) and its body
+    must tell the model the hook/daemon isn't there and not to act.
+    """
+    text = (install.skill_source_dir() / "SKILL.md").read_text()
+    front_matter, _, body = text.partition("---\n")[2].partition("---\n")
+
+    assert "disable-model-invocation: true" in front_matter
+
+    body_lower = body.lower()
+    assert "hook" in body_lower and ("not installed" in body_lower or "not running" in body_lower)
+    assert "do not" in body_lower and "toggle" in body_lower
+
+
 @pytest.mark.invariant(decision="The port is written down, never assumed")
 def test_resolve_install_port_prefers_explicit_flag() -> None:
     assert install.resolve_install_port(9999, {"CGX_PORT": "1111"}, 2222) == 9999
