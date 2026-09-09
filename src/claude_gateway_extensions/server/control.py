@@ -158,6 +158,7 @@ async def fork_session(request: web.Request) -> web.Response:
             "paid_write": verdict.paid_write,
             "model": verdict.model,
             "stream_key": verdict.stream_key,
+            "subagent_snapshot": verdict.subagent_snapshot,
         }
     )
 

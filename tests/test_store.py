@@ -12,7 +12,9 @@ from claude_gateway_extensions.core.snapshot import SessionState, Snapshot, Usag
 from claude_gateway_extensions.core.store import FileStore, MemoryStore
 
 
-def _snapshot(session_id: str, stream: str, captured_at: float = 1000.0) -> Snapshot:
+def _snapshot(
+    session_id: str, stream: str, captured_at: float = 1000.0, is_subagent: bool | None = None
+) -> Snapshot:
     return Snapshot(
         session_id=session_id,
         stream_key=stream,
@@ -21,6 +23,7 @@ def _snapshot(session_id: str, stream: str, captured_at: float = 1000.0) -> Snap
         body=b'{"model": "claude-x"}',
         captured_at=captured_at,
         usage=Usage(input_tokens=1),
+        is_subagent=is_subagent,
     )
 
 
@@ -84,6 +87,33 @@ def test_file_store_permissions_and_round_trip(tmp_path: Path) -> None:
     assert got_snapshots[0].body == snap.body
     got_state = reloaded.get_state("sess-1")
     assert got_state == state
+
+
+def test_file_store_round_trips_is_subagent(tmp_path: Path) -> None:
+    root = tmp_path / "state"
+    store = FileStore(root, max_streams_per_session=8)
+    store.put_snapshot(_snapshot("sess-1", "stream-a", is_subagent=True))
+
+    reloaded = FileStore(root, max_streams_per_session=8)
+    got = reloaded.get_snapshots("sess-1")
+    assert len(got) == 1
+    assert got[0].is_subagent is True
+
+
+def test_file_store_loads_snapshot_without_is_subagent_key(tmp_path: Path) -> None:
+    root = tmp_path / "state"
+    store = FileStore(root, max_streams_per_session=8)
+    store.put_snapshot(_snapshot("sess-1", "stream-a"))
+
+    snap_path = root / "sess-1" / "stream-a.json"
+    data = json.loads(snap_path.read_text())
+    del data["is_subagent"]
+    snap_path.write_text(json.dumps(data))
+
+    reloaded = FileStore(root, max_streams_per_session=8)
+    got = reloaded.get_snapshots("sess-1")
+    assert len(got) == 1
+    assert got[0].is_subagent is None
 
 
 def test_file_store_survives_a_platform_that_rejects_chmod(

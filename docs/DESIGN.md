@@ -153,9 +153,15 @@ loopback-only control API.
   TTL. The `cache_write` stop is the guard if that changes; keep it default.
 - Bumps after the user changed model or effort level pay one write, then stop.
   This is not detected proactively.
-- Subagent traffic shares the lead's session id. A subagent prompt larger than
-  the main conversation would win the default selection; integrators who care
-  can supply a selector that also reads `x-claude-code-agent-id`.
+- Subagent traffic shares the lead's session id. Bumping's default
+  selection still has no concept of this: a subagent prompt larger than
+  the main conversation wins the plain largest-prefix rule, and keeping
+  the wrong stream warm is a wasted read, not a wrong answer. A shadow
+  review fork's selection is not subject to this (see its own section
+  below, "The snapshot is chosen..."): it excludes known subagent
+  snapshots via `body_is_subagent` before applying the same rule, because
+  a fork's cost of getting this wrong is a wrong verdict, not a wasted
+  read.
 - The hook relies on `UserPromptSubmit` receiving the raw prompt before skill
   expansion. If that order changes, the skill body still explains the situation
   to the user.
@@ -176,10 +182,31 @@ review" roadmap line; no part of it ships in 1.0.
   `max_tokens` restored and one message appended, sent through the same
   `Upstream`: a twin that could take a second turn would need
   conversation state the daemon has no business owning.
-- **The snapshot is chosen by the same `TargetSelector` as bumping.** The
-  stream worth keeping warm is the stream worth reviewing — the main
-  conversation — and a second selection rule would silently drift from
-  the first.
+- **The snapshot is chosen by the same `TargetSelector` as bumping, but
+  only after excluding known subagent traffic.** The stream worth keeping
+  warm is the stream worth reviewing — the main conversation — and a
+  second selection rule would silently drift from the first, so
+  `fork_now` still calls the same selector; it just runs it over the
+  subset with `is_subagent is False` first. Subagent traffic shares the
+  lead's session id (see "Open risks"), so the snapshot set for a session
+  mixes main-conversation streams with subagent ones, and a big subagent
+  prompt would otherwise win the plain largest-prefix rule — worse for a
+  fork than for a bump, since the verdict becomes a confident answer
+  about a conversation that is not the one the hook fired in. Claude Code
+  states subagent-ness in the request body, not a header:
+  `core/snapshot.py::body_is_subagent` reads the `x-anthropic-billing-header:`
+  attribution block Claude Code prepends as `system[0]` for its
+  `cc_is_subagent=true` marker, three-valued (`None` when the body is
+  unreadable or carries no such block) so "unknown" is never read as
+  "main conversation" and never preferred over a snapshot known `False`.
+  When the known-safe subset is empty, `fork_now` falls back to selecting
+  over every snapshot for the session and flags the outcome
+  `subagent_snapshot: true` rather than refusing it — a fork is one-shot
+  spend, not a recurring cost, so there is nothing to protect by blocking
+  it the way `snapshot_stale` blocks a stale replay. Bumping's own
+  selection is unchanged: it has no equivalent concept of "wrong
+  conversation" to avoid, since it exists only to keep whatever stream it
+  picks warm.
 - **A fork runs on the reviewed session's own model by default, never a
   fixed list a tool ships.** `build_fork_body` leaves the captured body's
   `model` untouched by default, precisely because Anthropic namespaces

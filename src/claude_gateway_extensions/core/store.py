@@ -160,11 +160,17 @@ def _snapshot_to_json(snapshot: Snapshot) -> dict[str, object]:
             "cache_read_input_tokens": snapshot.usage.cache_read_input_tokens,
             "cache_creation_input_tokens": snapshot.usage.cache_creation_input_tokens,
         },
+        "is_subagent": snapshot.is_subagent,
     }
 
 
 def _snapshot_from_json(data: dict[str, object]) -> Snapshot:
-    """Deserialise a snapshot dict previously produced by :func:`_snapshot_to_json`."""
+    """Deserialise a snapshot dict previously produced by :func:`_snapshot_to_json`.
+
+    ``is_subagent`` defaults to ``None`` (unknown) when absent, so a
+    snapshot persisted before this field existed loads exactly as if its
+    body had carried no attribution block.
+    """
     usage_data = data["usage"]
     assert isinstance(usage_data, dict)
     return Snapshot(
@@ -175,6 +181,7 @@ def _snapshot_from_json(data: dict[str, object]) -> Snapshot:
         body=base64.b64decode(str(data["body_b64"])),
         captured_at=float(data["captured_at"]),  # type: ignore[arg-type]
         usage=Usage.from_dict(usage_data),
+        is_subagent=data.get("is_subagent"),  # type: ignore[arg-type]
     )
 
 

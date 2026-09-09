@@ -205,7 +205,7 @@ Response `200`:
   "usage": {"input_tokens": 3, "output_tokens": 12,
   "cache_read_input_tokens": 4096, "cache_creation_input_tokens": 0},
   "paid_write": false, "model": "claude-opus-4-5-20251101",
-  "stream_key": "a1b2c3..."}
+  "stream_key": "a1b2c3...", "subagent_snapshot": false}
 ```
 
 `verdict` is `"ok"` or `"intervene"`. `reason` is always a string.
@@ -221,7 +221,11 @@ flag to surface a fork that is quietly costing real money. `model` is
 the model the fork was actually sent to (the snapshot's own by default,
 or the effective override) and `stream_key` is the selected snapshot's
 stream key; both are `null` for `no_snapshot`, the only outcome reached
-before a snapshot is selected.
+before a snapshot is selected. `subagent_snapshot` is `true` when no
+snapshot known *not* to be subagent traffic existed for the session, so
+the fork fell back to selecting over every snapshot including subagent
+ones -- flagged, never refused, since a fork is one-shot spend; `false`
+otherwise, including for `no_snapshot`.
 
 This endpoint always answers `200` -- never `409` or `404` -- including
 for the following degraded outcomes, so no client needs a fail-open

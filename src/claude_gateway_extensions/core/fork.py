@@ -247,7 +247,10 @@ class ForkVerdict:
     request was actually sent to (the snapshot's own by default, or the
     override when one is in effect) and ``stream_key`` is the snapshot's.
     Both are ``None`` for outcomes reached before a snapshot is known
-    (``no_snapshot``).
+    (``no_snapshot``). ``subagent_snapshot`` is ``True`` when
+    ``Scheduler.fork_now`` had no snapshot known *not* to be subagent
+    traffic and fell back to selecting over every snapshot for the
+    session -- flagged, never refused, since a fork is one-shot spend.
     """
 
     verdict: Literal["ok", "intervene"]
@@ -257,6 +260,7 @@ class ForkVerdict:
     paid_write: bool
     model: str | None = None
     stream_key: str | None = None
+    subagent_snapshot: bool = False
 
 
 def _fail_open(

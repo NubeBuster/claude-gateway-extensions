@@ -157,6 +157,36 @@ async def test_tee_extracts_usage_from_sse_and_snapshots(harness: ServerHarness)
     assert snap.usage.output_tokens == 20
     assert snap.body == body
     assert snap.headers.get("authorization") == "Bearer tok"
+    assert snap.is_subagent is None
+
+
+async def test_capture_reads_is_subagent_from_the_attribution_block(
+    harness: ServerHarness,
+) -> None:
+    async def handler(request: web.Request) -> web.Response:
+        return web.json_response({"usage": {"input_tokens": 5}})
+
+    harness.fake.script(handler)
+
+    body = json.dumps(
+        {
+            "model": "claude-x",
+            "max_tokens": 10,
+            "system": [
+                {"type": "text", "text": "x-anthropic-billing-header: cc_is_subagent=true;x=1"}
+            ],
+            "messages": [],
+        }
+    ).encode()
+    resp = await harness.client.post(
+        "/v1/messages", data=body, headers={"x-claude-code-session-id": "sess-sub"}
+    )
+    assert resp.status == 200
+
+    store = harness.app[STORE_KEY]
+    snaps = store.get_snapshots("sess-sub")
+    assert len(snaps) == 1
+    assert snaps[0].is_subagent is True
 
 
 @pytest.mark.invariant(decision="Tee only the private copy")

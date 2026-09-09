@@ -1,8 +1,8 @@
 """Data models for captured requests and per-session bump state.
 
 Defines :class:`Usage`, :class:`Snapshot` and :class:`SessionState`, plus the
-two pure functions used to key and classify a captured ``/v1/messages``
-request body: :func:`stream_key` and :func:`wants_1h_ttl`.
+pure functions used to key and classify a captured ``/v1/messages`` request
+body: :func:`stream_key`, :func:`wants_1h_ttl` and :func:`body_is_subagent`.
 """
 
 from __future__ import annotations
@@ -58,7 +58,15 @@ class Usage:
 
 @dataclass
 class Snapshot:
-    """A captured ``/v1/messages`` request/response pair for one stream."""
+    """A captured ``/v1/messages`` request/response pair for one stream.
+
+    ``is_subagent`` is :func:`body_is_subagent`'s three-valued read of
+    ``body`` at capture time: ``True``/``False`` for a body that states
+    its side of the split via the attribution block, ``None`` for one
+    that does not (or could not be parsed) -- never coerced to a
+    two-valued default, so a caller that must not treat "unknown" as
+    "main conversation" can tell the two apart.
+    """
 
     session_id: str
     stream_key: str
@@ -67,6 +75,7 @@ class Snapshot:
     body: bytes
     captured_at: float
     usage: Usage
+    is_subagent: bool | None = None
 
 
 @dataclass
@@ -133,3 +142,58 @@ def wants_1h_ttl(body: bytes) -> bool:
         if isinstance(cache_control, dict) and cache_control.get("ttl") == "1h":
             return True
     return False
+
+
+#: Marker text of the attribution/billing block Claude Code prepends as
+#: ``system[0]`` (a text block, not an HTTP header, despite the name).
+_ATTRIBUTION_HEADER_PREFIX = "x-anthropic-billing-header:"
+
+#: The attribution block's own statement of which side of the main/subagent
+#: split a request came from -- the only thing on the wire that states it;
+#: nothing distinguishes a subagent's request from its parent's by header,
+#: model, or session id.
+_SUBAGENT_ATTRIBUTION_MARKER = "cc_is_subagent=true"
+
+
+def _is_attribution_block(block: object) -> bool:
+    """Whether ``block`` is the CLI's attribution/billing ``system`` block.
+
+    Shape-based: recognised by its ``x-anthropic-billing-header:`` text, so
+    a session whose ``system[0]`` is an ordinary preamble is never mistaken
+    for it. Only ``system[0]`` is ever considered by :func:`body_is_subagent`
+    -- that is where the client prepends it, so a lookalike deeper in
+    ``system`` is content the user put there.
+    """
+    if not isinstance(block, dict):
+        return False
+    if block.get("type") not in (None, "text"):
+        return False
+    text = block.get("text")
+    return isinstance(text, str) and text.lstrip().startswith(_ATTRIBUTION_HEADER_PREFIX)
+
+
+def body_is_subagent(body: bytes) -> bool | None:
+    """Whether a captured body is subagent traffic, or ``None`` if unreadable.
+
+    Three-valued on purpose, and callers must keep the third value apart
+    from the other two: ``None`` means "this body did not parse, or carries
+    no attribution block", never "it is a main-conversation request". A
+    guard that read an unparseable body as ``False`` would let exactly the
+    traffic it cannot inspect through the check it exists to apply.
+
+    Read off the attribution block rather than any header, because that
+    block is where the CLI states it -- see `_SUBAGENT_ATTRIBUTION_MARKER`.
+    """
+    try:
+        data = _load_json(body)
+    except SnapshotError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    system = data.get("system")
+    if not isinstance(system, list) or not system:
+        return None
+    block = system[0]
+    if not _is_attribution_block(block):
+        return None
+    return _SUBAGENT_ATTRIBUTION_MARKER in block.get("text", "")

@@ -128,7 +128,16 @@ async def test_forget_removes_the_session(harness: ServerHarness) -> None:
 
 
 #: The response keys ``docs/API.md`` documents for POST /cgx/sessions/{id}/fork.
-FORK_KEYS = {"verdict", "reason", "mutation", "usage", "paid_write", "model", "stream_key"}
+FORK_KEYS = {
+    "verdict",
+    "reason",
+    "mutation",
+    "usage",
+    "paid_write",
+    "model",
+    "stream_key",
+    "subagent_snapshot",
+}
 
 
 async def test_fork_invalid_session_id_rejected(harness: ServerHarness) -> None:
@@ -198,6 +207,7 @@ async def test_fork_without_snapshot_is_200_ok_no_snapshot(harness: ServerHarnes
         "paid_write": False,
         "model": None,
         "stream_key": None,
+        "subagent_snapshot": False,
     }
 
 
@@ -206,9 +216,22 @@ async def test_fork_returns_the_verdict_shape(harness: ServerHarness) -> None:
         return web.json_response({"usage": {"input_tokens": 5}})
 
     harness.fake.script(messages_handler)
+    # A system[0] attribution block without the subagent marker: this is
+    # main-conversation traffic, so the fork must not need the fallback
+    # path (see the "never a subagent snapshot" selection preference).
+    request_body = json.dumps(
+        {
+            "model": "claude-x",
+            "max_tokens": 10,
+            "system": [
+                {"type": "text", "text": "x-anthropic-billing-header: cc_is_subagent=false"}
+            ],
+            "messages": [],
+        }
+    ).encode()
     resp = await harness.client.post(
         "/v1/messages",
-        data=b'{"model": "claude-x", "max_tokens": 10, "messages": []}',
+        data=request_body,
         headers={"x-claude-code-session-id": "sess-fork", "authorization": "Bearer a"},
     )
     assert resp.status == 200
@@ -238,3 +261,4 @@ async def test_fork_returns_the_verdict_shape(harness: ServerHarness) -> None:
     assert body["usage"]["cache_read_input_tokens"] == 4096
     assert body["model"] == "claude-x"
     assert body["stream_key"] is not None
+    assert body["subagent_snapshot"] is False

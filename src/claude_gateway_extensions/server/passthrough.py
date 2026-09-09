@@ -25,7 +25,7 @@ from aiohttp import web
 from claude_gateway_extensions.config import Config
 from claude_gateway_extensions.core.clock import Clock
 from claude_gateway_extensions.core.scheduler import Scheduler
-from claude_gateway_extensions.core.snapshot import Snapshot, Usage, stream_key
+from claude_gateway_extensions.core.snapshot import Snapshot, Usage, body_is_subagent, stream_key
 from claude_gateway_extensions.core.upstream import decode_body, filter_headers
 from claude_gateway_extensions.server.keys import (
     CLIENT_SESSION_KEY,
@@ -205,6 +205,7 @@ def _capture(
             body=request_body,
             captured_at=clock.now(),
             usage=usage,
+            is_subagent=body_is_subagent(request_body),
         )
         credential = _extract_credential(headers)
         scheduler.note_request(session_id, snapshot, credential)

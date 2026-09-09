@@ -7,6 +7,7 @@ import pytest
 from claude_gateway_extensions.core.snapshot import (
     SnapshotError,
     Usage,
+    body_is_subagent,
     stream_key,
     wants_1h_ttl,
 )
@@ -82,6 +83,55 @@ def test_wants_1h_ttl_false_when_ttl_is_5m() -> None:
 def test_wants_1h_ttl_invalid_json_raises() -> None:
     with pytest.raises(SnapshotError):
         wants_1h_ttl(b"not json")
+
+
+def test_body_is_subagent_true_when_marker_present() -> None:
+    body = _body(
+        model="m",
+        system=[
+            {"type": "text", "text": "x-anthropic-billing-header: cc_is_subagent=true;other=1"}
+        ],
+    )
+    assert body_is_subagent(body) is True
+
+
+def test_body_is_subagent_false_when_marker_absent_from_attribution_block() -> None:
+    body = _body(
+        model="m",
+        system=[{"type": "text", "text": "x-anthropic-billing-header: cc_is_subagent=false"}],
+    )
+    assert body_is_subagent(body) is False
+
+
+def test_body_is_subagent_none_when_no_system() -> None:
+    body = _body(model="m")
+    assert body_is_subagent(body) is None
+
+
+def test_body_is_subagent_none_when_system0_is_not_attribution_shaped() -> None:
+    body = _body(model="m", system=[{"type": "text", "text": "you are a helpful assistant"}])
+    assert body_is_subagent(body) is None
+
+
+def test_body_is_subagent_none_when_marker_is_deeper_than_system0() -> None:
+    # Only system[0] is ever considered: a lookalike further in is content
+    # the user put there, not the client's own attribution block.
+    body = _body(
+        model="m",
+        system=[
+            {"type": "text", "text": "you are a helpful assistant"},
+            {"type": "text", "text": "x-anthropic-billing-header: cc_is_subagent=true"},
+        ],
+    )
+    assert body_is_subagent(body) is None
+
+
+def test_body_is_subagent_none_when_body_unparseable() -> None:
+    assert body_is_subagent(b"not json") is None
+
+
+def test_body_is_subagent_none_when_body_not_an_object() -> None:
+    assert body_is_subagent(b"[1, 2, 3]") is None
 
 
 def test_usage_defaults_and_total_input() -> None:

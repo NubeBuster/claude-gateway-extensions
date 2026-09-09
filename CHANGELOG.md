@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- Shadow review fork: a fork's snapshot selection now excludes known
+  subagent traffic before applying the usual largest-prefix rule, falling
+  back to selecting over every snapshot (flagged `subagent_snapshot:
+  true` on the response) only when no snapshot is known not to be a
+  subagent's. Subagent-ness is read from the `cc_is_subagent=true` marker
+  in the `system[0]` attribution block Claude Code prepends (new
+  `core/snapshot.py::body_is_subagent`, three-valued so an unparseable or
+  attribution-less body is treated as unknown, never as main-conversation
+  traffic) and stored on each `Snapshot` as `is_subagent` at capture time.
+  Previously a big subagent prompt could win the plain largest-prefix
+  selection and the verdict would be a confident answer about a
+  conversation the hook never fired in. Bumping's own selection is
+  unchanged.
 - Shadow review fork: the reviewer model is now stated and enforced as the
   reviewed session's own model by default (an invariant test pins
   `build_fork_body` to never change it), with an opt-in override -- an

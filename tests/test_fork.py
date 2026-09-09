@@ -62,7 +62,9 @@ def _verdict_response(verdict_obj: object, cache_creation: int = 0) -> UpstreamR
     )
 
 
-def _snapshot(session_id: str = "sess-1", total_input: int = 100) -> Snapshot:
+def _snapshot(
+    session_id: str = "sess-1", total_input: int = 100, is_subagent: bool | None = None
+) -> Snapshot:
     return Snapshot(
         session_id=session_id,
         stream_key="stream-a",
@@ -74,6 +76,29 @@ def _snapshot(session_id: str = "sess-1", total_input: int = 100) -> Snapshot:
         ),
         captured_at=1000.0,
         usage=Usage(input_tokens=total_input),
+        is_subagent=is_subagent,
+    )
+
+
+def _subagent_snapshot(
+    session_id: str = "sess-1",
+    stream_key: str = "stream-b",
+    total_input: int = 100,
+    is_subagent: bool | None = True,
+) -> Snapshot:
+    """A snapshot varying ``stream_key``/size/``is_subagent`` from :func:`_snapshot`."""
+    return Snapshot(
+        session_id=session_id,
+        stream_key=stream_key,
+        model="claude-x",
+        headers={"authorization": "Bearer old", "content-type": "application/json"},
+        body=(
+            b'{"model": "claude-x", "max_tokens": 4096, '
+            b'"messages": [{"role": "user", "content": "hi"}]}'
+        ),
+        captured_at=1000.0,
+        usage=Usage(input_tokens=total_input),
+        is_subagent=is_subagent,
     )
 
 
@@ -738,6 +763,77 @@ async def test_fork_now_config_default_model_applies_when_no_request_override(
     assert result.model == "claude-daemon-default"
     sent = json.loads(upstream.calls[0][3])
     assert sent["model"] == "claude-daemon-default"
+
+
+# -- Scheduler.fork_now: never a subagent snapshot -------------------------
+
+
+@pytest.mark.invariant(decision="never review a session against a subagent's snapshot")
+async def test_fork_now_prefers_main_conversation_over_a_larger_subagent_snapshot(
+    tmp_path: Path,
+) -> None:
+    clock = FakeClock(start=1000.0)
+    store = MemoryStore(max_streams_per_session=8)
+    store.put_snapshot(_snapshot("sess-1", total_input=100, is_subagent=False))
+    store.put_snapshot(
+        _subagent_snapshot("sess-1", stream_key="stream-sub", total_input=99999, is_subagent=True)
+    )
+    store.put_state(
+        SessionState(session_id="sess-1", last_credential=("authorization", "Bearer a"))
+    )
+    upstream = ScriptedUpstream([_verdict_response({"verdict": "ok", "reason": "fine"})])
+    scheduler = Scheduler(_config(tmp_path), store, LargestPrefixSelector(), upstream, clock)
+
+    result = await scheduler.fork_now("sess-1", "review", {}, None)
+
+    assert result.reason == "fine"
+    assert result.stream_key == "stream-a"
+    assert result.subagent_snapshot is False
+
+
+async def test_fork_now_falls_back_and_flags_when_only_subagent_snapshots_exist(
+    tmp_path: Path,
+) -> None:
+    clock = FakeClock(start=1000.0)
+    store = MemoryStore(max_streams_per_session=8)
+    store.put_snapshot(_subagent_snapshot("sess-1", stream_key="stream-sub", is_subagent=True))
+    store.put_state(
+        SessionState(session_id="sess-1", last_credential=("authorization", "Bearer a"))
+    )
+    upstream = ScriptedUpstream([_verdict_response({"verdict": "ok", "reason": "fine"})])
+    scheduler = Scheduler(_config(tmp_path), store, LargestPrefixSelector(), upstream, clock)
+
+    result = await scheduler.fork_now("sess-1", "review", {}, None)
+
+    assert result.reason == "fine"
+    assert result.stream_key == "stream-sub"
+    assert result.subagent_snapshot is True
+
+
+async def test_fork_now_treats_unparseable_subagent_status_as_unknown_never_preferred(
+    tmp_path: Path,
+) -> None:
+    # A snapshot whose is_subagent is None (unparseable body / no
+    # attribution block) must never be preferred over one known False.
+    clock = FakeClock(start=1000.0)
+    store = MemoryStore(max_streams_per_session=8)
+    store.put_snapshot(_snapshot("sess-1", total_input=1, is_subagent=False))
+    store.put_snapshot(
+        _subagent_snapshot(
+            "sess-1", stream_key="stream-unknown", total_input=99999, is_subagent=None
+        )
+    )
+    store.put_state(
+        SessionState(session_id="sess-1", last_credential=("authorization", "Bearer a"))
+    )
+    upstream = ScriptedUpstream([_verdict_response({"verdict": "ok", "reason": "fine"})])
+    scheduler = Scheduler(_config(tmp_path), store, LargestPrefixSelector(), upstream, clock)
+
+    result = await scheduler.fork_now("sess-1", "review", {}, None)
+
+    assert result.reason == "fine"
+    assert result.stream_key == "stream-a"
+    assert result.subagent_snapshot is False
 
 
 @pytest.mark.invariant(decision="A fork must not touch bump bookkeeping")

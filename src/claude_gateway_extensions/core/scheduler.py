@@ -195,6 +195,17 @@ class Scheduler:
     ) -> ForkVerdict:
         """Replay the session's selected snapshot once as a shadow review fork.
 
+        Unlike bumping, selection here prefers a snapshot known *not* to be
+        subagent traffic (``is_subagent is False``): the selector runs over
+        that subset first, falling back to every snapshot only when the
+        subset is empty. The fallback is flagged, not refused, on the
+        returned verdict's ``subagent_snapshot`` -- a fork is one-shot
+        spend, not recurring, so there is nothing to protect by refusing
+        it. A snapshot whose ``is_subagent`` is unknown (``None``, an
+        unparseable or attribution-less body) is treated the same as a
+        known subagent snapshot for this preference: never assumed to be
+        the main conversation.
+
         ``model`` overrides the reviewer model for this fork only, else
         falling back to ``CGX_FORK_MODEL`` (the daemon-wide default), else
         the snapshot's own model -- the only choice that reads the
@@ -205,7 +216,14 @@ class Scheduler:
         cache-warming replay, so none of the bump effects apply to it.
         """
         state = self._store.get_state(session_id)
-        snapshot = self._selector.select(self._store.get_snapshots(session_id))
+        snapshots = self._store.get_snapshots(session_id)
+        main_snapshots = [snap for snap in snapshots if snap.is_subagent is False]
+        subagent_snapshot = False
+        if main_snapshots:
+            snapshot = self._selector.select(main_snapshots)
+        else:
+            snapshot = self._selector.select(snapshots)
+            subagent_snapshot = snapshot is not None
         if snapshot is None:
             return ForkVerdict(
                 verdict="ok", reason="no_snapshot", mutation=None, usage=None, paid_write=False
@@ -222,7 +240,7 @@ class Scheduler:
         credential = state.last_credential if state is not None else None
         cap = max_tokens if max_tokens is not None else self._config.fork_max_tokens
         model_override = model if model is not None else self._config.fork_model
-        return await fork_once(
+        result = await fork_once(
             self._upstream,
             self._config.upstream,
             snapshot,
@@ -233,6 +251,9 @@ class Scheduler:
             self._config.fork_thinking_guard,
             model_override,
         )
+        if subagent_snapshot:
+            result = dataclasses.replace(result, subagent_snapshot=True)
+        return result
 
     def _snapshot_is_stale(self, snapshot: Snapshot) -> bool:
         """Return whether ``snapshot`` is older than the TTL its own body requested.
