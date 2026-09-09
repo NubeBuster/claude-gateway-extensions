@@ -13,14 +13,14 @@ normal cache-read pricing per bump (often free on a subscription); it stops
 bumping a session the moment a bump would pay a full cache write instead of
 a read (see "How it works").
 
-0.1 ships cache bumping only; other7 features are on the roadmap in
+0.1 ships cache bumping only; other features are on the roadmap in
 `docs/DESIGN.md`.
 
 ## Requirements
 
 - Python 3.11+
 - Claude Code
-- [Both claude.ai substriptions and API billing are supported](https://code.claude.com/docs/en/gateways#subscriptions-and-gateways)
+- [Both claude.ai subscriptions and API billing are supported](https://code.claude.com/docs/en/gateways#subscriptions-and-gateways)
 - Linux or macOS. `cgx service install` (the systemd user unit) is Linux
   only; on macOS run `cgx serve` yourself (a shell, `tmux`, or a `launchd`
   agent you write). Running without systemd: `cgx serve --port 8787` in any
@@ -71,7 +71,7 @@ above).
 
 ---
 
-Then configure Claude Code for routing to the gateway, installing hooks and dding `/cache` skill:
+Then configure Claude Code for routing to the gateway, installing hooks and adding `/cache` skill:
 
 ```sh
 cgx configure --scope user
@@ -84,7 +84,7 @@ cgx configure --scope user -y
 
 This:
 
-- writes to the the scope's (`managed-`)`settings.json`:
+- writes to the scope's (`managed-`)`settings.json`:
   - The [Deamon Environment Variables](#daemon-environment-variables)
   - configures [The Claude Code Hook](#claude-code-hook)
 - copies the [cache/SKILL.md](claude/skills/cache/SKILL.md) (fake, for autocomplete, optional) into the scope `.claude/hooks/` - pending confirmation with a diff if a conflicting file exists
