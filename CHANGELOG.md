@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Makefile: `check`/`fix`/`test`/`lint`/`types` now fail loudly with a
+  one-line error when `.venv` is missing instead of silently falling back
+  to a bare `python`/`ruff`/`pyright`/`pytest` from `PATH`. New `venv`
+  target bootstraps it.
+
 ## 1.0.0 - 2026-09-09
 
 - Transparent HTTP proxy between Claude Code and the Anthropic API with
