@@ -11,6 +11,12 @@
   never call a tool) and by `parse_verdict`, which now treats a reply
   whose `content` carries a `tool_use` block as the fail-open `ok` result
   with reason `tool_use_reply`.
+- Shadow review fork: `max_tokens` sent to the upstream now adds the
+  captured snapshot's `thinking.budget_tokens` on top of the fork cap when
+  extended thinking is enabled there, since the API requires `max_tokens`
+  strictly greater than the thinking budget; a thinking-enabled session
+  previously hit a hard 400 that `parse_verdict` fail-opened into a silent
+  `ok` with no verdict and no logged reason.
 - Makefile: `check`/`fix`/`test`/`lint`/`types` now fail loudly with a
   one-line error when `.venv` is missing instead of silently falling back
   to a bare `python`/`ruff`/`pyright`/`pytest` from `PATH`. New `venv`

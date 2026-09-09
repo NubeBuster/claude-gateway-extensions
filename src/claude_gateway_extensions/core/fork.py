@@ -31,26 +31,44 @@ ForkOutcome = Literal["ok", "intervene"]
 _FORK_PATH = "/v1/messages"
 
 
+def _thinking_budget(data: Mapping[str, object]) -> int | None:
+    """Return the captured body's positive ``thinking.budget_tokens`` if thinking is enabled."""
+    thinking = data.get("thinking")
+    if not isinstance(thinking, dict) or thinking.get("type") != "enabled":
+        return None
+    budget = thinking.get("budget_tokens")
+    if isinstance(budget, bool) or not isinstance(budget, int) or budget <= 0:
+        return None
+    return budget
+
+
 def build_fork_body(body: bytes, prompt: str, payload: object, max_tokens: int) -> bytes:
     """Return ``body`` re-serialised as a one-shot review fork request.
 
-    ``max_tokens`` is forced to ``max_tokens`` and ``stream`` is set to
-    ``false`` only if the key is already present, exactly as
-    :func:`~.bump.build_bump_body` treats it. ``tools`` and ``tool_choice``
-    are preserved by value, not dropped: Anthropic hashes the cache prefix
-    over ``tools``, then ``system``, then ``messages``, so removing either
-    key invalidates the whole prefix and turns every fork into a full
-    ``cache_creation`` write. One user message is appended: ``prompt``
-    followed by ``payload`` pretty-printed as a fenced JSON block. A twin
-    must still never act on the parent's behalf, so that guarantee now
-    comes from the prompt instructing the reviewer never to call a tool,
-    plus :func:`parse_verdict` treating a ``tool_use`` reply as fail-open.
-    Everything else, including every nested ``cache_control`` block, is
-    preserved by value exactly as :func:`~.bump.build_bump_body` preserves
-    it, so the fork hits the same cached prefix.
+    ``max_tokens`` is forced to ``max_tokens``, plus the captured body's
+    ``thinking.budget_tokens`` when extended thinking is enabled there: the
+    API requires ``max_tokens`` strictly greater than the thinking budget,
+    and the captured ``thinking`` block itself is replayed untouched (it is
+    part of the prefix-affecting parameter set). ``max_tokens`` still bounds
+    only the reviewer's visible answer; the budget is headroom the API
+    demands on top of it. ``stream`` is set to ``false`` only if the key is
+    already present, exactly as :func:`~.bump.build_bump_body` treats it.
+    ``tools`` and ``tool_choice`` are preserved by value, not dropped:
+    Anthropic hashes the cache prefix over ``tools``, then ``system``, then
+    ``messages``, so removing either key invalidates the whole prefix and
+    turns every fork into a full ``cache_creation`` write. One user message
+    is appended: ``prompt`` followed by ``payload`` pretty-printed as a
+    fenced JSON block. A twin must still never act on the parent's behalf,
+    so that guarantee now comes from the prompt instructing the reviewer
+    never to call a tool, plus :func:`parse_verdict` treating a ``tool_use``
+    reply as fail-open. Everything else, including every nested
+    ``cache_control`` block, is preserved by value exactly as
+    :func:`~.bump.build_bump_body` preserves it, so the fork hits the same
+    cached prefix.
     """
     data = json.loads(body)
-    data["max_tokens"] = max_tokens
+    budget = _thinking_budget(data)
+    data["max_tokens"] = max_tokens + budget if budget is not None else max_tokens
     if "stream" in data:
         data["stream"] = False
     payload_text = json.dumps(payload, indent=2, ensure_ascii=False)

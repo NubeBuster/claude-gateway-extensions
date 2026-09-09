@@ -186,7 +186,12 @@ through in the same body, purely for the caller's own bookkeeping.
 daemon: whatever JSON value it is gets embedded verbatim in the fork's
 appended message. `max_tokens` is an optional positive integer that caps
 this one fork's reply, overriding `CGX_FORK_MAX_TOKENS`; `0` or a negative
-value is rejected rather than clamped, same as `interval_s` above.
+value is rejected rather than clamped, same as `interval_s` above. The
+request actually sent upstream is this cap plus the captured snapshot's
+`thinking.budget_tokens` when extended thinking is enabled there (the API
+requires `max_tokens` strictly greater than the thinking budget); the cap
+itself still bounds the reviewer's visible answer, the budget is headroom
+the API demands on top of it.
 
 Response `200`:
 

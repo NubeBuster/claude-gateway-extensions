@@ -199,6 +199,12 @@ review" roadmap line; no part of it ships in 1.0.
   field, else `CGX_FORK_MAX_TOKENS`, default 512). A verdict is a
   sentence and a label, so a runaway twin is a bug, not a use case, and a
   non-streamed reply is one body to parse.
+- **The cap is additive on top of the captured `thinking.budget_tokens`
+  when extended thinking is enabled there.** The API rejects a request
+  whose `max_tokens` does not strictly exceed the thinking budget, and
+  the captured `thinking` block is replayed untouched like every other
+  prefix-affecting field; the cap still bounds only the reviewer's
+  visible answer, the budget is headroom the API demands on top of it.
 - **The verdict is strict JSON: `{"verdict": "ok" | "intervene",
   "reason": str, "mutation": object | null}`.** A fixed contract is what
   lets one hook CLI serve every template without each one inventing its

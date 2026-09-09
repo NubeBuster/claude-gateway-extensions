@@ -168,6 +168,40 @@ def test_build_fork_body_does_not_add_stream_key_when_absent() -> None:
     assert "stream" not in data
 
 
+@pytest.mark.parametrize(
+    "thinking",
+    [
+        None,
+        {"type": "disabled"},
+        {"type": "enabled", "budget_tokens": "not-an-int"},
+        {"type": "enabled", "budget_tokens": 0},
+        {"type": "enabled", "budget_tokens": -1},
+    ],
+)
+def test_build_fork_body_max_tokens_is_bare_cap_without_enabled_budget(
+    thinking: object,
+) -> None:
+    original: dict[str, object] = {"model": "m", "max_tokens": 10}
+    if thinking is not None:
+        original["thinking"] = thinking
+    body = json.dumps(original).encode()
+    data = json.loads(build_fork_body(body, "review", None, 100))
+    assert data["max_tokens"] == 100
+
+
+def test_build_fork_body_max_tokens_adds_enabled_thinking_budget() -> None:
+    original = {
+        "model": "m",
+        "max_tokens": 10,
+        "thinking": {"type": "enabled", "budget_tokens": 4096},
+    }
+    body = json.dumps(original).encode()
+    data = json.loads(build_fork_body(body, "review", None, 100))
+    assert data["max_tokens"] == 100 + 4096
+    # The thinking block itself is replayed untouched.
+    assert data["thinking"] == {"type": "enabled", "budget_tokens": 4096}
+
+
 # -- parse_verdict ------------------------------------------------------------
 
 
