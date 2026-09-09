@@ -47,6 +47,18 @@ def _load_settings_quiet(scope: install.Scope, environ: Mapping[str, str], cwd: 
         return {}
 
 
+def _dict_section(settings: dict, key: str) -> dict | None:
+    """Return ``settings[key]`` if it is a dict, else ``None``.
+
+    Settings files are user-editable JSON, so any top-level key (``env``,
+    ``hooks``, ...) may hold a non-dict value or be absent entirely; every
+    check below only cares about the dict case and treats anything else the
+    same way, so that comparison lives here once.
+    """
+    value = settings.get(key)
+    return value if isinstance(value, dict) else None
+
+
 def check_daemon(client: ControlClient, url: str) -> CheckResult:
     """Check that the daemon answers ``GET /cgx/health``."""
     try:
@@ -62,8 +74,8 @@ def check_base_url(config: Config, environ: Mapping[str, str], cwd: Path) -> Che
     """Check that some scope's ``env.ANTHROPIC_BASE_URL`` points at the daemon."""
     for scope in _SCOPES:
         settings = _load_settings_quiet(scope, environ, cwd)
-        env = settings.get("env")
-        if isinstance(env, dict) and env.get("ANTHROPIC_BASE_URL") == config.url:
+        env = _dict_section(settings, "env")
+        if env is not None and env.get("ANTHROPIC_BASE_URL") == config.url:
             path = install.settings_path(scope, environ, cwd)
             return CheckResult("ok", f"env.ANTHROPIC_BASE_URL set to {config.url} in {path}")
     return CheckResult(
@@ -78,8 +90,8 @@ def _find_settings_port(
     """Return the port embedded in whichever scope's ``env.ANTHROPIC_BASE_URL`` is set first."""
     for scope in _SCOPES:
         settings = _load_settings_quiet(scope, environ, cwd)
-        env = settings.get("env")
-        base_url = env.get("ANTHROPIC_BASE_URL") if isinstance(env, dict) else None
+        env = _dict_section(settings, "env")
+        base_url = env.get("ANTHROPIC_BASE_URL") if env is not None else None
         if isinstance(base_url, str):
             port = urlsplit(base_url).port
             if port is not None:
@@ -128,8 +140,8 @@ def check_hook(environ: Mapping[str, str], cwd: Path) -> CheckResult:
     """Check that the ``UserPromptSubmit`` hook is registered in some scope."""
     for scope in _SCOPES:
         settings = _load_settings_quiet(scope, environ, cwd)
-        hooks_section = settings.get("hooks")
-        entries = hooks_section.get("UserPromptSubmit") if isinstance(hooks_section, dict) else None
+        hooks_section = _dict_section(settings, "hooks")
+        entries = hooks_section.get("UserPromptSubmit") if hooks_section is not None else None
         if isinstance(entries, list) and any(
             isinstance(e, dict) and install.hook_entry_has_command(e, install.HOOK_COMMAND)
             for e in entries
@@ -173,8 +185,8 @@ def check_fork_review_templates(environ: Mapping[str, str], cwd: Path) -> list[C
     results: list[CheckResult] = []
     for scope in _SCOPES:
         settings = _load_settings_quiet(scope, environ, cwd)
-        hooks_section = settings.get("hooks")
-        if not isinstance(hooks_section, dict):
+        hooks_section = _dict_section(settings, "hooks")
+        if hooks_section is None:
             continue
         settings_path = install.settings_path(scope, environ, cwd)
         for event, entries in hooks_section.items():
@@ -230,8 +242,8 @@ def check_credentials(environ: Mapping[str, str], cwd: Path) -> CheckResult:
             problems.append(f"{name} is set in the environment")
     for scope in _SCOPES:
         settings = _load_settings_quiet(scope, environ, cwd)
-        env = settings.get("env")
-        if isinstance(env, dict):
+        env = _dict_section(settings, "env")
+        if env is not None:
             for name in _CREDENTIAL_ENV_VARS:
                 if env.get(name):
                     problems.append(f"{name} is set in {scope} settings env")
