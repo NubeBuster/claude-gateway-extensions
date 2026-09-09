@@ -180,6 +180,22 @@ review" roadmap line; no part of it ships in 1.0.
   stream worth keeping warm is the stream worth reviewing — the main
   conversation — and a second selection rule would silently drift from
   the first.
+- **A fork runs on the reviewed session's own model by default, never a
+  fixed list a tool ships.** `build_fork_body` leaves the captured body's
+  `model` untouched by default, precisely because Anthropic namespaces
+  the prompt cache per model: a fork sent on any other model cannot read
+  the parent's cached prefix and pays a full write, and every user (and
+  every company) has a different set of models available, so no shipped
+  default list could be right for all of them. The request body's
+  optional `model`, else `CGX_FORK_MODEL` (the daemon-wide default), else
+  `cgx fork-review --model`, overrides it for one fork; an override
+  always forfeits the cache read and is logged once at WARNING with that
+  reason. The response reports `model` (the model actually sent to) and
+  `stream_key` (the selected snapshot's) so a caller can see which model
+  answered without guessing; both are `null` only for `no_snapshot`,
+  reached before a snapshot exists. An override that lands on a model
+  other than the snapshot's is a cost decision the caller made on
+  purpose, never a refusal.
 - **The appended turn is one message, `user` unless the captured body's
   last message is `system`: the rendered prompt, then the hook payload as
   a fenced JSON block.** Keeping the data verbatim and clearly delimited
@@ -264,9 +280,9 @@ review" roadmap line; no part of it ships in 1.0.
   unparseable body is treated as stale, not fresh, so a fork never spends
   money on a snapshot it cannot classify.
 - **`POST /cgx/sessions/{id}/fork`**, body `{prompt, hook_event, payload,
-  max_tokens?}`, answering `200 {verdict, reason, mutation, usage,
-  paid_write}` — including for the `ok` degradations above, since a
-  non-200 would push fail-open logic into every client.
+  max_tokens?, model?}`, answering `200 {verdict, reason, mutation, usage,
+  paid_write, model, stream_key}` — including for the `ok` degradations
+  above, since a non-200 would push fail-open logic into every client.
 - **`cgx fork-review --template <name>` is the only hook-side entry
   point.** It reads the hook JSON on stdin, renders the named template,
   calls the API and maps the verdict to the output shape of whichever

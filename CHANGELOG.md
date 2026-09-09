@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Shadow review fork: the reviewer model is now stated and enforced as the
+  reviewed session's own model by default (an invariant test pins
+  `build_fork_body` to never change it), with an opt-in override -- an
+  optional `model` in the `POST /cgx/sessions/{id}/fork` request body,
+  else new `CGX_FORK_MODEL`, else `cgx fork-review --model`. An override
+  always forfeits the cache read (the prompt cache is namespaced per
+  model) and is logged once per fork at WARNING with that reason. The
+  response now reports `model` (the model actually sent to) and
+  `stream_key` (the selected snapshot's) alongside the existing verdict
+  fields.
 - Shadow review fork: the fork body no longer strips `tools`/`tool_choice`
   before replay -- Anthropic hashes the cache prefix over `tools`, then
   `system`, then `messages`, so dropping either key invalidated the whole

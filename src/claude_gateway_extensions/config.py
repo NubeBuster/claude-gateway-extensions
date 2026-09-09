@@ -173,6 +173,7 @@ class Config:
     fork_max_tokens: int
     fork_max_per_min: int
     fork_thinking_guard: bool
+    fork_model: str | None
 
     @classmethod
     def from_env(cls, environ: Mapping[str, str] | None = None) -> Config:
@@ -212,6 +213,7 @@ class Config:
         fork_thinking_guard = _parse_bool(
             "CGX_FORK_THINKING_GUARD", env.get("CGX_FORK_THINKING_GUARD", "true")
         )
+        fork_model = env.get("CGX_FORK_MODEL") or None
 
         return cls(
             host=host,
@@ -231,6 +233,7 @@ class Config:
             fork_max_tokens=fork_max_tokens,
             fork_max_per_min=fork_max_per_min,
             fork_thinking_guard=fork_thinking_guard,
+            fork_model=fork_model,
         )
 
     def is_local_host(self) -> bool:

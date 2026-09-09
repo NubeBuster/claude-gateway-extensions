@@ -191,14 +191,18 @@ class Scheduler:
         prompt: str,
         payload: object,
         max_tokens: int | None = None,
+        model: str | None = None,
     ) -> ForkVerdict:
         """Replay the session's selected snapshot once as a shadow review fork.
 
-        Never raises and never touches bump bookkeeping: it does not set
-        ``last_bump_at``, does not increment ``bump_count``, does not stop
-        the session on a paid write, and does not reset any timer. A fork
-        is a side channel, not a cache-warming replay, so none of the bump
-        effects apply to it.
+        ``model`` overrides the reviewer model for this fork only, else
+        falling back to ``CGX_FORK_MODEL`` (the daemon-wide default), else
+        the snapshot's own model -- the only choice that reads the
+        parent's cached prefix. Never raises and never touches bump
+        bookkeeping: it does not set ``last_bump_at``, does not increment
+        ``bump_count``, does not stop the session on a paid write, and
+        does not reset any timer. A fork is a side channel, not a
+        cache-warming replay, so none of the bump effects apply to it.
         """
         state = self._store.get_state(session_id)
         snapshot = self._selector.select(self._store.get_snapshots(session_id))
@@ -217,6 +221,7 @@ class Scheduler:
         self._record_fork(session_id)
         credential = state.last_credential if state is not None else None
         cap = max_tokens if max_tokens is not None else self._config.fork_max_tokens
+        model_override = model if model is not None else self._config.fork_model
         return await fork_once(
             self._upstream,
             self._config.upstream,
@@ -226,6 +231,7 @@ class Scheduler:
             payload,
             cap,
             self._config.fork_thinking_guard,
+            model_override,
         )
 
     def _snapshot_is_stale(self, snapshot: Snapshot) -> bool:

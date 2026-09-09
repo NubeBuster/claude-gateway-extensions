@@ -268,7 +268,9 @@ def _cmd_fork_review(args: argparse.Namespace, config: Config, ctx: _Context) ->
             payload["session_id"] = args.session
             raw = json.dumps(payload)
         stdin = io.StringIO(raw)
-    return run_fork_review(stdin, ctx.stdout, ctx.environ, args.template, prefix=args.prefix)
+    return run_fork_review(
+        stdin, ctx.stdout, ctx.environ, args.template, prefix=args.prefix, model=args.model
+    )
 
 
 def _cmd_statusline(args: argparse.Namespace, config: Config, ctx: _Context) -> int:
@@ -537,6 +539,15 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     fork_review_parser.add_argument(
         "--session", default=None, help="override the hook payload's session_id"
+    )
+    fork_review_parser.add_argument(
+        "--model",
+        default=None,
+        help=(
+            "override the reviewer model for this fork only (default: "
+            "CGX_FORK_MODEL, else the session's own model); an override "
+            "always forfeits the cache read"
+        ),
     )
 
     subparsers.add_parser("statusline", help="print a statusline segment")

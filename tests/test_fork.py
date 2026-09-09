@@ -121,6 +121,7 @@ def _config(tmp_path: Path, **overrides: object) -> Config:
         "fork_max_tokens": 512,
         "fork_max_per_min": 6,
         "fork_thinking_guard": True,
+        "fork_model": None,
     }
     fields.update(overrides)
     return Config(**fields)  # type: ignore[arg-type]
@@ -168,6 +169,19 @@ def test_build_fork_body_preserves_values_and_sets_cap() -> None:
     assert appended["content"].endswith("```")
     assert '"tool": "Bash"' in appended["content"]
     assert '"count": 2' in appended["content"]
+
+
+@pytest.mark.invariant(decision="a fork runs on the reviewed session's own model")
+def test_build_fork_body_never_changes_model_by_default() -> None:
+    body = json.dumps({"model": "claude-x", "max_tokens": 10}).encode()
+    data = json.loads(build_fork_body(body, "review", {}, 100))
+    assert data["model"] == "claude-x"
+
+
+def test_build_fork_body_model_override_replaces_it() -> None:
+    body = json.dumps({"model": "claude-x", "max_tokens": 10}).encode()
+    data = json.loads(build_fork_body(body, "review", {}, 100, model="claude-y"))
+    assert data["model"] == "claude-y"
 
 
 @pytest.mark.invariant(decision="A fork is one replay, never a session")
@@ -641,6 +655,89 @@ async def test_fork_now_refused_stale_leaves_rate_limit_window_untouched(tmp_pat
     fresh = await scheduler.fork_now("sess-1", "review", {}, None)
     assert fresh.reason == "fine"
     assert len(upstream.calls) == 1
+
+
+# -- Scheduler.fork_now: reviewer model -----------------------------------
+
+
+async def test_fork_now_default_sends_and_reports_the_snapshot_model(tmp_path: Path) -> None:
+    clock = FakeClock(start=1000.0)
+    store = MemoryStore(max_streams_per_session=8)
+    store.put_snapshot(_snapshot("sess-1"))  # model="claude-x"
+    store.put_state(
+        SessionState(session_id="sess-1", last_credential=("authorization", "Bearer a"))
+    )
+    upstream = ScriptedUpstream([_verdict_response({"verdict": "ok", "reason": "fine"})])
+    scheduler = Scheduler(_config(tmp_path), store, LargestPrefixSelector(), upstream, clock)
+
+    result = await scheduler.fork_now("sess-1", "review", {}, None)
+
+    assert result.model == "claude-x"
+    assert result.stream_key == "stream-a"
+    sent = json.loads(upstream.calls[0][3])
+    assert sent["model"] == "claude-x"
+
+
+async def test_fork_now_override_sends_and_reports_the_override_model(tmp_path: Path) -> None:
+    clock = FakeClock(start=1000.0)
+    store = MemoryStore(max_streams_per_session=8)
+    store.put_snapshot(_snapshot("sess-1"))  # model="claude-x"
+    store.put_state(
+        SessionState(session_id="sess-1", last_credential=("authorization", "Bearer a"))
+    )
+    upstream = ScriptedUpstream([_verdict_response({"verdict": "ok", "reason": "fine"})])
+    scheduler = Scheduler(_config(tmp_path), store, LargestPrefixSelector(), upstream, clock)
+
+    result = await scheduler.fork_now("sess-1", "review", {}, None, model="claude-y")
+
+    assert result.model == "claude-y"
+    sent = json.loads(upstream.calls[0][3])
+    assert sent["model"] == "claude-y"
+
+
+async def test_fork_now_override_on_different_model_session_still_forks(tmp_path: Path) -> None:
+    # A model override that does not match the captured snapshot's own
+    # model is a cost decision (a forfeited cache read), never a refusal.
+    clock = FakeClock(start=1000.0)
+    store = MemoryStore(max_streams_per_session=8)
+    store.put_snapshot(_snapshot("sess-1"))  # model="claude-x"
+    store.put_state(
+        SessionState(session_id="sess-1", last_credential=("authorization", "Bearer a"))
+    )
+    upstream = ScriptedUpstream([_verdict_response({"verdict": "ok", "reason": "fine"})])
+    scheduler = Scheduler(_config(tmp_path), store, LargestPrefixSelector(), upstream, clock)
+
+    result = await scheduler.fork_now("sess-1", "review", {}, None, model="claude-other-family")
+
+    assert result.verdict == "ok"
+    assert result.reason == "fine"
+    assert result.model == "claude-other-family"
+    assert len(upstream.calls) == 1
+
+
+async def test_fork_now_config_default_model_applies_when_no_request_override(
+    tmp_path: Path,
+) -> None:
+    clock = FakeClock(start=1000.0)
+    store = MemoryStore(max_streams_per_session=8)
+    store.put_snapshot(_snapshot("sess-1"))  # model="claude-x"
+    store.put_state(
+        SessionState(session_id="sess-1", last_credential=("authorization", "Bearer a"))
+    )
+    upstream = ScriptedUpstream([_verdict_response({"verdict": "ok", "reason": "fine"})])
+    scheduler = Scheduler(
+        _config(tmp_path, fork_model="claude-daemon-default"),
+        store,
+        LargestPrefixSelector(),
+        upstream,
+        clock,
+    )
+
+    result = await scheduler.fork_now("sess-1", "review", {}, None)
+
+    assert result.model == "claude-daemon-default"
+    sent = json.loads(upstream.calls[0][3])
+    assert sent["model"] == "claude-daemon-default"
 
 
 @pytest.mark.invariant(decision="A fork must not touch bump bookkeeping")

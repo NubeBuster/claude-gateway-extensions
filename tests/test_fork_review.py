@@ -37,6 +37,7 @@ class _ScriptedClient:
         hook_event: str | None,
         payload: object,
         max_tokens: int | None = None,
+        model: str | None = None,
     ) -> dict[str, Any]:
         self._calls.append(
             {
@@ -45,6 +46,7 @@ class _ScriptedClient:
                 "hook_event": hook_event,
                 "payload": payload,
                 "max_tokens": max_tokens,
+                "model": model,
             }
         )
         if self._exc is not None:
@@ -74,10 +76,11 @@ def _run(
     environ: Mapping[str, str],
     template: str,
     prefix: str | None = None,
+    model: str | None = None,
 ) -> tuple[int, str]:
     stdin = io.StringIO(json.dumps(payload))
     stdout = io.StringIO()
-    code = fork_review.run_fork_review(stdin, stdout, environ, template, prefix=prefix)
+    code = fork_review.run_fork_review(stdin, stdout, environ, template, prefix=prefix, model=model)
     return code, stdout.getvalue()
 
 
@@ -221,6 +224,25 @@ def test_ok_verdict_produces_empty_stdout(tmp_path: Path, monkeypatch: pytest.Mo
     )
     assert code == 0
     assert out == ""
+
+
+def test_model_absent_by_default(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    env = _write_template(tmp_path, "t", "intervene: deny\n\nreview {tool_name}\n")
+    calls = _install_client(monkeypatch, result=_OK_RESULT)
+    _run({"session_id": "s1", "hook_event_name": "PreToolUse", "tool_name": "Bash"}, env, "t")
+    assert calls[0]["model"] is None
+
+
+def test_model_override_reaches_the_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    env = _write_template(tmp_path, "t", "intervene: deny\n\nreview {tool_name}\n")
+    calls = _install_client(monkeypatch, result=_OK_RESULT)
+    _run(
+        {"session_id": "s1", "hook_event_name": "PreToolUse", "tool_name": "Bash"},
+        env,
+        "t",
+        model="claude-override",
+    )
+    assert calls[0]["model"] == "claude-override"
 
 
 # --- verdict-to-output mapping ------------------------------------------------

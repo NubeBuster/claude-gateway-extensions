@@ -14,6 +14,7 @@ scheduler.
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import logging
 import re
@@ -58,8 +59,18 @@ def _thinking_budget(data: Mapping[str, object]) -> int | None:
     return budget
 
 
-def build_fork_body(body: bytes, prompt: str, payload: object, max_tokens: int) -> bytes:
+def build_fork_body(
+    body: bytes, prompt: str, payload: object, max_tokens: int, model: str | None = None
+) -> bytes:
     """Return ``body`` re-serialised as a one-shot review fork request.
+
+    ``model`` defaults to ``None``, which leaves the captured body's
+    ``model`` field untouched -- the invariant this default exists to
+    preserve is that a fork runs on the reviewed session's own model,
+    since Anthropic namespaces the prompt cache per model and a fork on
+    any other model cannot read the parent's cached prefix. Passing a
+    ``model`` overrides it, an explicit choice that always forfeits the
+    cache read.
 
     ``max_tokens`` is forced to ``max_tokens``, plus the captured body's
     ``thinking.budget_tokens`` when extended thinking is enabled there: the
@@ -90,6 +101,8 @@ def build_fork_body(body: bytes, prompt: str, payload: object, max_tokens: int) 
     it, so the fork hits the same cached prefix.
     """
     data = json.loads(body)
+    if model is not None:
+        data["model"] = model
     budget = _thinking_budget(data)
     data["max_tokens"] = max_tokens + budget if budget is not None else max_tokens
     if "stream" in data:
@@ -227,20 +240,41 @@ def _check_thinking_safety(body: bytes, model: str | None) -> ForkVerdict | None
 
 @dataclass
 class ForkVerdict:
-    """The outcome of one shadow review fork."""
+    """The outcome of one shadow review fork.
+
+    ``model`` and ``stream_key`` are populated once a snapshot has been
+    selected and a request built for it: ``model`` is whichever model the
+    request was actually sent to (the snapshot's own by default, or the
+    override when one is in effect) and ``stream_key`` is the snapshot's.
+    Both are ``None`` for outcomes reached before a snapshot is known
+    (``no_snapshot``).
+    """
 
     verdict: Literal["ok", "intervene"]
     reason: str
     mutation: dict[str, object] | None
     usage: Usage | None
     paid_write: bool
+    model: str | None = None
+    stream_key: str | None = None
 
 
-def _fail_open(reason: str, usage: Usage | None = None) -> ForkVerdict:
+def _fail_open(
+    reason: str,
+    usage: Usage | None = None,
+    model: str | None = None,
+    stream_key: str | None = None,
+) -> ForkVerdict:
     """Return the fail-open ``ok`` verdict every unparseable/failed reply falls back to."""
     paid_write = usage is not None and usage.cache_creation_input_tokens > 0
     return ForkVerdict(
-        verdict="ok", reason=reason, mutation=None, usage=usage, paid_write=paid_write
+        verdict="ok",
+        reason=reason,
+        mutation=None,
+        usage=usage,
+        paid_write=paid_write,
+        model=model,
+        stream_key=stream_key,
     )
 
 
@@ -277,7 +311,9 @@ def _extract_text(data: Mapping[str, object]) -> str | None:
     return "".join(parts)
 
 
-def parse_verdict(status: int, body: bytes) -> ForkVerdict:
+def parse_verdict(
+    status: int, body: bytes, model: str | None = None, stream_key: str | None = None
+) -> ForkVerdict:
     """Classify a fork response, failing open on anything unconfirmed.
 
     Anything at all unexpected -- a non-200 status, a body that cannot be
@@ -286,42 +322,44 @@ def parse_verdict(status: int, body: bytes) -> ForkVerdict:
     ``verdict``/``reason``/``mutation`` fields do not match the fixed
     contract -- yields the fail-open ``ok`` verdict rather than raising or
     blocking the caller. This fail-open direction is an invariant: a broken
-    template or a chatty model must never block the user's work.
+    template or a chatty model must never block the user's work. ``model``
+    and ``stream_key`` are carried onto every returned verdict verbatim,
+    for a caller reporting which model actually answered.
     """
     if status != 200:
         logger.warning("fork request failed: status=%s", status)
-        return _fail_open("fork_failed")
+        return _fail_open("fork_failed", model=model, stream_key=stream_key)
 
     try:
         data = json.loads(body)
     except (json.JSONDecodeError, UnicodeDecodeError):
         logger.warning("fork verdict unparseable: reason=unparseable_verdict")
-        return _fail_open("unparseable_verdict")
+        return _fail_open("unparseable_verdict", model=model, stream_key=stream_key)
 
     usage = _extract_usage(data)
 
     if not isinstance(data, dict):
         logger.warning("fork verdict unparseable: reason=unparseable_verdict")
-        return _fail_open("unparseable_verdict", usage)
+        return _fail_open("unparseable_verdict", usage, model, stream_key)
 
     if _has_tool_use(data):
         logger.warning("fork verdict rejected: reason=tool_use_reply")
-        return _fail_open("tool_use_reply", usage)
+        return _fail_open("tool_use_reply", usage, model, stream_key)
 
     text = _extract_text(data)
     if text is None:
         logger.warning("fork verdict unparseable: reason=unparseable_verdict")
-        return _fail_open("unparseable_verdict", usage)
+        return _fail_open("unparseable_verdict", usage, model, stream_key)
 
     try:
         parsed = json.loads(text)
     except json.JSONDecodeError:
         logger.warning("fork verdict unparseable: reason=unparseable_verdict")
-        return _fail_open("unparseable_verdict", usage)
+        return _fail_open("unparseable_verdict", usage, model, stream_key)
 
     if not isinstance(parsed, dict):
         logger.warning("fork verdict unparseable: reason=unparseable_verdict")
-        return _fail_open("unparseable_verdict", usage)
+        return _fail_open("unparseable_verdict", usage, model, stream_key)
 
     verdict = parsed.get("verdict")
     reason = parsed.get("reason")
@@ -329,17 +367,23 @@ def parse_verdict(status: int, body: bytes) -> ForkVerdict:
 
     if verdict not in ("ok", "intervene"):
         logger.warning("fork verdict unparseable: reason=unparseable_verdict")
-        return _fail_open("unparseable_verdict", usage)
+        return _fail_open("unparseable_verdict", usage, model, stream_key)
     if not isinstance(reason, str):
         logger.warning("fork verdict unparseable: reason=unparseable_verdict")
-        return _fail_open("unparseable_verdict", usage)
+        return _fail_open("unparseable_verdict", usage, model, stream_key)
     if mutation is not None and not isinstance(mutation, dict):
         logger.warning("fork verdict unparseable: reason=unparseable_verdict")
-        return _fail_open("unparseable_verdict", usage)
+        return _fail_open("unparseable_verdict", usage, model, stream_key)
 
     paid_write = usage is not None and usage.cache_creation_input_tokens > 0
     return ForkVerdict(
-        verdict=verdict, reason=reason, mutation=mutation, usage=usage, paid_write=paid_write
+        verdict=verdict,
+        reason=reason,
+        mutation=mutation,
+        usage=usage,
+        paid_write=paid_write,
+        model=model,
+        stream_key=stream_key,
     )
 
 
@@ -352,29 +396,50 @@ async def fork_once(
     payload: object,
     max_tokens: int,
     thinking_guard: bool = True,
+    model: str | None = None,
 ) -> ForkVerdict:
     """Replay ``snapshot`` as a review fork against ``upstream_base`` and classify the reply.
 
+    ``model`` overrides the model the fork is sent to; ``None`` (the
+    default) sends it to the snapshot's own model, which is the only
+    choice that can read the parent's cached prefix -- Anthropic
+    namespaces the prompt cache per model, so any override always pays a
+    full cache write. An override in effect is logged once per fork at
+    WARNING with that reason. Every returned verdict carries the model
+    actually used and the snapshot's ``stream_key``.
+
     When ``thinking_guard`` is true (``CGX_FORK_THINKING_GUARD``, default
-    on) and the captured snapshot carries thinking blocks, the snapshot's
-    model is checked against the measured thinking-preservation table before
-    anything is sent: a model below its family's minimum, in a family with
-    no entry (every Haiku model), or unrecognised entirely refuses with the
+    on) and the captured snapshot carries thinking blocks, the effective
+    model (the override, if any, else the snapshot's own) is checked
+    against the measured thinking-preservation table before anything is
+    sent: a model below its family's minimum, in a family with no entry
+    (every Haiku model), or unrecognised entirely refuses with the
     existing fail-open shape rather than paying a full cold write of the
     conversation. Network exceptions are caught and turned into the
     fail-open ``ok`` verdict so callers never need a separate exception
     path.
     """
+    effective_model = model if model is not None else snapshot.model
+    if model is not None and model != snapshot.model:
+        logger.warning(
+            "fork model overridden: session=%s snapshot_model=%s override_model=%s "
+            "reason=cache_read_forfeited",
+            snapshot.session_id,
+            snapshot.model,
+            model,
+        )
     if thinking_guard:
-        refusal = _check_thinking_safety(snapshot.body, snapshot.model)
+        refusal = _check_thinking_safety(snapshot.body, effective_model)
         if refusal is not None:
-            return refusal
+            return dataclasses.replace(
+                refusal, model=effective_model, stream_key=snapshot.stream_key
+            )
     url = f"{upstream_base.rstrip('/')}{_FORK_PATH}"
     headers = build_bump_headers(snapshot.headers, credential)
-    body = build_fork_body(snapshot.body, prompt, payload, max_tokens)
+    body = build_fork_body(snapshot.body, prompt, payload, max_tokens, model)
     try:
         response = await upstream.send("POST", url, headers, body)
     except Exception:
         logger.warning("fork request failed: reason=fork_failed")
-        return _fail_open("fork_failed")
-    return parse_verdict(response.status, response.body)
+        return _fail_open("fork_failed", model=effective_model, stream_key=snapshot.stream_key)
+    return parse_verdict(response.status, response.body, effective_model, snapshot.stream_key)

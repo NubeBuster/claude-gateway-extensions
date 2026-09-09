@@ -186,6 +186,7 @@ def run_fork_review(
     environ: Mapping[str, str],
     template: str,
     prefix: str | None = None,
+    model: str | None = None,
 ) -> int:
     """Read a hook event from ``stdin``, review it via a shadow fork, and print the mapped verdict.
 
@@ -197,7 +198,9 @@ def run_fork_review(
     exception) is fail-open: no decision fields, and a ``systemMessage``
     (unless ``CGX_FORK_REVIEW_QUIET`` is set) naming the reason. An ``ok``
     verdict from the daemon is also silent -- only ``intervene`` produces
-    output.
+    output. ``model`` overrides the reviewer model for this fork only,
+    always forfeiting the cache read; omitted, the daemon falls back to
+    ``CGX_FORK_MODEL`` then the session's own model.
     """
     raw = stdin.read()
     try:
@@ -243,7 +246,7 @@ def run_fork_review(
     client = ControlClient(config.url)
     try:
         result = client.fork(
-            session_id, rendered_prompt, hook_event, payload, config.fork_max_tokens
+            session_id, rendered_prompt, hook_event, payload, config.fork_max_tokens, model
         )
     except DaemonUnreachable as exc:
         return _skip(f"daemon not reachable ({exc})")

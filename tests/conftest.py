@@ -128,6 +128,7 @@ def make_config(tmp_path: Path, upstream: str, **overrides: object) -> Config:
         "fork_max_tokens": 512,
         "fork_max_per_min": 6,
         "fork_thinking_guard": True,
+        "fork_model": None,
     }
     fields.update(overrides)
     return Config(**fields)  # type: ignore[arg-type]

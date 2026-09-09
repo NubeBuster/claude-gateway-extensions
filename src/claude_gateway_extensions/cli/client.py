@@ -175,20 +175,27 @@ class ControlClient:
         hook_event: str | None,
         payload: object,
         max_tokens: int | None = None,
+        model: str | None = None,
     ) -> dict[str, Any]:
         """Run one shadow review fork via ``POST /cgx/sessions/{id}/fork``.
 
-        Returns the parsed verdict body for any 2xx response, including the
-        fail-open degradations the daemon documents (``no_snapshot``,
-        ``rate_limited``, ``unparseable_verdict``, ``fork_failed``) -- the
-        daemon always answers 200 for those per ``docs/DESIGN.md``, so this
-        method only raises :class:`ApiError` on an actual non-2xx response.
+        ``model`` overrides the reviewer model for this fork only; omitted,
+        the daemon uses ``CGX_FORK_MODEL`` if set, else the session's own
+        model, which is the only choice that reads the parent's cached
+        prefix. Returns the parsed verdict body for any 2xx response,
+        including the fail-open degradations the daemon documents
+        (``no_snapshot``, ``rate_limited``, ``unparseable_verdict``,
+        ``fork_failed``) -- the daemon always answers 200 for those per
+        ``docs/DESIGN.md``, so this method only raises :class:`ApiError` on
+        an actual non-2xx response.
         """
         request_body: dict[str, Any] = {"prompt": prompt, "payload": payload}
         if hook_event is not None:
             request_body["hook_event"] = hook_event
         if max_tokens is not None:
             request_body["max_tokens"] = max_tokens
+        if model is not None:
+            request_body["model"] = model
         status, parsed = self._request("POST", f"/cgx/sessions/{session_id}/fork", request_body)
         if not 200 <= status < 300:
             raise ApiError(status, str(parsed))

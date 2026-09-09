@@ -173,7 +173,7 @@ Request body:
 ```json
 {"prompt": "Classify the command below...", "hook_event": "PreToolUse",
   "payload": {"tool_name": "Bash", "tool_input": {"command": "rm -rf /"}},
-  "max_tokens": 512}
+  "max_tokens": 512, "model": "claude-opus-4-5-20251101"}
 ```
 
 `prompt` is required and must be a string: it becomes the fork's one
@@ -191,7 +191,12 @@ request actually sent upstream is this cap plus the captured snapshot's
 `thinking.budget_tokens` when extended thinking is enabled there (the API
 requires `max_tokens` strictly greater than the thinking budget); the cap
 itself still bounds the reviewer's visible answer, the budget is headroom
-the API demands on top of it.
+the API demands on top of it. `model` is an optional non-empty string
+that overrides the reviewer model for this fork only, overriding
+`CGX_FORK_MODEL`; omitted, the fork runs on the snapshot's own model,
+which is the only choice that can read the parent's cached prefix (the
+prompt cache is namespaced per model), so any override always forfeits
+the cache read and pays a full `cache_creation` write.
 
 Response `200`:
 
@@ -199,19 +204,24 @@ Response `200`:
 {"verdict": "ok", "reason": "fine", "mutation": null,
   "usage": {"input_tokens": 3, "output_tokens": 12,
   "cache_read_input_tokens": 4096, "cache_creation_input_tokens": 0},
-  "paid_write": false}
+  "paid_write": false, "model": "claude-opus-4-5-20251101",
+  "stream_key": "a1b2c3..."}
 ```
 
 `verdict` is `"ok"` or `"intervene"`. `reason` is always a string.
 `mutation` is an object when the reviewer supplied one, otherwise `null`.
 `usage` is the fork reply's usage block (same fields as `BumpResult.usage`
 above), or `null` when no request ever reached the upstream
-(`no_snapshot`, `rate_limited`). `paid_write` is `true` when the fork's
-own `cache_creation_input_tokens` was greater than zero: the cached
-prefix had drifted, so this fork paid a full cache write instead of the
-expected cache read; the verdict is still returned, since the answer was
-already paid for, but a caller or statusline can use this flag to surface
-a fork that is quietly costing real money.
+(`no_snapshot`, `rate_limited`, `snapshot_stale`). `paid_write` is `true`
+when the fork's own `cache_creation_input_tokens` was greater than zero:
+the cached prefix had drifted, so this fork paid a full cache write
+instead of the expected cache read; the verdict is still returned, since
+the answer was already paid for, but a caller or statusline can use this
+flag to surface a fork that is quietly costing real money. `model` is
+the model the fork was actually sent to (the snapshot's own by default,
+or the effective override) and `stream_key` is the selected snapshot's
+stream key; both are `null` for `no_snapshot`, the only outcome reached
+before a snapshot is selected.
 
 This endpoint always answers `200` -- never `409` or `404` -- including
 for the following degraded outcomes, so no client needs a fail-open
@@ -256,8 +266,9 @@ branch of its own the way `POST .../bump`'s `409` requires one:
 
 `400` cases: `{"error": "invalid_session_id"}` for a malformed id (same
 pattern as every other endpoint); `{"error": "invalid_body"}` when the
-body is not a JSON object, `prompt` is missing or not a string, or
-`max_tokens` is present and not a positive integer.
+body is not a JSON object, `prompt` is missing or not a string,
+`max_tokens` is present and not a positive integer, or `model` is
+present and not a non-empty string.
 
 A fork never alters the session's bump state: it does not set
 `last_bump_at`, does not increment `bump_count`, does not reset the bump

@@ -128,7 +128,7 @@ async def test_forget_removes_the_session(harness: ServerHarness) -> None:
 
 
 #: The response keys ``docs/API.md`` documents for POST /cgx/sessions/{id}/fork.
-FORK_KEYS = {"verdict", "reason", "mutation", "usage", "paid_write"}
+FORK_KEYS = {"verdict", "reason", "mutation", "usage", "paid_write", "model", "stream_key"}
 
 
 async def test_fork_invalid_session_id_rejected(harness: ServerHarness) -> None:
@@ -164,6 +164,24 @@ async def test_fork_non_positive_max_tokens_rejected(harness: ServerHarness) -> 
     assert (await resp.json())["error"] == "invalid_body"
 
 
+async def test_fork_empty_string_model_rejected(harness: ServerHarness) -> None:
+    resp = await harness.client.post(
+        "/cgx/sessions/sess-f/fork",
+        json={"prompt": "review", "hook_event": "x", "payload": {}, "model": ""},
+    )
+    assert resp.status == 400
+    assert (await resp.json())["error"] == "invalid_body"
+
+
+async def test_fork_non_str_model_rejected(harness: ServerHarness) -> None:
+    resp = await harness.client.post(
+        "/cgx/sessions/sess-f/fork",
+        json={"prompt": "review", "hook_event": "x", "payload": {}, "model": 5},
+    )
+    assert resp.status == 400
+    assert (await resp.json())["error"] == "invalid_body"
+
+
 async def test_fork_without_snapshot_is_200_ok_no_snapshot(harness: ServerHarness) -> None:
     resp = await harness.client.post(
         "/cgx/sessions/sess-empty2/fork",
@@ -178,6 +196,8 @@ async def test_fork_without_snapshot_is_200_ok_no_snapshot(harness: ServerHarnes
         "mutation": None,
         "usage": None,
         "paid_write": False,
+        "model": None,
+        "stream_key": None,
     }
 
 
@@ -216,3 +236,5 @@ async def test_fork_returns_the_verdict_shape(harness: ServerHarness) -> None:
     assert body["mutation"] is None
     assert body["paid_write"] is False
     assert body["usage"]["cache_read_input_tokens"] == 4096
+    assert body["model"] == "claude-x"
+    assert body["stream_key"] is not None

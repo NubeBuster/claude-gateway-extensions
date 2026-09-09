@@ -142,10 +142,13 @@ async def fork_session(request: web.Request) -> web.Response:
     max_tokens = body.get("max_tokens")
     if not _is_optional_positive_int(max_tokens):
         return web.json_response({"error": "invalid_body"}, status=400)
+    model = body.get("model")
+    if not _is_optional_nonempty_str(model):
+        return web.json_response({"error": "invalid_body"}, status=400)
     payload = body.get("payload")
 
     scheduler: Scheduler = request.app[SCHEDULER_KEY]
-    verdict = await scheduler.fork_now(session_id, prompt, payload, max_tokens)
+    verdict = await scheduler.fork_now(session_id, prompt, payload, max_tokens, model)
     return web.json_response(
         {
             "verdict": verdict.verdict,
@@ -153,6 +156,8 @@ async def fork_session(request: web.Request) -> web.Response:
             "mutation": verdict.mutation,
             "usage": dataclasses.asdict(verdict.usage) if verdict.usage is not None else None,
             "paid_write": verdict.paid_write,
+            "model": verdict.model,
+            "stream_key": verdict.stream_key,
         }
     )
 
@@ -178,6 +183,15 @@ async def _read_json_object(request: web.Request) -> dict[str, Any] | None:
     except json.JSONDecodeError:
         return None
     return data if isinstance(data, dict) else None
+
+
+def _is_optional_nonempty_str(value: object) -> bool:
+    """Return ``True`` if ``value`` is ``None`` or a non-empty ``str``.
+
+    Used for the fork request's optional ``model`` override: an empty
+    string is never a model id a caller meant to send.
+    """
+    return value is None or (isinstance(value, str) and value != "")
 
 
 def _is_optional_positive_int(value: object) -> bool:
