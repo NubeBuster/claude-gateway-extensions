@@ -444,6 +444,78 @@ async def test_capture_reads_usage_from_a_gzipped_response(harness: ServerHarnes
     assert snapshots[0].usage.total_input == 4107
 
 
+@pytest.mark.invariant(decision="Tee only the private copy")
+async def test_gzipped_request_body_captured_same_as_plain(harness: ServerHarness) -> None:
+    """A gzip-encoded request body must still be captured, and forwarded unchanged."""
+
+    async def handler(request: web.Request) -> web.Response:
+        return web.json_response({"usage": {"input_tokens": 7}})
+
+    harness.fake.script(handler)
+
+    plain_body = b'{"model": "claude-x", "max_tokens": 10, "messages": []}'
+    compressed_body = gzip.compress(plain_body)
+    resp = await harness.client.post(
+        "/v1/messages",
+        data=compressed_body,
+        headers={
+            "x-claude-code-session-id": "sess-gzip-req",
+            "content-encoding": "gzip",
+        },
+    )
+    assert resp.status == 200
+
+    # Forwarded to upstream exactly as received, still compressed.
+    assert harness.fake.requests[0].body == compressed_body
+    assert harness.fake.requests[0].headers.get("content-encoding") == "gzip"
+
+    store = harness.app[STORE_KEY]
+    snapshots = store.get_snapshots("sess-gzip-req")
+    assert len(snapshots) == 1
+    snapshot = snapshots[0]
+    assert snapshot.body == plain_body
+    assert snapshot.model == "claude-x"
+    # The stored copy is plain JSON now, so a stale content-encoding header
+    # must not follow it into the snapshot (a future bump replay would try
+    # to gunzip a body that was never gzipped again).
+    assert "content-encoding" not in snapshot.headers
+
+
+@pytest.mark.invariant(decision="Tee only the private copy")
+async def test_malformed_gzip_request_body_warns_once_per_session(
+    harness: ServerHarness, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A body that claims gzip but is not valid gzip logs one WARNING per session."""
+
+    async def handler(request: web.Request) -> web.Response:
+        return web.json_response({"usage": {"input_tokens": 1}})
+
+    harness.fake.script(handler)
+    harness.fake.script(handler)
+    caplog.set_level(logging.WARNING, logger="claude_gateway_extensions.server.passthrough")
+
+    for _ in range(2):
+        resp = await harness.client.post(
+            "/v1/messages",
+            data=b"not actually gzip",
+            headers={
+                "x-claude-code-session-id": "sess-bad-gzip",
+                "content-encoding": "gzip",
+            },
+        )
+        assert resp.status == 200
+
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warnings) == 1
+    message = warnings[0].getMessage()
+    assert "sess-bad-gzip" in message
+    assert "gzip" in message
+    assert "not actually gzip" not in message
+
+    store = harness.app[STORE_KEY]
+    assert store.get_snapshots("sess-bad-gzip") == []
+
+
 @pytest.mark.invariant(decision="Bodies never reach a log")
 async def test_no_request_or_response_body_reaches_any_log_record(
     harness: ServerHarness, caplog: pytest.LogCaptureFixture

@@ -28,8 +28,15 @@ deliberately absent from this release, not ruled out for the project.
   so raising the log level must never turn the daemon into a transcript
   recorder.
 - **Tee only the private copy.** Only `POST /v1/messages` is captured, and
-  only the daemon's own copy of the response is decoded and parsed. The bytes
-  the client receives are never touched.
+  only the daemon's own copy of the request and response is decoded and
+  parsed -- a gzip- or deflate-encoded request body (a chained upstream
+  proxy or the SDK can send one) is decompressed for that private copy the
+  same way a compressed response already is, with the stored snapshot's
+  `content-encoding` dropped to match. The bytes forwarded in either
+  direction are never touched. A body that still cannot be parsed once
+  decoded logs one WARNING per session, naming the encoding and the failure,
+  never the body, so a session stuck sending an uncapturable body is visible
+  without a warning per request.
 - **Session identity is `x-claude-code-session-id`.** It is the documented
   per-session header. Requests without it are forwarded but never captured.
 - **Streams keyed by model + system + tools, largest prefix wins.** One

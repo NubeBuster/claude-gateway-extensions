@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Fix: a gzip- or deflate-encoded `POST /v1/messages` request body (sent by
+  a chained upstream proxy or the SDK) is now decoded before capture instead
+  of silently never producing a snapshot. The forwarded bytes are untouched;
+  a body that still cannot be parsed once decoded now logs one WARNING per
+  session naming the encoding and the failure, never the body. See the
+  updated "Tee only the private copy" decision in `docs/DESIGN.md`.
 - Documented and tested that the daemon tunnels every non-`/cgx/` path to
   the upstream verbatim -- method, path, query and body untouched -- so a
   chained upstream proxy's own control calls pass through unmolested. See

@@ -50,3 +50,9 @@ CLIENT_SESSION_KEY: web.AppKey[aiohttp.ClientSession] = web.AppKey(
     "client_session", aiohttp.ClientSession
 )
 DRAIN_STATE_KEY: web.AppKey[DrainState] = web.AppKey("drain_state", DrainState)
+
+#: Session ids that have already logged one capture-parse-failure warning
+#: (see the "decode the private copy, warn once per session" behaviour in
+#: ``passthrough._capture``), so a session stuck sending an unparseable body
+#: logs exactly once instead of once per request.
+CAPTURE_WARNED_KEY: web.AppKey[set[str]] = web.AppKey("capture_warned", set)

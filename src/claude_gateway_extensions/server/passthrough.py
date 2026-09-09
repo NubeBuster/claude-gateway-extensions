@@ -14,8 +14,10 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import gzip
 import json
 import logging
+import zlib
 from collections.abc import Mapping
 from typing import Any
 
@@ -28,6 +30,7 @@ from claude_gateway_extensions.core.scheduler import Scheduler
 from claude_gateway_extensions.core.snapshot import Snapshot, Usage, body_is_subagent, stream_key
 from claude_gateway_extensions.core.upstream import decode_body, filter_headers
 from claude_gateway_extensions.server.keys import (
+    CAPTURE_WARNED_KEY,
     CLIENT_SESSION_KEY,
     CLOCK_KEY,
     CONFIG_KEY,
@@ -48,6 +51,7 @@ async def handle(request: web.Request) -> web.StreamResponse:
     session: aiohttp.ClientSession = request.app[CLIENT_SESSION_KEY]
     scheduler: Scheduler = request.app[SCHEDULER_KEY]
     clock: Clock = request.app[CLOCK_KEY]
+    warned_sessions: set[str] = request.app[CAPTURE_WARNED_KEY]
 
     target_url = config.upstream.rstrip("/") + request.path_qs
     outbound_headers = filter_headers(request.headers)
@@ -81,6 +85,7 @@ async def handle(request: web.Request) -> web.StreamResponse:
             is_messages=is_messages,
             session_id=session_id,
             request_body=request_body,
+            warned_sessions=warned_sessions,
         )
     finally:
         if tracking_id is not None:
@@ -109,6 +114,7 @@ async def _forward(
     is_messages: bool,
     session_id: str | None,
     request_body: bytes | None,
+    warned_sessions: set[str],
 ) -> web.StreamResponse:
     """Send the request upstream and stream the response back, tee'ing if applicable.
 
@@ -173,8 +179,28 @@ async def _forward(
             bytes(tee_buffer),
             content_type,
             content_encoding,
+            warned_sessions,
         )
     return resp
+
+
+def _decode_request_body(body: bytes, content_encoding: str | None) -> bytes:
+    """Decode ``body`` per its request ``content-encoding`` for the private copy.
+
+    Mirrors :func:`~claude_gateway_extensions.core.upstream.decode_body`, but
+    raises instead of swallowing a decode failure: the bytes forwarded
+    upstream are never touched (``request.content``/``request_body`` stay
+    exactly as received), so a bad encoding here can only hurt the private
+    capture, and the caller needs to know it happened to warn about it.
+    """
+    encoding = (content_encoding or "").strip().lower()
+    if not encoding or encoding == "identity":
+        return body
+    if encoding == "gzip":
+        return gzip.decompress(body)
+    if encoding == "deflate":
+        return zlib.decompress(body)
+    raise ValueError(f"unsupported content-encoding {encoding!r}")
 
 
 def _capture(
@@ -186,30 +212,56 @@ def _capture(
     tee_body: bytes,
     content_type: str,
     content_encoding: str | None,
+    warned_sessions: set[str],
 ) -> None:
     """Store a snapshot of a completed ``/v1/messages`` exchange for ``session_id``.
 
-    Best-effort: any parsing failure is logged at DEBUG and never propagates
-    or affects the client, whose response has already been fully written.
+    The request body is decoded per its own ``content-encoding`` header
+    before parsing -- a gzipped (or deflated) request body, which the
+    upstream side of a chained proxy or the SDK can send, must still be
+    captured. Best-effort: any parsing failure (a bad encoding or bytes that
+    still are not JSON once decoded) is logged at DEBUG and never propagates
+    or affects the client, whose response has already been fully written --
+    plus one WARNING per session, the first time it happens, naming the
+    request's content-encoding and the failure's exception class (never the
+    body), so a session stuck sending an uncapturable body is visible
+    without a warning per request.
     """
+    request_content_encoding = headers.get("content-encoding")
     try:
-        key = stream_key(request_body)
-        body_data = json.loads(request_body)
+        decoded_body = _decode_request_body(request_body, request_content_encoding)
+        key = stream_key(decoded_body)
+        body_data = json.loads(decoded_body)
         model = body_data.get("model") if isinstance(body_data, dict) else None
         usage = _extract_usage(tee_body, content_type, content_encoding)
+        snapshot_headers = dict(headers)
+        if decoded_body is not request_body:
+            # The stored body is now plain JSON; a stale content-encoding
+            # would tell a future bump replay to gunzip a body that never
+            # got gzipped again (build_bump_body re-serializes from JSON).
+            snapshot_headers.pop("content-encoding", None)
         snapshot = Snapshot(
             session_id=session_id,
             stream_key=key,
             model=model if isinstance(model, str) else None,
-            headers=dict(headers),
-            body=request_body,
+            headers=snapshot_headers,
+            body=decoded_body,
             captured_at=clock.now(),
             usage=usage,
-            is_subagent=body_is_subagent(request_body),
+            is_subagent=body_is_subagent(decoded_body),
         )
         credential = _extract_credential(headers)
         scheduler.note_request(session_id, snapshot, credential)
-    except Exception:
+    except Exception as exc:
+        if session_id not in warned_sessions:
+            warned_sessions.add(session_id)
+            logger.warning(
+                "failed to capture a snapshot for session %s: content-encoding=%s error=%s "
+                "(logged once per session)",
+                session_id,
+                request_content_encoding or "identity",
+                type(exc).__name__,
+            )
         logger.debug("failed to capture snapshot for session %s", session_id, exc_info=True)
 
 

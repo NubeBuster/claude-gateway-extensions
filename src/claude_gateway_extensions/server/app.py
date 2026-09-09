@@ -35,6 +35,7 @@ from claude_gateway_extensions.core.store import FileStore, MemoryStore, Snapsho
 from claude_gateway_extensions.core.upstream import AiohttpUpstream, Upstream
 from claude_gateway_extensions.server import control, passthrough
 from claude_gateway_extensions.server.keys import (
+    CAPTURE_WARNED_KEY,
     CLIENT_SESSION_KEY,
     CLOCK_KEY,
     CONFIG_KEY,
@@ -114,12 +115,19 @@ def make_app(
         selector if selector is not None else LargestPrefixSelector()
     )
 
-    app = web.Application(middlewares=[track_in_flight])
+    # auto_decompress=False: the server must not decompress an incoming
+    # request body itself, or a gzip-encoded request forwarded byte-for-byte
+    # (the "Byte-transparent forwarding" decision) would be silently
+    # transcoded before the handler ever sees it -- and a body that fails to
+    # decompress would be refused outright instead of reaching the handler
+    # to be forwarded untouched and captured deliberately.
+    app = web.Application(middlewares=[track_in_flight], handler_args={"auto_decompress": False})
     app[CONFIG_KEY] = config
     app[STORE_KEY] = resolved_store
     app[SELECTOR_KEY] = resolved_selector
     app[CLOCK_KEY] = resolved_clock
     app[DRAIN_STATE_KEY] = DrainState()
+    app[CAPTURE_WARNED_KEY] = set()
 
     async def _lifecycle(app: web.Application) -> AsyncIterator[None]:
         """Open the shared client session and run the scheduler for the app's lifetime."""

@@ -74,7 +74,11 @@ class FakeUpstream:
         """Build the underlying ``web.Application`` with a single catch-all route."""
         self.requests: list[RecordedRequest] = []
         self._handlers: list[Handler] = []
-        self.app = web.Application()
+        # auto_decompress=False: this fake stands in for the real upstream,
+        # which the proxy must reach with a forwarded body's bytes (and its
+        # content-encoding) untouched, so the fake must record what actually
+        # arrived on the wire instead of silently decompressing it first.
+        self.app = web.Application(handler_args={"auto_decompress": False})
         self.app.router.add_route("*", "/{tail:.*}", self._dispatch)
 
     def script(self, handler: Handler) -> None:
