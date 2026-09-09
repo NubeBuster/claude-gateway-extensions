@@ -13,12 +13,19 @@ API error, unexpected exception) exits 0 with no decision fields. It is not
 silent, though -- each failure emits a ``systemMessage`` starting with
 ``"cgx fork-review skipped"`` so a broken template or a dead daemon cannot
 fail invisibly. Set ``CGX_FORK_REVIEW_QUIET=1`` to suppress that message.
+
+``--apply <command>`` lets an ``intervene`` verdict act on the side rather
+than only speaking through the hook's own decision fields: the command runs
+through the shell with the verdict JSON on its stdin, for something like a
+``/rename`` that composes a name from the fork's context and applies it
+outside the conversation being renamed.
 """
 
 from __future__ import annotations
 
 import json
 import re
+import subprocess
 from collections.abc import Mapping
 from importlib import resources
 from pathlib import Path
@@ -26,6 +33,10 @@ from typing import Any, TextIO
 
 from claude_gateway_extensions.cli.client import ApiError, ControlClient, DaemonUnreachable
 from claude_gateway_extensions.config import Config, resolve_home
+
+#: Matches ``cli/install.py::_HOOK_TIMEOUT_S`` -- an ``--apply`` command runs
+#: inside the same hook invocation, so it gets the same budget.
+_APPLY_TIMEOUT_S = 5
 
 #: The template front matter's only recognised key, and its allowed values.
 _INTERVENE_VALUES = {"deny", "ask", "context"}
@@ -148,6 +159,36 @@ def _render(body: str, fields: Mapping[str, str]) -> str:
     return _PLACEHOLDER_RE.sub(_substitute, body)
 
 
+def _run_apply(command: str, verdict_json: str) -> str | None:
+    """Run ``command`` through the shell, feeding it ``verdict_json`` on stdin.
+
+    ``command`` is the user's own string, passed to the shell exactly as
+    given -- never split or parsed. Returns ``None`` on a clean exit within
+    :data:`_APPLY_TIMEOUT_S`; any other outcome (non-zero exit, a timeout, or
+    the shell itself failing to start) returns a short reason string for the
+    caller to fold into the existing fail-open skip message. The command's
+    own stdout and stderr are always discarded so they can never contaminate
+    the hook's stdout contract.
+    """
+    try:
+        result = subprocess.run(
+            command,
+            shell=True,
+            input=verdict_json,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=_APPLY_TIMEOUT_S,
+            text=True,
+        )
+    except subprocess.TimeoutExpired:
+        return f"apply command timed out after {_APPLY_TIMEOUT_S}s"
+    except OSError as exc:
+        return f"apply command failed to start ({exc})"
+    if result.returncode != 0:
+        return f"apply command exited {result.returncode}"
+    return None
+
+
 def _pretooluse_output(
     intervene_mode: str, reason: str, mutation: dict[str, Any] | None
 ) -> dict[str, Any]:
@@ -187,6 +228,7 @@ def run_fork_review(
     template: str,
     prefix: str | None = None,
     model: str | None = None,
+    apply: str | None = None,
 ) -> int:
     """Read a hook event from ``stdin``, review it via a shadow fork, and print the mapped verdict.
 
@@ -198,9 +240,17 @@ def run_fork_review(
     exception) is fail-open: no decision fields, and a ``systemMessage``
     (unless ``CGX_FORK_REVIEW_QUIET`` is set) naming the reason. An ``ok``
     verdict from the daemon is also silent -- only ``intervene`` produces
-    output. ``model`` overrides the reviewer model for this fork only,
-    always forfeiting the cache read; omitted, the daemon falls back to
-    ``CGX_FORK_MODEL`` then the session's own model.
+    output, and only an ``intervene`` verdict ever runs ``apply``. ``model``
+    overrides the reviewer model for this fork only, always forfeiting the
+    cache read; omitted, the daemon falls back to ``CGX_FORK_MODEL`` then the
+    session's own model. ``apply``, when given, is a shell command run on an
+    ``intervene`` verdict with the verdict JSON (``{"verdict", "reason",
+    "mutation"}``) on its stdin, for a side effect the parent session should
+    never see happen -- the verdict is still mapped to the hook output as
+    usual, so ``apply`` composes with the template's ``intervene:`` mode
+    rather than replacing it. A failing, timing-out or missing ``apply``
+    command never blocks the mapped output; it only adds the usual skip
+    ``systemMessage`` alongside it (suppressed by ``CGX_FORK_REVIEW_QUIET``).
     """
     raw = stdin.read()
     try:
@@ -268,6 +318,13 @@ def run_fork_review(
     output = _map_verdict(hook_event, intervene_mode, reason, mutation)
     if output is None:
         return 0
+
+    if apply:
+        verdict_json = json.dumps({"verdict": "intervene", "reason": reason, "mutation": mutation})
+        apply_skip_reason = _run_apply(apply, verdict_json)
+        if apply_skip_reason is not None and not _env_flag(environ, "CGX_FORK_REVIEW_QUIET"):
+            output = {**output, "systemMessage": f"cgx fork-review skipped: {apply_skip_reason}"}
+
     stdout.write(json.dumps(output))
     stdout.write("\n")
     return 0

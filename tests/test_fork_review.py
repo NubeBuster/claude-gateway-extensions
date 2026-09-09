@@ -77,10 +77,13 @@ def _run(
     template: str,
     prefix: str | None = None,
     model: str | None = None,
+    apply: str | None = None,
 ) -> tuple[int, str]:
     stdin = io.StringIO(json.dumps(payload))
     stdout = io.StringIO()
-    code = fork_review.run_fork_review(stdin, stdout, environ, template, prefix=prefix, model=model)
+    code = fork_review.run_fork_review(
+        stdin, stdout, environ, template, prefix=prefix, model=model, apply=apply
+    )
     return code, stdout.getvalue()
 
 
@@ -464,12 +467,158 @@ def test_template_dir_prefers_cgx_template_dir_over_xdg(
     assert json.loads(out)["hookSpecificOutput"]["permissionDecision"] == "deny"
 
 
+# --- --apply: act on an intervene verdict without touching the conversation --
+
+
+def _write_apply_script(tmp_path: Path, *, exit_code: int = 0, sleep_s: float = 0.0) -> Path:
+    """Write a shell script that records its stdin, echoes a leak marker, then exits.
+
+    The echoed ``APPLY-STDOUT-LEAK`` line lets a test assert the command's own
+    stdout never reaches ``run_fork_review``'s stdout.
+    """
+    script = tmp_path / "apply.sh"
+    stdin_capture = tmp_path / "apply-stdin.txt"
+    script.write_text(
+        "#!/bin/sh\n"
+        f"sleep {sleep_s}\n"
+        f"cat > {stdin_capture}\n"
+        "echo APPLY-STDOUT-LEAK\n"
+        f"exit {exit_code}\n",
+        encoding="utf-8",
+    )
+    script.chmod(0o755)
+    return script
+
+
+def test_apply_runs_on_intervene_with_verdict_json_on_stdin(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    env = _write_template(tmp_path, "t", "intervene: deny\n\nreview {tool_name}\n")
+    _install_client(monkeypatch, result=_INTERVENE_RESULT)
+    script = _write_apply_script(tmp_path)
+    code, out = _run(
+        {"session_id": "s1", "hook_event_name": "PreToolUse", "tool_name": "Bash"},
+        env,
+        "t",
+        apply=str(script),
+    )
+    assert code == 0
+    stdin_capture = tmp_path / "apply-stdin.txt"
+    assert stdin_capture.is_file()
+    assert json.loads(stdin_capture.read_text(encoding="utf-8")) == {
+        "verdict": "intervene",
+        "reason": "nope",
+        "mutation": None,
+    }
+    # The mapped verdict output is unaffected by a successful apply.
+    assert json.loads(out) == {
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "deny",
+            "permissionDecisionReason": "nope",
+        }
+    }
+
+
+def test_apply_does_not_run_on_ok_verdict(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    env = _write_template(tmp_path, "t", "intervene: deny\n\nreview {tool_name}\n")
+    _install_client(monkeypatch, result=_OK_RESULT)
+    script = _write_apply_script(tmp_path)
+    code, out = _run(
+        {"session_id": "s1", "hook_event_name": "PreToolUse", "tool_name": "Bash"},
+        env,
+        "t",
+        apply=str(script),
+    )
+    assert code == 0
+    assert out == ""
+    assert not (tmp_path / "apply-stdin.txt").is_file()
+
+
+def test_apply_failing_command_skips_with_message_and_keeps_verdict(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    env = _write_template(tmp_path, "t", "intervene: deny\n\nreview {tool_name}\n")
+    _install_client(monkeypatch, result=_INTERVENE_RESULT)
+    script = _write_apply_script(tmp_path, exit_code=1)
+    code, out = _run(
+        {"session_id": "s1", "hook_event_name": "PreToolUse", "tool_name": "Bash"},
+        env,
+        "t",
+        apply=str(script),
+    )
+    assert code == 0
+    data = json.loads(out)
+    assert data["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert data["systemMessage"].startswith("cgx fork-review skipped")
+    assert "APPLY-STDOUT-LEAK" not in out
+
+
+def test_apply_timeout_skips_with_message(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    env = _write_template(tmp_path, "t", "intervene: deny\n\nreview {tool_name}\n")
+    _install_client(monkeypatch, result=_INTERVENE_RESULT)
+    monkeypatch.setattr(fork_review, "_APPLY_TIMEOUT_S", 0.2)
+    script = _write_apply_script(tmp_path, sleep_s=2.0)
+    code, out = _run(
+        {"session_id": "s1", "hook_event_name": "PreToolUse", "tool_name": "Bash"},
+        env,
+        "t",
+        apply=str(script),
+    )
+    assert code == 0
+    data = json.loads(out)
+    assert data["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert "timed out" in data["systemMessage"]
+    assert "APPLY-STDOUT-LEAK" not in out
+
+
+def test_apply_missing_command_skips_with_message(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    env = _write_template(tmp_path, "t", "intervene: deny\n\nreview {tool_name}\n")
+    _install_client(monkeypatch, result=_INTERVENE_RESULT)
+    code, out = _run(
+        {"session_id": "s1", "hook_event_name": "PreToolUse", "tool_name": "Bash"},
+        env,
+        "t",
+        apply=str(tmp_path / "does-not-exist-at-all"),
+    )
+    assert code == 0
+    data = json.loads(out)
+    assert data["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert data["systemMessage"].startswith("cgx fork-review skipped")
+
+
+def test_apply_failure_message_suppressed_by_quiet_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    env = _write_template(tmp_path, "t", "intervene: deny\n\nreview {tool_name}\n")
+    env["CGX_FORK_REVIEW_QUIET"] = "1"
+    _install_client(monkeypatch, result=_INTERVENE_RESULT)
+    script = _write_apply_script(tmp_path, exit_code=1)
+    code, out = _run(
+        {"session_id": "s1", "hook_event_name": "PreToolUse", "tool_name": "Bash"},
+        env,
+        "t",
+        apply=str(script),
+    )
+    assert code == 0
+    data = json.loads(out)
+    assert data["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert "systemMessage" not in data
+
+
 # --- packaged example templates ----------------------------------------------
 
 
 @pytest.mark.parametrize(
     ("name", "expected_intervene"),
-    [("task-assignment", "context"), ("permission-classifier", "deny"), ("btw", "deny")],
+    [
+        ("task-assignment", "context"),
+        ("permission-classifier", "deny"),
+        ("btw", "deny"),
+        ("rename", "deny"),
+    ],
 )
 def test_packaged_templates_are_loadable(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str, expected_intervene: str

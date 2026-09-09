@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Shadow review fork: `cgx fork-review` gained `--apply <command>`, run
+  through the shell exactly as given, with the verdict JSON
+  (`{"verdict", "reason", "mutation"}`) on its stdin, only on an
+  `intervene` verdict. Its own stdout is discarded, it is bounded by the
+  same 5s timeout as the hook itself, and a failing, timing-out or
+  missing command adds the existing fail-open `systemMessage` alongside
+  the verdict's normal mapped output rather than in place of it. New
+  packaged `rename` template (`intervene: deny`) pairs with it for a
+  custom `/rename` that composes the label from the fork's own context
+  and applies it outside the conversation being renamed.
 - Shadow review fork: a fork's snapshot selection now excludes known
   subagent traffic before applying the usual largest-prefix rule, falling
   back to selecting over every snapshot (flagged `subagent_snapshot:

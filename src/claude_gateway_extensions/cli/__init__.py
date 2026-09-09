@@ -269,7 +269,13 @@ def _cmd_fork_review(args: argparse.Namespace, config: Config, ctx: _Context) ->
             raw = json.dumps(payload)
         stdin = io.StringIO(raw)
     return run_fork_review(
-        stdin, ctx.stdout, ctx.environ, args.template, prefix=args.prefix, model=args.model
+        stdin,
+        ctx.stdout,
+        ctx.environ,
+        args.template,
+        prefix=args.prefix,
+        model=args.model,
+        apply=args.apply,
     )
 
 
@@ -547,6 +553,16 @@ def _build_parser() -> argparse.ArgumentParser:
             "override the reviewer model for this fork only (default: "
             "CGX_FORK_MODEL, else the session's own model); an override "
             "always forfeits the cache read"
+        ),
+    )
+    fork_review_parser.add_argument(
+        "--apply",
+        default=None,
+        help=(
+            "on an intervene verdict, run this shell command with the verdict "
+            "JSON on its stdin, for a side effect the conversation never sees "
+            "(e.g. a session rename); your own string, run through the shell "
+            "exactly as given"
         ),
     )
 

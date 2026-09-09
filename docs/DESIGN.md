@@ -351,3 +351,21 @@ review" roadmap line; no part of it ships in 1.0.
   of a fork's reply.** Each of these turns a stateless one-shot into a
   thing with a lifecycle, and none is needed by the four use cases that
   motivated the feature.
+- **`cgx fork-review --apply <command>` lets an `intervene` verdict act on
+  the side rather than only through the hook's own decision fields.** The
+  motivating case is a user-controlled `/rename`: the built-in session
+  rename is not customisable, and doing it in-conversation costs a turn and
+  pollutes the context being renamed, while a fork already holds the same
+  context at a cache read. On `intervene`, and only then, the command runs
+  through the shell exactly as the user gave it (their own string, never
+  split), fed the verdict JSON (`{"verdict", "reason", "mutation"}`) on
+  stdin, stdout discarded so it can never contaminate the hook's own stdout
+  contract, bounded by the same timeout as the hook itself
+  (`cli/install.py::_HOOK_TIMEOUT_S`, 5s). A non-zero exit, a timeout or a
+  missing command is the existing fail-open skip -- exit 0, a `systemMessage`
+  naming it, suppressed by `CGX_FORK_REVIEW_QUIET` -- attached alongside the
+  verdict's own mapped output rather than replacing it, since the template's
+  `intervene:` mode still decides what the parent conversation sees. The
+  packaged `rename` template (`intervene: deny`, so the prompt itself is
+  always swallowed) pairs with `cgx fork-review --template rename --prefix
+  /rename --apply '<user command>'` as a `UserPromptSubmit` hook.
