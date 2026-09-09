@@ -1,4 +1,6 @@
 intervene: deny
+event: PreToolUse
+matcher: Bash
 
 Classify the Bash command below against this session's own context (its
 working directory, and whatever else you already know about what it has

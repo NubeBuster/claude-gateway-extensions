@@ -1,4 +1,5 @@
 intervene: deny
+event: UserPromptSubmit
 
 Answer the question below directly and concisely, using this session's own
 context (recent files, its task, the conversation so far) as background.

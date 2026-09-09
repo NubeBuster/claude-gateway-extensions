@@ -1,4 +1,6 @@
 intervene: context
+event: PreToolUse
+matcher: TaskCreate|TaskUpdate
 
 Review the `TaskCreate` tool call below for a model-to-task mismatch: does
 the task's complexity (interpretation, ambiguity, debugging depth) match

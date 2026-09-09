@@ -331,6 +331,20 @@ review" roadmap line; no part of it ships in 1.0.
   At `PreToolUse` it becomes `updatedInput` (whole object, per the hook
   contract); anywhere else it is logged as ignored rather than
   approximated with injected text.
+- **A template's front matter may also declare `event` and `matcher`,**
+  the hook event and Claude Code hook matcher it was written for —
+  `event` one of the events `_map_verdict` maps (`PreToolUse`,
+  `UserPromptSubmit`, `PostToolUse`), anything else (including absent)
+  falling back to undeclared exactly like an unrecognised `intervene`
+  value; `matcher` a free string (e.g. `Bash`), never validated here.
+  `matcher` is informational only for `cgx fork-review` itself — it is
+  read by `cgx configure --fork-review` to place the hook entry. A
+  declared `event` that disagrees with the payload's `hook_event_name`
+  is a configuration mistake, not a review outcome: the hook exits 0
+  with the existing fail-open skip `systemMessage`, naming both, before
+  a fork is ever requested — previously a template wired to the wrong
+  event evaporated silently, since `_map_verdict` already returned
+  `None` for it after paying for the fork.
 - **Templates are plain text files in the user's config directory**
   (`CGX_TEMPLATE_DIR`, default `$XDG_CONFIG_HOME/cgx/templates`),
   `{placeholder}` substituted from the hook payload's top-level fields,

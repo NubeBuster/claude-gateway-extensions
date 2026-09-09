@@ -374,6 +374,91 @@ def test_absent_front_matter_defaults_to_deny(
     assert data["hookSpecificOutput"]["permissionDecision"] == "deny"
 
 
+def test_parse_template_reads_event_and_matcher() -> None:
+    intervene, event, matcher, body = fork_review._parse_template(
+        "intervene: ask\nevent: PreToolUse\nmatcher: Bash\n\nreview {tool_name}\n"
+    )
+    assert intervene == "ask"
+    assert event == "PreToolUse"
+    assert matcher == "Bash"
+    assert body == "review {tool_name}"
+
+
+def test_parse_template_ignores_unknown_key() -> None:
+    intervene, event, matcher, body = fork_review._parse_template(
+        "intervene: deny\nauthor: someone\n\nreview\n"
+    )
+    assert intervene == "deny"
+    assert event is None
+    assert matcher is None
+    assert body == "review"
+
+
+def test_parse_template_invalid_event_falls_back_to_undeclared() -> None:
+    _intervene, event, _matcher, _body = fork_review._parse_template(
+        "intervene: deny\nevent: NotARealEvent\n\nreview\n"
+    )
+    assert event is None
+
+
+def test_parse_template_no_front_matter_leaves_event_and_matcher_unset() -> None:
+    intervene, event, matcher, body = fork_review._parse_template("review, no header at all\n")
+    assert intervene == "deny"
+    assert event is None
+    assert matcher is None
+    assert body == "review, no header at all"
+
+
+def test_declared_event_mismatch_skips_with_message(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    env = _write_template(
+        tmp_path, "t", "intervene: deny\nevent: PreToolUse\n\nreview {tool_name}\n"
+    )
+    calls = _install_client(monkeypatch, result=_INTERVENE_RESULT)
+    code, out = _run(
+        {"session_id": "s1", "hook_event_name": "UserPromptSubmit", "prompt": "hi"}, env, "t"
+    )
+    assert code == 0
+    data = json.loads(out)
+    assert set(data) == {"systemMessage"}
+    assert data["systemMessage"].startswith("cgx fork-review skipped")
+    assert "PreToolUse" in data["systemMessage"]
+    assert "UserPromptSubmit" in data["systemMessage"]
+    assert calls == []
+
+
+def test_declared_event_mismatch_quiet_env_suppresses_message(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    env = _write_template(
+        tmp_path, "t", "intervene: deny\nevent: PreToolUse\n\nreview {tool_name}\n"
+    )
+    env["CGX_FORK_REVIEW_QUIET"] = "1"
+    calls = _install_client(monkeypatch, result=_INTERVENE_RESULT)
+    code, out = _run(
+        {"session_id": "s1", "hook_event_name": "UserPromptSubmit", "prompt": "hi"}, env, "t"
+    )
+    assert code == 0
+    assert out == ""
+    assert calls == []
+
+
+def test_declared_event_match_proceeds_normally(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    env = _write_template(
+        tmp_path, "t", "intervene: deny\nevent: PreToolUse\n\nreview {tool_name}\n"
+    )
+    calls = _install_client(monkeypatch, result=_INTERVENE_RESULT)
+    code, out = _run(
+        {"session_id": "s1", "hook_event_name": "PreToolUse", "tool_name": "Bash"}, env, "t"
+    )
+    assert code == 0
+    assert len(calls) == 1
+    assert json.loads(out)["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
 def test_unknown_placeholder_survives_literally(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -612,22 +697,28 @@ def test_apply_failure_message_suppressed_by_quiet_env(
 
 
 @pytest.mark.parametrize(
-    ("name", "expected_intervene"),
+    ("name", "hook_event_name", "expected_intervene"),
     [
-        ("task-assignment", "context"),
-        ("permission-classifier", "deny"),
-        ("btw", "deny"),
-        ("rename", "deny"),
+        ("task-assignment", "PreToolUse", "context"),
+        ("permission-classifier", "PreToolUse", "deny"),
+        ("btw", "UserPromptSubmit", "deny"),
+        ("rename", "UserPromptSubmit", "deny"),
     ],
 )
 def test_packaged_templates_are_loadable(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str, expected_intervene: str
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    name: str,
+    hook_event_name: str,
+    expected_intervene: str,
 ) -> None:
     """With no user template directory populated, the packaged examples are used.
 
     Scripting an ``intervene`` verdict and checking the mapped output's shape
     (rather than just that *something* was produced) confirms the packaged
     template's own ``intervene:`` front matter was actually parsed.
+    ``hook_event_name`` matches each template's own declared ``event:`` line,
+    since a mismatch now skips instead of reviewing.
     """
     empty_home = tmp_path / "empty-home"
     empty_home.mkdir()
@@ -638,10 +729,11 @@ def test_packaged_templates_are_loadable(
     code, out = _run(
         {
             "session_id": "s1",
-            "hook_event_name": "PreToolUse",
+            "hook_event_name": hook_event_name,
             "tool_name": "Bash",
             "tool_input": {"command": "ls"},
             "cwd": "/tmp",
+            "prompt": "hello",
         },
         env,
         name,
@@ -649,6 +741,9 @@ def test_packaged_templates_are_loadable(
     assert code == 0
     assert len(calls) == 1
     assert '"verdict"' in calls[0]["prompt"]
+    if hook_event_name == "UserPromptSubmit":
+        assert json.loads(out) == {"decision": "block", "reason": "nope"}
+        return
     hook_specific = json.loads(out)["hookSpecificOutput"]
     if expected_intervene == "context":
         assert "additionalContext" in hook_specific

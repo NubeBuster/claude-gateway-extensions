@@ -19,6 +19,12 @@ than only speaking through the hook's own decision fields: the command runs
 through the shell with the verdict JSON on its stdin, for something like a
 ``/rename`` that composes a name from the fork's context and applies it
 outside the conversation being renamed.
+
+A template may also declare the ``event`` (and, informationally, the
+``matcher``) it is written for in its front matter. A payload whose
+``hook_event_name`` disagrees with a declared ``event`` is a configuration
+mistake -- the hook exits 0 with the same fail-open skip ``systemMessage``,
+naming both, rather than the review silently evaporating.
 """
 
 from __future__ import annotations
@@ -56,6 +62,10 @@ _TRUE_VALUES = {"true", "1", "yes"}
 
 #: Hook events whose output uses the top-level ``decision: "block"`` shape.
 _DECISION_BLOCK_EVENTS = {"UserPromptSubmit", "PostToolUse"}
+
+#: Every event a template's ``event:`` front-matter line may declare --
+#: exactly the events :func:`_map_verdict` knows how to map.
+_MAPPABLE_EVENTS = {"PreToolUse", *_DECISION_BLOCK_EVENTS}
 
 
 class _TemplateError(Exception):
@@ -108,15 +118,25 @@ def _load_template(name: str, environ: Mapping[str, str]) -> str:
     raise _TemplateError(f"template not found: {name!r}")
 
 
-def _parse_template(text: str) -> tuple[str, str]:
-    """Split ``text`` into its ``intervene`` mode and body.
+def _parse_template(text: str) -> tuple[str, str | None, str | None, str]:
+    """Split ``text`` into its ``intervene`` mode, declared ``event``, ``matcher`` and body.
 
     Optional ``key: value`` lines at the top, then a blank separator line,
-    then the body. The only recognised key is ``intervene`` (``deny`` by
-    default); an absent header, or a value outside ``deny``/``ask``/
-    ``context``, both fall back to ``deny``. A template with no front matter
-    at all (no line matching the ``key: value`` shape) is used verbatim as
-    the body.
+    then the body. Three keys are recognised:
+
+    - ``intervene`` (``deny`` by default): an absent header, or a value
+      outside ``deny``/``ask``/``context``, both fall back to ``deny``.
+    - ``event`` (``None`` by default): the hook event the template is
+      written for, one of the events :func:`_map_verdict` can map --
+      anything else (including absent) is ``None``, matching how an
+      unrecognised ``intervene`` value falls back rather than raising.
+    - ``matcher`` (``None`` by default): a free string, the Claude Code hook
+      matcher (e.g. ``Bash``); never validated, since the set of valid tool
+      names is not this module's to know.
+
+    Any other key is ignored. A template with no front matter at all (no
+    line matching the ``key: value`` shape) is used verbatim as the body,
+    with all three fields at their defaults.
     """
     lines = text.splitlines()
     front_matter: dict[str, str] = {}
@@ -133,7 +153,11 @@ def _parse_template(text: str) -> tuple[str, str]:
     intervene = front_matter.get("intervene", "deny")
     if intervene not in _INTERVENE_VALUES:
         intervene = "deny"
-    return intervene, body
+    event = front_matter.get("event")
+    if event not in _MAPPABLE_EVENTS:
+        event = None
+    matcher = front_matter.get("matcher") or None
+    return intervene, event, matcher, body
 
 
 def _build_fields(payload: Mapping[str, Any], argument: str) -> dict[str, str]:
@@ -287,11 +311,17 @@ def run_fork_review(
     except _TemplateError as exc:
         return _skip(str(exc))
 
-    intervene_mode, body = _parse_template(template_text)
+    intervene_mode, declared_event, _matcher, body = _parse_template(template_text)
     fields = _build_fields(payload, argument)
     rendered_prompt = _render(body, fields)
 
     hook_event = payload.get("hook_event_name")
+    if declared_event is not None and hook_event != declared_event:
+        return _skip(
+            f"template {template!r} declares event {declared_event!r}, "
+            f"hook fired for {hook_event!r}"
+        )
+
     config = Config.from_env(environ)
     client = ControlClient(config.url)
     try:

@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Shadow review fork: a template's front matter can now declare `event`
+  and `matcher`, the hook event and Claude Code hook matcher it was
+  written for. A payload's `hook_event_name` disagreeing with a declared
+  `event` now exits 0 with the existing fail-open skip `systemMessage`,
+  naming both, before a fork is requested -- previously a template wired
+  to the wrong event evaporated silently after paying for the fork,
+  since `_map_verdict` already returned `None` for it. The three
+  packaged templates (plus the new `rename`) declare their own event and
+  matcher.
 - Shadow review fork: `cgx fork-review` gained `--apply <command>`, run
   through the shell exactly as given, with the verdict JSON
   (`{"verdict", "reason", "mutation"}`) on its stdin, only on an

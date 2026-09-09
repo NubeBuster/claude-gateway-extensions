@@ -1,4 +1,5 @@
 intervene: deny
+event: UserPromptSubmit
 
 Look at this session's own context (recent files, its task, the
 conversation so far) and come up with a short label for it: lowercase,
