@@ -234,6 +234,18 @@ branch of its own the way `POST .../bump`'s `409` requires one:
   `usage` is still populated from the reply when it was readable, and
   `paid_write` is computed from it, so a caller can see that a wasted
   fork was also an expensive one.
+- `tool_use_reply`: the reply's `content` carried a block of type
+  `tool_use` (`usage` populated when readable, `paid_write` computed from
+  it as above). The fork body no longer strips `tools`/`tool_choice`, so a
+  twin calling a tool is refused by reading the reply rather than by the
+  request shape.
+- `thinking_unsafe_model`/`thinking_model_unknown`: the captured snapshot
+  carries thinking blocks and the target model is not known
+  (`thinking_model_unknown`) or known not (`thinking_unsafe_model`) to
+  preserve them across the appended turn, which would invalidate the
+  message cache (`usage: null`, `paid_write: false`). No request reaches
+  the upstream. Set `CGX_FORK_THINKING_GUARD=false` to disable this check
+  for a model you have measured yourself.
 
 `400` cases: `{"error": "invalid_session_id"}` for a malformed id (same
 pattern as every other endpoint); `{"error": "invalid_body"}` when the
