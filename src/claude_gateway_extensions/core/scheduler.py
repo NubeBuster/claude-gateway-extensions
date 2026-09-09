@@ -379,14 +379,25 @@ class Scheduler:
         state = dataclasses.replace(state, enabled=False, stopped_reason=reason, until=None)
         self._store.put_state(state)
 
+    @staticmethod
+    def _wants_1h_safe(snapshot: Snapshot) -> bool:
+        """Return whether ``snapshot`` requested the 1h TTL, or ``False`` if unparseable."""
+        try:
+            return wants_1h_ttl(snapshot.body)
+        except SnapshotError:
+            return False
+
+    def _max_duration_s(self, state: SessionState) -> int:
+        """Return the configured per-session max duration, or the daemon default."""
+        if state.max_duration_s is not None:
+            return state.max_duration_s
+        return self._config.max_duration_s
+
     def _effective_interval(self, state: SessionState, snapshot: Snapshot) -> int:
         """Return the configured per-session interval, or the config default for this snapshot."""
         if state.interval_s is not None:
             return state.interval_s
-        try:
-            wants_1h = wants_1h_ttl(snapshot.body)
-        except SnapshotError:
-            wants_1h = False
+        wants_1h = self._wants_1h_safe(snapshot)
         return self._config.interval_1h_s if wants_1h else self._config.interval_5m_s
 
     def _next_bump_at(self, state: SessionState, snapshot: Snapshot | None) -> float | None:
@@ -407,12 +418,7 @@ class Scheduler:
         """
         if state.until is not None:
             return state.until
-        max_duration = (
-            state.max_duration_s
-            if state.max_duration_s is not None
-            else self._config.max_duration_s
-        )
-        return self._enabled_since.get(session_id, self._clock.now()) + max_duration
+        return self._enabled_since.get(session_id, self._clock.now()) + self._max_duration_s(state)
 
     async def _await_first_snapshot(self, session_id: str, state: SessionState) -> None:
         """Park until a snapshot is captured for ``session_id`` or its wait bound is due.
@@ -438,10 +444,7 @@ class Scheduler:
         (``wants_1h_ttl``), but the real Anthropic TTL rather than the
         daemon's smaller, configurable bump-interval safety margin.
         """
-        try:
-            wants_1h = wants_1h_ttl(snapshot.body)
-        except SnapshotError:
-            wants_1h = False
+        wants_1h = self._wants_1h_safe(snapshot)
         return CACHE_TTL_1H_S if wants_1h else CACHE_TTL_5M_S
 
     def _cache_expires_at(self, state: SessionState, snapshot: Snapshot | None) -> float | None:
@@ -491,6 +494,28 @@ class Scheduler:
         self._last_result[session_id] = result
         return "transient"
 
+    def _deadline_stop_reason(
+        self, session_id: str, state: SessionState, snapshot: Snapshot | None
+    ) -> str | None:
+        """Return the stop reason if ``state``'s deadline or max duration is already due.
+
+        Checks, in priority order: an explicit ``until`` deadline; the
+        waiting bound when there is no snapshot yet; otherwise the max
+        duration measured from the last real request.
+        """
+        if state.until is not None:
+            if self._clock.now() >= state.until:
+                return "deadline"
+        elif snapshot is None:
+            if self._clock.now() >= self._waiting_bound(session_id, state):
+                return "max_duration"
+        elif (
+            state.last_request_at is not None
+            and self._clock.now() - state.last_request_at >= self._max_duration_s(state)
+        ):
+            return "max_duration"
+        return None
+
     async def _run_session(self, session_id: str) -> None:
         """Task body: wait for the next bump, then bump, forever until disabled or stopped.
 
@@ -509,23 +534,10 @@ class Scheduler:
                     return
                 snapshots = self._store.get_snapshots(session_id)
                 snapshot = self._selector.select(snapshots)
-                if state.until is not None:
-                    if self._clock.now() >= state.until:
-                        self._persist_stop(session_id, "deadline")
-                        return
-                elif snapshot is None:
-                    if self._clock.now() >= self._waiting_bound(session_id, state):
-                        self._persist_stop(session_id, "max_duration")
-                        return
-                elif state.last_request_at is not None:
-                    max_duration = (
-                        state.max_duration_s
-                        if state.max_duration_s is not None
-                        else self._config.max_duration_s
-                    )
-                    if self._clock.now() - state.last_request_at >= max_duration:
-                        self._persist_stop(session_id, "max_duration")
-                        return
+                stop_reason = self._deadline_stop_reason(session_id, state, snapshot)
+                if stop_reason is not None:
+                    self._persist_stop(session_id, stop_reason)
+                    return
                 if snapshot is None:
                     await self._await_first_snapshot(session_id, state)
                     continue
