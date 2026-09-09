@@ -4,7 +4,7 @@ VENV_PY := .venv/bin/python
 BIN := $(if $(wildcard $(VENV_PY)),.venv/bin/,)
 
 check-venv:
-	@test -x "$(VENV_PY)" || { echo "no .venv: run \`python -m venv .venv && .venv/bin/pip install -e '.[dev]'\`" >&2; exit 1; }
+	@test -n "$(CGX_SYSTEM_PYTHON)" -o -x "$(VENV_PY)" || { echo "no .venv: run \`python -m venv .venv && .venv/bin/pip install -e '.[dev]'\` (or set CGX_SYSTEM_PYTHON=1 to use the system interpreter, e.g. in CI)" >&2; exit 1; }
 
 check: check-venv lint types
 	$(BIN)pytest

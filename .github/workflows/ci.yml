@@ -10,6 +10,8 @@ jobs:
     strategy:
       matrix:
         python-version: ["3.11", "3.12"]
+    env:
+      CGX_SYSTEM_PYTHON: "1"
     steps:
       - uses: actions/checkout@v4
 

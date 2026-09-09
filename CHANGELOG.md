@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Makefile: `check-venv` now honours `CGX_SYSTEM_PYTHON=1` as an explicit
+  opt-out, letting a runner with no `.venv` (CI) pass the same guard that
+  otherwise refuses to fall back to a bare `python`/`ruff`/`pyright`/
+  `pytest` from `PATH`. `.github/workflows/ci.yml` sets it for the job
+  that runs `make check`.
 - Shadow review fork: a template's front matter can now declare
   `require:`, a comma-separated, ANDed list of conditions on the hook
   payload (`path` for "exists and is a non-empty string", `path=regex`
