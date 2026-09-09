@@ -79,6 +79,20 @@ class Snapshot:
 
 
 @dataclass
+class RewarmWrite:
+    """Record of the one ``cache_write`` bump a rewarm was allowed to tolerate.
+
+    See the "Rewarm" decision in ``docs/DESIGN.md``. Written once, when the
+    tolerated write happens; never cleared afterwards, so it stays visible
+    in status as a historical record even after the flag it consumed is
+    gone.
+    """
+
+    at: float
+    usage: Usage
+
+
+@dataclass
 class SessionState:
     """Per-session mutable bump state, persisted next to its snapshots."""
 
@@ -92,6 +106,8 @@ class SessionState:
     bump_count: int = 0
     stopped_reason: str | None = None
     last_credential: tuple[str, str] | None = field(default=None)
+    rewarm: bool = False
+    rewarm_write: RewarmWrite | None = None
 
 
 def _load_json(body: bytes) -> Any:

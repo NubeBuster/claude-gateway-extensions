@@ -102,9 +102,12 @@ async def put_session(request: web.Request) -> web.Response:
     until = body.get("until")
     if not _is_optional_number(until):
         return _invalid_body()
+    rewarm = body.get("rewarm", False)
+    if not isinstance(rewarm, bool):
+        return _invalid_body()
 
     scheduler: Scheduler = request.app[SCHEDULER_KEY]
-    scheduler.set_enabled(session_id, body["enabled"], interval_s, max_duration_s, until)
+    scheduler.set_enabled(session_id, body["enabled"], interval_s, max_duration_s, until, rewarm)
     return web.json_response(scheduler.status(session_id))
 
 

@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Feature: rewarm -- an explicit, opt-in way to bring a cold session back.
+  `rewarm: true` on `PUT /cgx/sessions/{id}` (`cgx on ... --rewarm`,
+  `/cache <deadline> rewarm`) tolerates exactly one `cache_write` bump
+  result for that session instead of stopping it: the write is recorded as
+  `rewarm_write` (usage and timestamp, surfaced in `formatted` and `cgx
+  status`), the flag is consumed, and bumping resumes normally. Every
+  session enabled without the flag keeps today's fail-closed default. See
+  the "Rewarm" decision in `docs/DESIGN.md`.
 - Fix: `cgx service install`'s systemd unit no longer bakes in
   session/hook-side `CGX_*` variables from the installing shell (`CGX_URL`,
   `CGX_FORK_REVIEW_QUIET`, `CGX_TEMPLATE_DIR`, ...) that `cgx serve` never

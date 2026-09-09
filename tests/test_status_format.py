@@ -11,6 +11,7 @@ from claude_gateway_extensions.core.status_format import (
     format_clock,
     format_countdown,
     format_deadline,
+    format_rewarm_write,
     format_status_times,
 )
 
@@ -66,6 +67,7 @@ def test_format_status_times_full() -> None:
         "expires_at": "08:38",
         "next_bump_countdown": "50:19",
         "next_bump_at": "08:33",
+        "rewarm_write": None,
     }
 
 
@@ -89,6 +91,26 @@ def test_format_status_times_no_bump_scheduled() -> None:
 def test_format_status_times_elapsed_ttl_clamps_to_zero() -> None:
     result = format_status_times(cache_expires_at=_NOW - 10, next_bump_at=None, now=_NOW, tz=_TZ)
     assert result["ttl_countdown"] == "00:00"
+
+
+# -- format_rewarm_write ------------------------------------------------------
+
+
+def test_format_rewarm_write_none_when_unset() -> None:
+    assert format_rewarm_write(None) is None
+
+
+def test_format_rewarm_write_renders_tokens_and_clock() -> None:
+    record = {"at": _NOW + 3319, "usage": {"cache_creation_input_tokens": 4096}}
+    assert format_rewarm_write(record, tz=_TZ) == "4096 cache-write tokens at 08:38"
+
+
+def test_format_status_times_includes_rewarm_write() -> None:
+    record = {"at": _NOW, "usage": {"cache_creation_input_tokens": 128}}
+    result = format_status_times(
+        cache_expires_at=None, next_bump_at=None, now=_NOW, tz=_TZ, rewarm_write=record
+    )
+    assert result["rewarm_write"] == "128 cache-write tokens at 07:43"
 
 
 # -- format_deadline: local-calendar-day classification ----------------------

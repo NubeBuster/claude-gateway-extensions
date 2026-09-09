@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from claude_gateway_extensions.core.snapshot import SessionState, Snapshot, Usage
+from claude_gateway_extensions.core.snapshot import RewarmWrite, SessionState, Snapshot, Usage
 from claude_gateway_extensions.core.store import FileStore, MemoryStore
 
 
@@ -98,6 +98,42 @@ def test_file_store_round_trips_is_subagent(tmp_path: Path) -> None:
     got = reloaded.get_snapshots("sess-1")
     assert len(got) == 1
     assert got[0].is_subagent is True
+
+
+@pytest.mark.invariant(decision="Rewarm: an explicit, opt-in return from a cold cache")
+def test_file_store_round_trips_rewarm_fields(tmp_path: Path) -> None:
+    root = tmp_path / "state"
+    store = FileStore(root, max_streams_per_session=8)
+    state = SessionState(
+        session_id="sess-1",
+        enabled=True,
+        rewarm=True,
+        rewarm_write=RewarmWrite(at=1000.0, usage=Usage(cache_creation_input_tokens=4096)),
+    )
+    store.put_state(state)
+
+    reloaded = FileStore(root, max_streams_per_session=8)
+    got_state = reloaded.get_state("sess-1")
+    assert got_state == state
+
+
+def test_file_store_loads_state_without_rewarm_keys(tmp_path: Path) -> None:
+    """A state persisted before rewarm existed loads as if never armed."""
+    root = tmp_path / "state"
+    store = FileStore(root, max_streams_per_session=8)
+    store.put_state(SessionState(session_id="sess-1", enabled=True))
+
+    state_path = root / "sess-1" / "state.json"
+    data = json.loads(state_path.read_text())
+    del data["rewarm"]
+    del data["rewarm_write"]
+    state_path.write_text(json.dumps(data))
+
+    reloaded = FileStore(root, max_streams_per_session=8)
+    got_state = reloaded.get_state("sess-1")
+    assert got_state is not None
+    assert got_state.rewarm is False
+    assert got_state.rewarm_write is None
 
 
 def test_file_store_loads_snapshot_without_is_subagent_key(tmp_path: Path) -> None:

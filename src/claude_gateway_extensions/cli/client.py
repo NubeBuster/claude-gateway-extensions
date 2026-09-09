@@ -130,11 +130,15 @@ class ControlClient:
         interval_s: int | None = None,
         max_duration_s: int | None = None,
         until: float | None = None,
+        rewarm: bool = False,
     ) -> dict[str, Any]:
         """Enable/disable bumping and optionally set overrides via ``PUT /cgx/sessions/{id}``.
 
         ``until`` is an absolute Unix epoch deadline that replaces the
-        max-duration stop for this session; see ``docs/API.md``.
+        max-duration stop for this session; see ``docs/API.md``. ``rewarm``
+        arms the session to tolerate exactly one ``cache_write`` bump result
+        instead of stopping on it (the "Rewarm" decision in
+        ``docs/DESIGN.md``); omitted or ``False``, nothing changes.
         """
         payload: dict[str, Any] = {"enabled": enabled}
         if interval_s is not None:
@@ -143,6 +147,8 @@ class ControlClient:
             payload["max_duration_s"] = max_duration_s
         if until is not None:
             payload["until"] = until
+        if rewarm:
+            payload["rewarm"] = True
         status, parsed = self._request("PUT", f"/cgx/sessions/{session_id}", payload)
         if not 200 <= status < 300:
             raise ApiError(status, str(parsed))

@@ -85,6 +85,8 @@ def _format_until_reason(session: Mapping[str, Any], now: float) -> str:
         return "cache: on for this session"
     minutes = _interval_minutes(session)
     suffix = f", bump every {minutes}m" if minutes is not None else ""
+    if session.get("rewarm"):
+        suffix += ", rewarm armed (next cache write is tolerated)"
     return f"cache: bumping until {format_deadline(until, now)}{suffix}"
 
 
@@ -96,7 +98,10 @@ def _format_now_reason(result: Mapping[str, Any]) -> str:
         tokens = usage.get("cache_read_input_tokens", 0)
         return f"cache: bumped, {tokens} tokens read from cache"
     if outcome == "cache_write":
-        return "cache: bumped, but the cache had already expired (paid a full write)"
+        tokens = usage.get("cache_creation_input_tokens", 0)
+        return (
+            f"cache: bumped, but the cache had already expired (paid a full write, {tokens} tokens)"
+        )
     if outcome == "unauthorized":
         return "cache: bump failed, credential rejected (session stopped)"
     if outcome == "rejected":
@@ -125,7 +130,9 @@ def _handle_command(client: ControlClient, session_id: str, argument: str, now_d
         return _format_now_reason(result)
 
     if isinstance(deadline, At):
-        session = client.set_session(session_id, True, until=deadline.when.timestamp())
+        session = client.set_session(
+            session_id, True, until=deadline.when.timestamp(), rewarm=deadline.rewarm
+        )
         return _format_until_reason(session, now_dt.timestamp())
 
     assert isinstance(deadline, Status)

@@ -44,9 +44,10 @@ Response `200`:
   "max_duration_s": null, "until": null, "last_request_at": 1700000000.0,
   "last_bump_at": 1700003000.0, "bump_count": 3, "stopped_reason": null,
   "next_bump_at": 1700006000.0, "cache_expires_at": 1700003300.0,
-  "streams": 2, "last_result": null,
+  "streams": 2, "last_result": null, "rewarm": false, "rewarm_write": null,
   "formatted": {"ttl_countdown": "04:37", "expires_at": "20:18",
-  "next_bump_countdown": "49:37", "next_bump_at": "21:06"}}]}
+  "next_bump_countdown": "49:37", "next_bump_at": "21:06",
+  "rewarm_write": null}}]}
 ```
 
 ## GET /cgx/sessions/{id}
@@ -71,7 +72,22 @@ to `00:00` once elapsed; clock values (`expires_at`, `next_bump_at`) render
 as local `HH:MM`. `ttl_countdown`/`expires_at` are present whenever
 `cache_expires_at` is known, even when the session is disabled, so a
 statusline can always show the cache's time to live; `next_bump_countdown`/
-`next_bump_at` are `null` when no bump is scheduled.
+`next_bump_at` are `null` when no bump is scheduled. `formatted.rewarm_write`
+renders `rewarm_write` below (e.g. `"4096 cache-write tokens at 20:18"`), or
+`null` when the session has never had a rewarm-tolerated write.
+
+`rewarm` is `true` while the session's rewarm flag is armed (see `PUT
+/cgx/sessions/{id}` below): the next `cache_write` bump result is tolerated
+instead of stopping the session, and the flag flips back to `false` once
+that write happens. `rewarm_write` is `null` until the first (and, per
+session, only) write the flag ever tolerates; from then on it holds that
+write's usage and timestamp permanently, even after the flag that let it
+through is spent:
+
+```json
+{"at": 1700003000.0, "usage": {"input_tokens": 1, "output_tokens": 0,
+  "cache_read_input_tokens": 0, "cache_creation_input_tokens": 4096}}
+```
 
 ## PUT /cgx/sessions/{id}
 
@@ -81,7 +97,8 @@ or max duration. Creates the session's state if it did not already exist.
 Request body:
 
 ```json
-{"enabled": true, "interval_s": 300, "max_duration_s": 86400, "until": 1700006000}
+{"enabled": true, "interval_s": 300, "max_duration_s": 86400, "until": 1700006000,
+  "rewarm": false}
 ```
 
 `enabled` is required and must be a boolean. `interval_s` and
@@ -107,6 +124,17 @@ Disabling a session (`"enabled": false`) clears `until`, unlike
 `transient`) clears it too. Re-enabling without a new `until` therefore
 falls back to the max-duration stop rather than resuming a deadline that is
 already spent.
+
+`rewarm` is an optional boolean, `false` by default. `"rewarm": true` arms
+the session's rewarm flag: the next bump result classified `cache_write`
+(see the "Fail-closed bump classification" and "Rewarm" decisions in
+`docs/DESIGN.md`) is tolerated -- recorded as `rewarm_write` above, session
+kept enabled, bumping resumes on the normal schedule -- instead of stopping
+the session as it would by default. The flag is consumed by that one write:
+a second `cache_write` after it stops the session exactly like today, and a
+new one needs a fresh `"rewarm": true`. Passing `false` (or omitting the
+field) on an already-armed session leaves the flag untouched -- only
+`"enabled": false` and every automatic stop clear it, exactly like `until`.
 
 Enabling a session whose first request has not been captured yet is
 allowed and is not a stop condition: the session stays `"enabled": true`
@@ -147,6 +175,10 @@ Response body is a `BumpResult`:
 `transient`: `ok` is a confirmed cache read; `cache_write` means the cache
 was gone and a write was paid; `unauthorized` is 401/403; `rejected` is any
 other 4xx; `transient` is a network or 5xx error or unreadable usage.
+`cache_write` still returns `409` even when the session's `rewarm` flag
+tolerated it (the write itself was still paid) -- check the session's
+status afterwards to see whether it stopped or is still `enabled: true`
+with the flag now spent.
 
 Status codes: `200` when `outcome` is `ok`, `409` for any other outcome (the
 result is still returned in the body), `400` on an invalid id, `404` with

@@ -38,6 +38,8 @@ STATUS_KEYS = {
     "cache_expires_at",
     "streams",
     "last_result",
+    "rewarm",
+    "rewarm_write",
     "formatted",
 }
 

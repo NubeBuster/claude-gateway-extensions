@@ -554,3 +554,42 @@ def test_bare_number_other_than_zero_is_rejected(text: str) -> None:
     now = _at(2026, 9, 8, 8, 0)
     with pytest.raises(WhenError, match="try 2h, 9PM, tomorrow 10AM"):
         parse_when(text, now)
+
+
+# -- rewarm ---------------------------------------------------------------
+
+
+@pytest.mark.invariant(decision="Rewarm: an explicit, opt-in return from a cold cache")
+def test_duration_with_rewarm_suffix() -> None:
+    now = _at(2026, 9, 8, 12, 0)
+    result = parse_when("2h rewarm", now)
+    assert result == At(now + timedelta(hours=2), rewarm=True)
+
+
+@pytest.mark.invariant(decision="Rewarm: an explicit, opt-in return from a cold cache")
+def test_clock_with_rewarm_suffix_is_case_insensitive() -> None:
+    now = _at(2026, 9, 8, 12, 0)
+    result = parse_when("9PM ReWaRm", now)
+    assert result == At(_at(2026, 9, 8, 21, 0), rewarm=True)
+
+
+@pytest.mark.invariant(decision="Absolute deadline, not an open-ended toggle")
+def test_duration_without_rewarm_is_unarmed() -> None:
+    """Every previously accepted deadline keeps parsing exactly as before."""
+    now = _at(2026, 9, 8, 12, 0)
+    assert parse_when("2h", now) == At(now + timedelta(hours=2), rewarm=False)
+
+
+@pytest.mark.invariant(decision="Rewarm: an explicit, opt-in return from a cold cache")
+def test_bare_rewarm_is_an_error() -> None:
+    now = _at(2026, 9, 8, 12, 0)
+    with pytest.raises(WhenError, match="rewarm needs a deadline first"):
+        parse_when("rewarm", now)
+
+
+@pytest.mark.parametrize("text", ["status rewarm", "bump rewarm", "off rewarm", "0 rewarm"])
+@pytest.mark.invariant(decision="Rewarm: an explicit, opt-in return from a cold cache")
+def test_rewarm_on_a_non_deadline_keyword_is_an_error(text: str) -> None:
+    now = _at(2026, 9, 8, 12, 0)
+    with pytest.raises(WhenError, match="rewarm only applies to an absolute deadline"):
+        parse_when(text, now)

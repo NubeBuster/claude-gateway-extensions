@@ -110,9 +110,16 @@ class Off:
 
 @dataclass(frozen=True)
 class At:
-    """Enable bumping with an absolute, aware, minute-truncated deadline."""
+    """Enable bumping with an absolute, aware, minute-truncated deadline.
+
+    ``rewarm`` is set by a trailing ``rewarm`` token (``/cache 2h rewarm``):
+    it arms the session to tolerate exactly one ``cache_write`` bump result
+    instead of stopping on it -- see the "Rewarm" decision in
+    ``docs/DESIGN.md``.
+    """
 
     when: datetime
+    rewarm: bool = False
 
 
 #: Every shape a parsed ``/cache`` argument can take.
@@ -131,16 +138,37 @@ def parse_when(text: str, now: datetime) -> Deadline:
     relative and "next occurrence" calculation is anchored to it and done in
     its zone, so DST transitions resolve correctly. Raises :class:`WhenError`
     with a one-line reason on anything unparseable or already in the past.
+
+    A trailing ``rewarm`` token (``2h rewarm``, ``9pm rewarm``) arms
+    :attr:`At.rewarm`; it is only meaningful attached to a deadline, so it is
+    stripped and parsed first, before every other keyword and grammar rule
+    below -- every input this function already accepted keeps parsing
+    exactly as before, since none of them end in a literal ``rewarm`` token.
     """
     stripped = text.strip()
     lowered = stripped.lower()
+    rewarm = False
+    if lowered == "rewarm" or lowered.endswith(" rewarm"):
+        prefix = stripped[: -len("rewarm")].strip()
+        if not prefix:
+            raise WhenError(f"rewarm needs a deadline first, e.g. '2h rewarm' ({_HINT})")
+        rewarm = True
+        stripped = prefix
+        lowered = stripped.lower()
+        if lowered in ("", "status", "bump", "off", "0"):
+            raise WhenError(
+                f"{text.strip()!r}: rewarm only applies to an absolute deadline, e.g. '2h rewarm'"
+            )
     if lowered in ("", "status"):
         return Status()
     if lowered == "bump":
         return Bump()
     if lowered in ("off", "0"):
         return Off()
-    return At(when=_truncate_to_minute(_parse_deadline(stripped, lowered, now)))
+    return At(
+        when=_truncate_to_minute(_parse_deadline(stripped, lowered, now)),
+        rewarm=rewarm,
+    )
 
 
 def _truncate_to_minute(when: datetime) -> datetime:

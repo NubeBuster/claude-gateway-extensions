@@ -69,8 +69,11 @@ class _FakeClient:
         interval_s: int | None = None,
         max_duration_s: int | None = None,
         until: float | None = None,
+        rewarm: bool = False,
     ) -> dict[str, Any]:
-        self.calls.append(("set_session", (session_id, enabled, interval_s, max_duration_s, until)))
+        self.calls.append(
+            ("set_session", (session_id, enabled, interval_s, max_duration_s, until, rewarm))
+        )
         self._maybe_raise()
         session = {
             "session_id": session_id,
@@ -197,7 +200,7 @@ def test_on_uses_claude_session_id_env() -> None:
     code, out, _ = _run(["on"], client, environ={"CLAUDE_SESSION_ID": "s1"})
     assert code == EXIT_OK
     assert "s1" in out
-    assert client.calls == [("set_session", ("s1", True, None, None, None))]
+    assert client.calls == [("set_session", ("s1", True, None, None, None, False))]
 
 
 def test_on_explicit_session_and_duration() -> None:
@@ -206,7 +209,7 @@ def test_on_explicit_session_and_duration() -> None:
         ["on", "--session", "s1", "--interval", "60", "--max-duration", "7200"], client
     )
     assert code == EXIT_OK
-    assert client.calls == [("set_session", ("s1", True, 60, 7200, None))]
+    assert client.calls == [("set_session", ("s1", True, 60, 7200, None, False))]
 
 
 @pytest.mark.invariant(decision="Absolute deadline, not an open-ended toggle")
@@ -216,9 +219,23 @@ def test_on_with_until_flag_reuses_parse_when() -> None:
     assert code == EXIT_OK
     assert "until=" in out
     ((_name, call_args),) = client.calls
-    session_id, enabled, interval_s, max_duration_s, until = call_args
-    assert (session_id, enabled, interval_s, max_duration_s) == ("s1", True, None, None)
+    session_id, enabled, interval_s, max_duration_s, until, rewarm = call_args
+    assert (session_id, enabled, interval_s, max_duration_s, rewarm) == (
+        "s1",
+        True,
+        None,
+        None,
+        False,
+    )
     assert isinstance(until, float)
+
+
+@pytest.mark.invariant(decision="Rewarm: an explicit, opt-in return from a cold cache")
+def test_on_with_rewarm_flag_passes_it_through() -> None:
+    client = _FakeClient("http://x")
+    code, _, _ = _run(["on", "--session", "s1", "--rewarm"], client)
+    assert code == EXIT_OK
+    assert client.calls == [("set_session", ("s1", True, None, None, None, True))]
 
 
 @pytest.mark.invariant(decision="Absolute deadline, not an open-ended toggle")
@@ -243,7 +260,7 @@ def test_off() -> None:
     code, out, _ = _run(["off", "--session", "s1"], client)
     assert code == EXIT_OK
     assert "enabled=False" in out
-    assert client.calls == [("set_session", ("s1", False, None, None, None))]
+    assert client.calls == [("set_session", ("s1", False, None, None, None, False))]
 
 
 def test_now_ok_outcome_exits_zero() -> None:

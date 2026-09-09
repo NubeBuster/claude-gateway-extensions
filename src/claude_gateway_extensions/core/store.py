@@ -21,7 +21,7 @@ from collections import OrderedDict
 from pathlib import Path
 from typing import Protocol
 
-from claude_gateway_extensions.core.snapshot import SessionState, Snapshot, Usage
+from claude_gateway_extensions.core.snapshot import RewarmWrite, SessionState, Snapshot, Usage
 
 #: Session ids are used verbatim as filesystem directory names; anything not
 #: matching this pattern is rejected before it ever reaches the filesystem.
@@ -185,6 +185,28 @@ def _snapshot_from_json(data: dict[str, object]) -> Snapshot:
     )
 
 
+def _rewarm_write_to_json(rewarm_write: RewarmWrite | None) -> dict[str, object] | None:
+    """Serialise ``rewarm_write`` to a JSON-compatible dict, or ``None`` if unset."""
+    if rewarm_write is None:
+        return None
+    return {
+        "at": rewarm_write.at,
+        "usage": {
+            "input_tokens": rewarm_write.usage.input_tokens,
+            "output_tokens": rewarm_write.usage.output_tokens,
+            "cache_read_input_tokens": rewarm_write.usage.cache_read_input_tokens,
+            "cache_creation_input_tokens": rewarm_write.usage.cache_creation_input_tokens,
+        },
+    }
+
+
+def _rewarm_write_from_json(data: object) -> RewarmWrite | None:
+    """Deserialise a ``rewarm_write`` dict previously produced by :func:`_rewarm_write_to_json`."""
+    if not isinstance(data, dict):
+        return None
+    return RewarmWrite(at=float(data["at"]), usage=Usage.from_dict(data.get("usage")))  # type: ignore[arg-type]
+
+
 def _state_to_json(state: SessionState) -> dict[str, object]:
     """Serialise ``state`` to a JSON-compatible dict."""
     return {
@@ -198,11 +220,18 @@ def _state_to_json(state: SessionState) -> dict[str, object]:
         "bump_count": state.bump_count,
         "stopped_reason": state.stopped_reason,
         "last_credential": list(state.last_credential) if state.last_credential else None,
+        "rewarm": state.rewarm,
+        "rewarm_write": _rewarm_write_to_json(state.rewarm_write),
     }
 
 
 def _state_from_json(data: dict[str, object]) -> SessionState:
-    """Deserialise a session-state dict previously produced by :func:`_state_to_json`."""
+    """Deserialise a session-state dict previously produced by :func:`_state_to_json`.
+
+    ``rewarm``/``rewarm_write`` default to ``False``/``None`` when absent, so
+    a state persisted before this feature existed loads exactly as if it had
+    never been armed.
+    """
     credential = data.get("last_credential")
     return SessionState(
         session_id=str(data["session_id"]),
@@ -215,6 +244,8 @@ def _state_from_json(data: dict[str, object]) -> SessionState:
         bump_count=int(data["bump_count"]),  # type: ignore[arg-type]
         stopped_reason=data["stopped_reason"],  # type: ignore[arg-type]
         last_credential=tuple(credential) if credential else None,  # type: ignore[assignment]
+        rewarm=bool(data.get("rewarm", False)),
+        rewarm_write=_rewarm_write_from_json(data.get("rewarm_write")),
     )
 
 

@@ -36,6 +36,21 @@ deliberately absent from this release, not ruled out for the project.
   HTTP 200 with `cache_creation_input_tokens == 0`. A paid write stops the
   session by default; unreadable usage retries then stops; auth errors stop.
   The check is part of `BumpResult`, so no caller can skip it.
+- **Rewarm: an explicit, opt-in return from a cold cache.** A bump on a
+  session whose cache prefix already expired pays a `cache_write` and, by
+  the fail-closed rule above, stops the session -- from the CLI that reads
+  as a refusal, with no way to deliberately bring the session back.
+  `rewarm: true` on `PUT /cgx/sessions/{id}` (`cgx on ... --rewarm`,
+  `/cache <deadline> rewarm`) tolerates exactly one `cache_write` bump
+  result for that session: the daemon records it (`rewarm_write`: the
+  write's usage numbers and timestamp, surfaced in `formatted` and `cgx
+  status`), keeps the session enabled, and resumes normal bumping instead
+  of stopping it. The flag is consumed by that one write -- a second
+  rewarm needs a new explicit enable -- and is cleared on disable and on
+  every auto-stop, exactly like `until`. A bump reply that paid the write
+  always says so plainly, including its size. Every session enabled
+  without the flag keeps the fail-closed default unchanged: a
+  `cache_write` still stops it.
 - **Interval derived from the snapshot's TTL.** A body requesting a 1 h TTL is
   bumped at 50 min, otherwise at 4 min. The daemon reads this from the
   captured request; nothing else is authoritative about the TTL.

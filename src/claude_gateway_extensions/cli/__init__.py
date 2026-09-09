@@ -101,9 +101,12 @@ def _format_status_line(session: Mapping[str, Any], now: float) -> str:
     last_outcome = last_result.get("outcome") if isinstance(last_result, dict) else None
     stopped_reason = session.get("stopped_reason") or "-"
     until = _format_until_local(session.get("until"), now)
+    formatted = session.get("formatted")
+    rewarm_write = formatted.get("rewarm_write") if isinstance(formatted, dict) else None
+    rewarm_suffix = f"  rewarm_write={rewarm_write}" if rewarm_write else ""
     return (
         f"{session_id}  enabled={enabled}  next_bump={next_bump}  until={until}  "
-        f"last_result={last_outcome or '-'}  stopped={stopped_reason}"
+        f"last_result={last_outcome or '-'}  stopped={stopped_reason}{rewarm_suffix}"
     )
 
 
@@ -200,6 +203,7 @@ def _cmd_set_enabled(args: argparse.Namespace, config: Config, ctx: _Context, en
             interval_s=args.interval,
             max_duration_s=args.max_duration,
             until=until,
+            rewarm=getattr(args, "rewarm", False),
         )
     except (DaemonUnreachable, ApiError) as exc:
         return _client_error_exit(ctx, exc)
@@ -522,6 +526,11 @@ def _build_parser() -> argparse.ArgumentParser:
                 "--until",
                 default=None,
                 help="absolute deadline, e.g. 2h, 9PM, 2026-12-31 08:00 (see /cache grammar)",
+            )
+            p.add_argument(
+                "--rewarm",
+                action="store_true",
+                help="tolerate exactly one cache-write bump instead of stopping on it",
             )
 
     add_on_off("on")

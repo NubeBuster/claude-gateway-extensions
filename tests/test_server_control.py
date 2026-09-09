@@ -242,6 +242,7 @@ async def test_status_has_no_cache_expires_at_without_a_snapshot(
         "expires_at": None,
         "next_bump_countdown": None,
         "next_bump_at": None,
+        "rewarm_write": None,
     }
 
 
@@ -268,6 +269,55 @@ async def test_status_cache_expires_at_present_after_a_real_request(
     assert data["formatted"]["expires_at"] is not None
     assert data["formatted"]["next_bump_countdown"] is None
     assert data["formatted"]["next_bump_at"] is None
+
+
+@pytest.mark.invariant(decision="Rewarm: an explicit, opt-in return from a cold cache")
+async def test_put_rewarm_tolerates_one_cache_write(harness: ServerHarness) -> None:
+    """A rewarm-armed session survives a cache-write bump and stays enabled."""
+
+    async def messages_handler(request: web.Request) -> web.Response:
+        return web.json_response({"usage": {"input_tokens": 5}})
+
+    harness.fake.script(messages_handler)
+    body = b'{"model": "claude-x", "max_tokens": 10, "messages": []}'
+    resp = await harness.client.post(
+        "/v1/messages",
+        data=body,
+        headers={"x-claude-code-session-id": "sess-rewarm", "authorization": "Bearer a"},
+    )
+    assert resp.status == 200
+
+    put_resp = await harness.client.put(
+        "/cgx/sessions/sess-rewarm", json={"enabled": True, "rewarm": True}
+    )
+    assert put_resp.status == 200
+    assert (await put_resp.json())["rewarm"] is True
+
+    async def cache_write_handler(request: web.Request) -> web.Response:
+        return web.json_response(
+            {"usage": {"input_tokens": 1, "cache_creation_input_tokens": 4096}}
+        )
+
+    harness.fake.script(cache_write_handler)
+    bump_resp = await harness.client.post("/cgx/sessions/sess-rewarm/bump")
+    assert bump_resp.status == 409
+    data = await bump_resp.json()
+    assert data["outcome"] == "cache_write"
+
+    status = await (await harness.client.get("/cgx/sessions/sess-rewarm")).json()
+    assert status["enabled"] is True
+    assert status["stopped_reason"] is None
+    assert status["rewarm"] is False
+    assert status["rewarm_write"]["usage"]["cache_creation_input_tokens"] == 4096
+    assert status["formatted"]["rewarm_write"] is not None
+
+    # The flag is spent: a second cache write stops the session as usual.
+    harness.fake.script(cache_write_handler)
+    second_bump = await harness.client.post("/cgx/sessions/sess-rewarm/bump")
+    assert second_bump.status == 409
+    status_after = await (await harness.client.get("/cgx/sessions/sess-rewarm")).json()
+    assert status_after["enabled"] is False
+    assert status_after["stopped_reason"] == "cache_write"
 
 
 @pytest.mark.invariant(decision="Absolute deadline, not an open-ended toggle")

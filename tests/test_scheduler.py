@@ -213,6 +213,88 @@ async def test_cache_write_stops_with_reason(
     await scheduler.stop()
 
 
+@pytest.mark.invariant(decision="Rewarm: an explicit, opt-in return from a cold cache")
+async def test_rewarm_tolerates_exactly_one_cache_write(
+    tmp_path: Path, clock: FakeClock, store: MemoryStore
+) -> None:
+    """A rewarm-armed session survives its first cache write, but not its second."""
+    upstream = ScriptedUpstream(
+        [_ok_response(cache_creation=4096), _ok_response(cache_creation=50)]
+    )
+    scheduler = Scheduler(_config(tmp_path), store, LargestPrefixSelector(), upstream, clock)
+
+    scheduler.note_request("sess-1", _snapshot(), ("authorization", "Bearer a"))
+    scheduler.set_enabled("sess-1", True, interval_s=2, rewarm=True)
+
+    await _pump_until(lambda: store.get_state("sess-1").bump_count == 1)  # type: ignore[union-attr]
+    state = store.get_state("sess-1")
+    assert state is not None
+    assert state.enabled is True
+    assert state.stopped_reason is None
+    assert state.rewarm is False
+    assert state.rewarm_write is not None
+    assert state.rewarm_write.usage.cache_creation_input_tokens == 4096
+    assert state.rewarm_write.at == pytest.approx(1002.0)
+
+    status = scheduler.status("sess-1")
+    assert status["rewarm"] is False
+    rewarm_write = status["rewarm_write"]
+    assert isinstance(rewarm_write, dict)
+    assert rewarm_write["usage"]["cache_creation_input_tokens"] == 4096
+    formatted_rewarm_write = _formatted(status)["rewarm_write"]
+    assert isinstance(formatted_rewarm_write, str)
+    assert formatted_rewarm_write.startswith("4096 cache-write tokens at ")
+
+    # The flag was already spent: a second cache write stops the session as usual.
+    await _pump_until(lambda: store.get_state("sess-1").stopped_reason is not None)  # type: ignore[union-attr]
+    state = store.get_state("sess-1")
+    assert state is not None
+    assert state.enabled is False
+    assert state.stopped_reason == "cache_write"
+    # The historical record of the tolerated write survives the later stop.
+    assert state.rewarm_write is not None
+    assert state.rewarm_write.usage.cache_creation_input_tokens == 4096
+
+    await scheduler.stop()
+
+
+@pytest.mark.invariant(decision="Rewarm: an explicit, opt-in return from a cold cache")
+async def test_disable_clears_the_rewarm_flag(
+    tmp_path: Path, clock: FakeClock, store: MemoryStore
+) -> None:
+    upstream = ScriptedUpstream([])
+    scheduler = Scheduler(_config(tmp_path), store, LargestPrefixSelector(), upstream, clock)
+
+    scheduler.note_request("sess-1", _snapshot(), ("authorization", "Bearer a"))
+    scheduler.set_enabled("sess-1", True, interval_s=1000, rewarm=True)
+    assert store.get_state("sess-1").rewarm is True  # type: ignore[union-attr]
+
+    scheduler.set_enabled("sess-1", False)
+    assert store.get_state("sess-1").rewarm is False  # type: ignore[union-attr]
+
+    await scheduler.stop()
+
+
+@pytest.mark.invariant(decision="Rewarm: an explicit, opt-in return from a cold cache")
+async def test_auto_stop_clears_the_rewarm_flag(
+    tmp_path: Path, clock: FakeClock, store: MemoryStore
+) -> None:
+    """An armed rewarm flag must not survive a deadline stop that never saw a write."""
+    upstream = ScriptedUpstream([])
+    scheduler = Scheduler(_config(tmp_path), store, LargestPrefixSelector(), upstream, clock)
+
+    scheduler.note_request("sess-1", _snapshot(), ("authorization", "Bearer a"))
+    scheduler.set_enabled("sess-1", True, interval_s=1000, until=1005.0, rewarm=True)
+
+    await _pump_until(lambda: store.get_state("sess-1").stopped_reason is not None)  # type: ignore[union-attr]
+    state = store.get_state("sess-1")
+    assert state is not None
+    assert state.stopped_reason == "deadline"
+    assert state.rewarm is False
+
+    await scheduler.stop()
+
+
 @pytest.mark.invariant(decision="Fail-closed bump classification")
 async def test_cache_write_continues_when_configured(
     tmp_path: Path, clock: FakeClock, store: MemoryStore
@@ -641,6 +723,7 @@ async def test_status_cache_expires_at_none_without_snapshot(
         "expires_at": None,
         "next_bump_countdown": None,
         "next_bump_at": None,
+        "rewarm_write": None,
     }
 
 

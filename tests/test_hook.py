@@ -167,6 +167,51 @@ def test_bump_reports_tokens(fake_daemon: tuple[str, dict, list]) -> None:
     assert "48213 tokens read from cache" in decision["reason"]
 
 
+@pytest.mark.invariant(decision="Rewarm: an explicit, opt-in return from a cold cache")
+def test_bump_cache_write_reports_the_paid_write_and_its_size(
+    fake_daemon: tuple[str, dict, list],
+) -> None:
+    base_url, routes, _calls = fake_daemon
+    routes[("POST", "/cgx/sessions/s1/bump")] = (
+        409,
+        {"outcome": "cache_write", "usage": {"cache_creation_input_tokens": 4096}},
+    )
+    code, out = _run({"session_id": "s1", "prompt": "/cache bump"}, {"CGX_URL": base_url})
+    assert code == 0
+    decision = json.loads(out)
+    assert "paid a full write, 4096 tokens" in decision["reason"]
+
+
+@pytest.mark.invariant(decision="Rewarm: an explicit, opt-in return from a cold cache")
+def test_rewarm_suffix_arms_the_session(fake_daemon: tuple[str, dict, list]) -> None:
+    base_url, routes, calls = fake_daemon
+    routes[("PUT", "/cgx/sessions/s1")] = (
+        200,
+        {"session_id": "s1", "enabled": True, "until": 1700006000, "rewarm": True},
+    )
+    code, out = _run({"session_id": "s1", "prompt": "/cache 2h rewarm"}, {"CGX_URL": base_url})
+    assert code == 0
+    decision = json.loads(out)
+    assert "rewarm armed" in decision["reason"]
+    assert len(calls) == 1
+    _method, _path, body = calls[0]
+    assert body["rewarm"] is True
+
+
+@pytest.mark.invariant(decision="Rewarm: an explicit, opt-in return from a cold cache")
+def test_duration_without_rewarm_does_not_send_the_flag(
+    fake_daemon: tuple[str, dict, list],
+) -> None:
+    base_url, routes, calls = fake_daemon
+    routes[("PUT", "/cgx/sessions/s1")] = (
+        200,
+        {"session_id": "s1", "enabled": True, "until": 1700006000},
+    )
+    _run({"session_id": "s1", "prompt": "/cache 2h"}, {"CGX_URL": base_url})
+    _method, _path, body = calls[0]
+    assert "rewarm" not in body
+
+
 @pytest.mark.invariant(decision="The port is written down, never assumed")
 def test_falls_back_to_loopback_anthropic_base_url(fake_daemon: tuple[str, dict, list]) -> None:
     """No CGX_URL set: a loopback ANTHROPIC_BASE_URL (what Claude Code passes to hooks) works."""

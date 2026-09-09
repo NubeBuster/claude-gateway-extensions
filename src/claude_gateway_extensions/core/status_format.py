@@ -10,6 +10,7 @@ the clock or the host's local zone itself, so tests can pin both.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import UTC, datetime, tzinfo
 
 #: Boundary, in seconds, at which a countdown switches from ``MM:SS`` to
@@ -41,19 +42,40 @@ def format_clock(epoch: float, tz: tzinfo | None = None) -> str:
     return local.strftime("%H:%M")
 
 
+def format_rewarm_write(
+    rewarm_write: Mapping[str, object] | None, tz: tzinfo | None = None
+) -> str | None:
+    """Format a ``rewarm_write`` record (``{"at": epoch, "usage": {...}}``) for humans.
+
+    Returns ``None`` when ``rewarm_write`` is ``None`` (no tolerated write
+    has happened yet for this session). See the "Rewarm" decision in
+    ``docs/DESIGN.md``.
+    """
+    if rewarm_write is None:
+        return None
+    usage = rewarm_write.get("usage")
+    tokens = usage.get("cache_creation_input_tokens", 0) if isinstance(usage, Mapping) else 0
+    at = rewarm_write.get("at")
+    clock = format_clock(at, tz) if isinstance(at, int | float) else "?"
+    return f"{tokens} cache-write tokens at {clock}"
+
+
 def format_status_times(
     *,
     cache_expires_at: float | None,
     next_bump_at: float | None,
     now: float,
     tz: tzinfo | None = None,
+    rewarm_write: Mapping[str, object] | None = None,
 ) -> dict[str, str | None]:
     """Build the ``formatted`` block of a session status dict.
 
     ``ttl_countdown``/``expires_at`` are present whenever ``cache_expires_at``
     is known, even when bumping is disabled, so a statusline can always show
     the cache's time to live. ``next_bump_countdown``/``next_bump_at`` are
-    ``None`` when no bump is scheduled.
+    ``None`` when no bump is scheduled. ``rewarm_write`` renders the
+    session's ``rewarm_write`` record (see :func:`format_rewarm_write`), or
+    ``None`` when the session has never had a rewarm-tolerated write.
     """
     ttl_countdown: str | None = None
     expires_at: str | None = None
@@ -72,6 +94,7 @@ def format_status_times(
         "expires_at": expires_at,
         "next_bump_countdown": next_bump_countdown,
         "next_bump_at": next_bump_at_formatted,
+        "rewarm_write": format_rewarm_write(rewarm_write, tz),
     }
 
 
@@ -124,4 +147,10 @@ def format_deadline(until: float, now: float, tz: tzinfo | None = None) -> str:
     return f"{head} — {_format_remaining(until - now)} from now"
 
 
-__all__ = ["format_clock", "format_countdown", "format_deadline", "format_status_times"]
+__all__ = [
+    "format_clock",
+    "format_countdown",
+    "format_deadline",
+    "format_rewarm_write",
+    "format_status_times",
+]

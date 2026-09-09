@@ -25,6 +25,7 @@ from claude_gateway_extensions.core.selector import TargetSelector
 from claude_gateway_extensions.core.snapshot import (
     CACHE_TTL_1H_S,
     CACHE_TTL_5M_S,
+    RewarmWrite,
     SessionState,
     Snapshot,
     SnapshotError,
@@ -132,6 +133,7 @@ class Scheduler:
         interval_s: int | None = None,
         max_duration_s: int | None = None,
         until: float | None = None,
+        rewarm: bool = False,
     ) -> SessionState:
         """Enable or disable bumping for a session, optionally overriding interval/max duration.
 
@@ -143,6 +145,13 @@ class Scheduler:
         Disabling clears the deadline, so re-enabling the session without a
         new one falls back to the daemon's default max duration instead of
         silently resuming a deadline the user already turned off.
+
+        ``rewarm=True`` arms the session's rewarm flag (see the "Rewarm"
+        decision in ``docs/DESIGN.md``): the next ``cache_write`` bump result
+        is tolerated instead of stopping the session. It only ever turns the
+        flag on here -- re-enabling without ``rewarm`` leaves an
+        already-armed flag alone -- and is cleared, like ``until``, on
+        disable and on every auto-stop.
         """
         state = self._store.get_state(session_id)
         if state is None:
@@ -156,8 +165,10 @@ class Scheduler:
             state = dataclasses.replace(state, until=until)
         if enabled:
             state = dataclasses.replace(state, stopped_reason=None)
+            if rewarm:
+                state = dataclasses.replace(state, rewarm=True)
         else:
-            state = dataclasses.replace(state, until=None)
+            state = dataclasses.replace(state, until=None, rewarm=False)
         self._store.put_state(state)
         if enabled:
             self._ensure_task(session_id)
@@ -314,6 +325,9 @@ class Scheduler:
         cache_expires_at = self._cache_expires_at(state, snapshot)
         last_result = self._last_result.get(session_id)
         now = self._clock.now()
+        rewarm_write = (
+            dataclasses.asdict(state.rewarm_write) if state.rewarm_write is not None else None
+        )
         return {
             "session_id": state.session_id,
             "enabled": state.enabled,
@@ -328,8 +342,13 @@ class Scheduler:
             "cache_expires_at": cache_expires_at,
             "streams": len(snapshots),
             "last_result": dataclasses.asdict(last_result) if last_result is not None else None,
+            "rewarm": state.rewarm,
+            "rewarm_write": rewarm_write,
             "formatted": format_status_times(
-                cache_expires_at=cache_expires_at, next_bump_at=next_bump_at, now=now
+                cache_expires_at=cache_expires_at,
+                next_bump_at=next_bump_at,
+                now=now,
+                rewarm_write=rewarm_write,
             ),
         }
 
@@ -376,7 +395,9 @@ class Scheduler:
         state = self._store.get_state(session_id)
         if state is None:
             return
-        state = dataclasses.replace(state, enabled=False, stopped_reason=reason, until=None)
+        state = dataclasses.replace(
+            state, enabled=False, stopped_reason=reason, until=None, rewarm=False
+        )
         self._store.put_state(state)
 
     @staticmethod
@@ -460,8 +481,17 @@ class Scheduler:
         return anchor + self._cache_ttl_s(snapshot)
 
     def _apply_result(self, session_id: str, result: BumpResult) -> str | None:
-        """Record ``result`` and apply its bookkeeping effect; return a stop reason if any."""
+        """Record ``result`` and apply its bookkeeping effect; return a stop reason if any.
+
+        A ``cache_write`` on a session with its rewarm flag armed is
+        tolerated rather than stopped: the flag is consumed (cleared) and the
+        write is recorded as ``rewarm_write`` (see the "Rewarm" decision in
+        ``docs/DESIGN.md``). Any other ``cache_write`` -- including a second
+        one on the same session, since the flag is already spent -- stops
+        the session exactly as before.
+        """
         self._last_result[session_id] = result
+        rewarm_consumed = False
         if result.outcome in ("ok", "cache_write"):
             state = self._store.get_state(session_id)
             if state is not None:
@@ -470,12 +500,24 @@ class Scheduler:
                     last_bump_at=self._clock.now(),
                     bump_count=state.bump_count + 1,
                 )
+                if result.outcome == "cache_write" and state.rewarm:
+                    rewarm_consumed = True
+                    assert result.usage is not None  # a cache_write always carries usage
+                    state = dataclasses.replace(
+                        state,
+                        rewarm=False,
+                        rewarm_write=RewarmWrite(at=self._clock.now(), usage=result.usage),
+                    )
                 self._store.put_state(state)
         if result.outcome == "unauthorized":
             return "unauthorized"
         if result.outcome == "rejected":
             return "rejected"
-        if result.outcome == "cache_write" and self._config.on_cache_write == "stop":
+        if (
+            result.outcome == "cache_write"
+            and not rewarm_consumed
+            and self._config.on_cache_write == "stop"
+        ):
             return "cache_write"
         return None
 
