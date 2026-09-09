@@ -432,3 +432,99 @@ review" roadmap line; no part of it ships in 1.0.
   entry the matching `configure` call added and leaves everything else
   (including a hand-written entry at the same event) untouched; it never
   removes the copied template file, since the user may have edited it.
+
+## Live regression harness
+
+The cache-read guarantees this project exists for cannot be proven against
+the fake upstream in `tests/`: a bump that silently starts paying
+`cache_creation` still passes every offline test, and the regression costs
+the user money before anyone notices. So one command drives a real Claude
+Code session against a real daemon against the real API and asserts on the
+numbers, deliberately outside `make check`.
+
+- **It lives in `tests/live/`, run by `make live`, never as a `cgx`
+  subcommand.** The shipped package has one runtime dependency and no test
+  concerns in it; a `cgx live` subcommand would put `tmux`, a scratch
+  `$HOME` writer and a price table into the thing that sits in the user's
+  request path. `make live` is the entry point because the repo already
+  verifies through the Makefile, and `pytest` is the wrong front door for a
+  run that spends money and needs an explicit budget argument.
+- **Stdlib plus `tmux`, no new dependency, dev extra at most.** The harness
+  talks to the daemon with `urllib` (as the CLI client already does) and to
+  the subject with `tmux` subprocesses.
+- **The subject is a real interactive TUI in a detached tmux session, not
+  `--print`.** `--print` is a different client: it does not exercise the
+  session lifecycle, the trust dialog or the resume path a user actually
+  runs, and the whole point of a live guard is that it fails where users
+  would be hurt. `tmux new-session -d` plus `send-keys` drives it; nothing
+  requires a visible window, so the run is unattended by construction.
+- **Assertions read the daemon's control API and the subject's own
+  transcript JSONL, never rendered pane text.** Pane text is a terminal
+  rendering: it wraps, redraws and truncates, so an assertion over it
+  passes on noise and hangs on the frame it was written for. The verdicts
+  come from `POST /cgx/sessions/{id}/bump` and `/fork` response bodies and
+  from `GET /cgx/sessions`; turn completion and the subject's replies come
+  from `~/.claude/projects/<slug>/<session-id>.jsonl`, which Claude Code
+  writes per turn. `capture-pane` output is collected only into the failure
+  report, as a diagnostic.
+- **The subject's session id is discovered from the daemon, not from the
+  subject.** An interactive session emits no machine-readable init event,
+  and a session id derived from a file name goes stale on the first resume.
+  `GET /cgx/sessions` before the first turn and after it yields exactly one
+  new id -- the session that just sent `x-claude-code-session-id` through
+  the passthrough -- which is the same identity every control call uses.
+- **First-run interaction is removed by configuration, never by typing at
+  the dialog.** The scratch cwd is fresh, so Claude Code would show the
+  workspace trust dialog; the harness marks the path trusted in
+  `~/.claude.json` (`projects.<cwd>.hasTrustDialogAccepted`) before launch,
+  by re-reading the file, adding only that key and replacing it atomically,
+  and it removes the entry it created on teardown. Answering a dialog with
+  `send-keys` would encode one build's exact key order into the harness and
+  silently mis-answer the next one. Onboarding and theme are not seeded:
+  they are per-installation state a machine that can run this harness at
+  all already has.
+- **The subject is isolated the way every test subject here is**: an empty
+  scratch cwd under `/tmp`, `--safe-mode`, `--name T-cgx-live-<tag>`,
+  `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`, `ANTHROPIC_API_KEY` and
+  `ANTHROPIC_AUTH_TOKEN` unset so the subject cannot reach a
+  pay-as-you-go organisation, and `ANTHROPIC_BASE_URL` pointed at the
+  harness's own daemon on an ephemeral port with its own `CGX_STATE_DIR`.
+  Embedding these rules in the harness is deliberate: a user of this
+  public repo gets the isolation for free instead of reconstructing it.
+- **Haiku is the default subject model; the fork assertions that need a
+  thinking-safe model take `--model sonnet`.** A run whose model nobody
+  chose must be the cheapest one, and the haiku path is not a degraded
+  variant of the run -- it is the assertion that the thinking guard
+  refuses (`thinking_unsafe_model`, `paid_write: false`), which is exactly
+  the protection that keeps a shadow fork from writing a whole
+  conversation. So both models are real cases, and `--model sonnet`
+  additionally asserts the read-with-zero-creation fork.
+- **A budget guard aborts the run, computed from reported usage against a
+  price table in the harness.** Every daemon response and every transcript
+  entry carries token counts; the harness accumulates them, converts with
+  a per-model table it owns (never a network lookup), and refuses to send
+  another turn once the estimate passes `--budget-usd`. The estimate is
+  reported at the end of every run, pass or fail: a live guard whose cost
+  is invisible is one nobody runs twice.
+- **Teardown is guaranteed and total.** The tmux session, the daemon
+  process, the scratch state dir and the `~/.claude.json` entry are
+  released in a `finally` that runs on assertion failure, on exception and
+  on `SIGINT`; the daemon is stopped through its own drain path
+  (`SIGTERM`, then a health probe for `draining`, then wait) so the run
+  also proves the documented shutdown behaviour instead of killing it.
+- **The assertion list is fixed, and each assertion names what regressing
+  it would cost.** In order: a snapshot exists for the session after
+  ordinary turns (`streams >= 1`); a bump answers `ok` with
+  `cache_read_input_tokens > 0` and `cache_creation_input_tokens == 0`
+  (the premise of the whole project); a fork on a thinking-safe model
+  answers a parsed verdict with the same read-not-write shape and
+  `paid_write: false`; a second fork repeats it, so a fork is not
+  one-shot-cheap; a fork on haiku is refused with reason
+  `thinking_unsafe_model` and `paid_write: false`, never sent; the
+  subject's next turn after the forks completes normally, proving the twin
+  never touched the parent; and `cgx serve` exits cleanly through drain.
+- **The harness's own logic is unit-tested offline with a fake tmux and a
+  fake daemon.** The parts that can be wrong without spending money --
+  session-id discovery, transcript parsing, the price table, the budget
+  stop, the teardown ordering -- are ordinary `pytest` cases inside `make
+  check`; only the live run needs the API.
