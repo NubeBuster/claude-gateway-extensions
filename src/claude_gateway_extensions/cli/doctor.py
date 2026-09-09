@@ -6,6 +6,7 @@ one line per check and returns exit code 1 if any check failed.
 
 from __future__ import annotations
 
+import re
 import stat
 import sys
 from collections.abc import Mapping
@@ -14,7 +15,7 @@ from pathlib import Path
 from typing import Literal, TextIO
 from urllib.parse import urlsplit
 
-from claude_gateway_extensions.cli import install, service
+from claude_gateway_extensions.cli import fork_review, install, service
 from claude_gateway_extensions.cli.client import (
     ApiError,
     ClientFactory,
@@ -147,6 +148,75 @@ def check_skill(environ: Mapping[str, str], cwd: Path) -> CheckResult:
     return CheckResult("warn", "cache skill not found; run `cgx configure`")
 
 
+#: Matches a ``cgx fork-review --template NAME ...`` hook command, the exact
+#: string :func:`~claude_gateway_extensions.cli.install.fork_review_command`
+#: writes; captures the template name.
+_FORK_REVIEW_COMMAND_RE = re.compile(r"^cgx fork-review --template (\S+)")
+
+
+def check_fork_review_templates(environ: Mapping[str, str], cwd: Path) -> list[CheckResult]:
+    """Check that every ``cgx fork-review --template X`` hook entry resolves.
+
+    Scans ``hooks.<event>`` in every scope's settings (the same files the
+    other checks read) for a ``cgx fork-review`` command, resolves its
+    template the same way the hook does
+    (:func:`~claude_gateway_extensions.cli.fork_review.load_template_declaration`,
+    reused rather than re-implemented), and reports one result per entry: a
+    missing/unreadable template is ``fail`` (it fails open, silently, at
+    hook time -- this is the only place it is surfaced up front); a
+    front-matter ``event:`` that disagrees with the ``hooks.<event>`` key
+    the entry is actually wired under is ``warn`` (the hook still runs, just
+    never matches, per ``run_fork_review``'s declared-event skip); otherwise
+    ``ok`` naming where it resolved from. Returns an empty list if no
+    ``--fork-review`` hook entries exist in any scope.
+    """
+    results: list[CheckResult] = []
+    for scope in _SCOPES:
+        settings = _load_settings_quiet(scope, environ, cwd)
+        hooks_section = settings.get("hooks")
+        if not isinstance(hooks_section, dict):
+            continue
+        settings_path = install.settings_path(scope, environ, cwd)
+        for event, entries in hooks_section.items():
+            if not isinstance(entries, list):
+                continue
+            for entry in entries:
+                if not isinstance(entry, dict):
+                    continue
+                for hook in entry.get("hooks", []) if isinstance(entry.get("hooks"), list) else []:
+                    if not isinstance(hook, dict):
+                        continue
+                    command = hook.get("command")
+                    if not isinstance(command, str):
+                        continue
+                    match = _FORK_REVIEW_COMMAND_RE.match(command)
+                    if match is None:
+                        continue
+                    name = match.group(1)
+                    where = f"fork-review template {name!r} (hooks.{event} in {settings_path})"
+                    try:
+                        declared_event, _matcher = fork_review.load_template_declaration(
+                            name, environ
+                        )
+                    except fork_review.TemplateError as exc:
+                        results.append(CheckResult("fail", f"{where}: {exc}"))
+                        continue
+                    user_path = fork_review.user_template_path(name, environ)
+                    location = str(user_path) if user_path.is_file() else "the packaged template"
+                    if declared_event is not None and declared_event != event:
+                        results.append(
+                            CheckResult(
+                                "warn",
+                                f"{where} resolves to {location}, but its front matter "
+                                f"declares event {declared_event!r} -- the hook fires under "
+                                f"{event!r} and will never match it",
+                            )
+                        )
+                    else:
+                        results.append(CheckResult("ok", f"{where} resolves to {location}"))
+    return results
+
+
 def check_credentials(environ: Mapping[str, str], cwd: Path) -> CheckResult:
     """Check that nothing overrides the subscription credential.
 
@@ -241,10 +311,16 @@ def run_doctor(
         check_credentials(environ, cwd),
         service_check,
         check_state_dir(config),
+        *check_fork_review_templates(environ, cwd),
     ]
     for check in checks:
         stdout.write(f"{check.status}: {check.message}\n")
     return 1 if any(check.status == "fail" for check in checks) else 0
 
 
-__all__ = ["CheckResult", "check_port_consistency", "run_doctor"]
+__all__ = [
+    "CheckResult",
+    "check_fork_review_templates",
+    "check_port_consistency",
+    "run_doctor",
+]

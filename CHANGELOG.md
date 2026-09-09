@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- `cgx doctor` now checks every `cgx fork-review --template X` hook entry it
+  finds in any scope's settings: a template that cannot be resolved (moved
+  or deleted since `cgx configure` wired it in) is a `fail`, and a
+  front-matter `event:` that disagrees with the `hooks.<event>` key the
+  entry is wired under -- so the hook fires but never matches -- is a
+  `warn`. Previously such a template only failed at hook time, silently
+  (fail-open) past a `systemMessage` easy to miss.
 - `cgx status` (no `--session`) no longer prints "unknown session: None"
   when the resolved daemon URL answers the session-list route with a 404
   (e.g. `ANTHROPIC_BASE_URL` pointing at some other loopback HTTP server).
