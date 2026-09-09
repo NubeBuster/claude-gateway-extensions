@@ -248,6 +248,10 @@ review" roadmap line; no part of it ships in 1.0.
   with JSON only and never call a tool, and `parse_verdict` treats any
   reply whose `content` carries a `tool_use` block as the fail-open `ok`
   result with reason `tool_use_reply`, logging only the reason code.
+  Measured live on 2026-09-09 against a real Claude Code session: two
+  consecutive forks of a 16046-token prefix each returned
+  `cache_read_input_tokens: 16046` with `cache_creation_input_tokens: 0`,
+  a parsed verdict, and `paid_write: false`.
 - **`stream` is false and `max_tokens` is capped per fork** (request
   field, else `CGX_FORK_MAX_TOKENS`, default 512). A verdict is a
   sentence and a label, so a runaway twin is a bug, not a use case, and a
