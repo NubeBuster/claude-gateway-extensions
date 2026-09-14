@@ -1,10 +1,19 @@
 """Tests for claude_gateway_extensions.config."""
 
+import os
 from pathlib import Path
 
 import pytest
 
-from claude_gateway_extensions.config import Config, ConfigError
+from claude_gateway_extensions.config import (
+    Config,
+    ConfigError,
+    ConfigFileWatcher,
+    ShadowForkSettings,
+    merge_shadow_fork,
+    parse_shadow_fork_file,
+    resolve_config_file,
+)
 
 
 @pytest.mark.invariant(decision="Environment variables only, split by process")
@@ -163,3 +172,208 @@ def test_url_ignores_non_loopback_or_non_http_anthropic_base_url(base_url: str) 
     """A non-loopback (or non-http) ANTHROPIC_BASE_URL is not this daemon; ignore it."""
     config = Config.from_env({"ANTHROPIC_BASE_URL": base_url})
     assert config.url == "http://127.0.0.1:8787"
+
+
+# -- resolve_config_file ----------------------------------------------------
+
+
+def test_resolve_config_file_default_uses_xdg_config_home() -> None:
+    path = resolve_config_file({"XDG_CONFIG_HOME": "/tmp/xdg-config"})
+    assert path == Path("/tmp/xdg-config/cgx/config.toml")
+
+
+def test_resolve_config_file_default_falls_back_to_home() -> None:
+    path = resolve_config_file({"HOME": "/home/someone"})
+    assert path == Path("/home/someone/.config/cgx/config.toml")
+
+
+def test_resolve_config_file_override_wins_over_everything() -> None:
+    path = resolve_config_file(
+        {"CGX_CONFIG_FILE": "/srv/cgx.toml", "XDG_CONFIG_HOME": "/tmp/xdg-config"}
+    )
+    assert path == Path("/srv/cgx.toml")
+
+
+def test_config_from_env_sets_config_file_and_records_configured_env_vars() -> None:
+    config = Config.from_env(
+        {"XDG_CONFIG_HOME": "/tmp/xdg-config", "CGX_SHADOW_FORK_MAX_TOKENS": "256"}
+    )
+    assert config.config_file == Path("/tmp/xdg-config/cgx/config.toml")
+    assert "CGX_SHADOW_FORK_MAX_TOKENS" in config.configured_env_vars
+    assert "CGX_SHADOW_FORK_MAX_PER_MIN" not in config.configured_env_vars
+
+
+# -- parse_shadow_fork_file ---------------------------------------------------
+
+
+def test_parse_shadow_fork_file_reads_all_four_keys(tmp_path: Path) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text(
+        "[shadow_fork]\n"
+        "max_tokens = 768\n"
+        "max_per_min = 10\n"
+        "thinking_guard = false\n"
+        'model = "claude-reviewer"\n'
+    )
+    settings = parse_shadow_fork_file(path)
+    assert settings == ShadowForkSettings(
+        max_tokens=768, max_per_min=10, thinking_guard=False, model="claude-reviewer"
+    )
+
+
+def test_parse_shadow_fork_file_missing_table_is_all_none(tmp_path: Path) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text("# no [shadow_fork] table here\n")
+    assert parse_shadow_fork_file(path) == ShadowForkSettings()
+
+
+def test_parse_shadow_fork_file_partial_table_leaves_rest_none(tmp_path: Path) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text("[shadow_fork]\nmax_tokens = 999\n")
+    settings = parse_shadow_fork_file(path)
+    assert settings == ShadowForkSettings(max_tokens=999)
+
+
+def test_parse_shadow_fork_file_syntax_error_raises(tmp_path: Path) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text("[shadow_fork\nmax_tokens = 1\n")
+    with pytest.raises(ConfigError):
+        parse_shadow_fork_file(path)
+
+
+def test_parse_shadow_fork_file_unknown_key_raises(tmp_path: Path) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text("[shadow_fork]\nbogus_key = 1\n")
+    with pytest.raises(ConfigError, match="bogus_key"):
+        parse_shadow_fork_file(path)
+
+
+@pytest.mark.parametrize(
+    ("key", "bad_toml"),
+    [
+        ("max_tokens", 'max_tokens = "not an int"'),
+        ("max_tokens", "max_tokens = true"),  # bool is not an int here
+        ("max_per_min", 'max_per_min = "not an int"'),
+        ("thinking_guard", 'thinking_guard = "not a bool"'),
+        ("model", "model = 123"),
+    ],
+)
+def test_parse_shadow_fork_file_wrong_type_raises(tmp_path: Path, key: str, bad_toml: str) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text(f"[shadow_fork]\n{bad_toml}\n")
+    with pytest.raises(ConfigError, match=key):
+        parse_shadow_fork_file(path)
+
+
+# -- ConfigFileWatcher --------------------------------------------------------
+
+
+def test_config_file_watcher_missing_file_is_all_none_and_not_present(tmp_path: Path) -> None:
+    watcher = ConfigFileWatcher(tmp_path / "does-not-exist.toml")
+    state = watcher.current()
+    assert state.present is False
+    assert state.parse_error is None
+    assert state.settings == ShadowForkSettings()
+
+
+@pytest.mark.invariant(
+    decision="Shadow Fork tuning is hot reloaded from one config file; "
+    "the file wins over the environment for exactly the keys it holds."
+)
+def test_config_file_watcher_reloads_after_mtime_change(tmp_path: Path) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text("[shadow_fork]\nmax_tokens = 100\n")
+    watcher = ConfigFileWatcher(path)
+    assert watcher.current().settings.max_tokens == 100
+
+    # Same content re-read without a stat change must not re-parse -- but
+    # since a passing test can't observe "did not re-parse" directly, the
+    # meaningful assertion is the one below: a real edit *does* take effect.
+    os.utime(path, (os.stat(path).st_mtime + 5, os.stat(path).st_mtime + 5))
+    path.write_text("[shadow_fork]\nmax_tokens = 200\n")
+    assert watcher.current().settings.max_tokens == 200
+
+
+def test_config_file_watcher_keeps_last_good_on_invalid_reload(tmp_path: Path) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text("[shadow_fork]\nmax_tokens = 100\n")
+    watcher = ConfigFileWatcher(path)
+    assert watcher.current().settings.max_tokens == 100
+
+    os.utime(path, (os.stat(path).st_mtime + 5, os.stat(path).st_mtime + 5))
+    path.write_text("[shadow_fork]\nmax_tokens = not valid toml\n")
+    state = watcher.current()
+    assert state.parse_error is not None
+    assert state.present is True
+    assert state.settings.max_tokens == 100  # kept the last good value
+
+
+def test_config_file_watcher_disappearing_file_resets_to_environment(tmp_path: Path) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text("[shadow_fork]\nmax_tokens = 100\n")
+    watcher = ConfigFileWatcher(path)
+    assert watcher.current().settings.max_tokens == 100
+
+    path.unlink()
+    state = watcher.current()
+    assert state.present is False
+    assert state.parse_error is None
+    assert state.settings == ShadowForkSettings()  # not "kept the last good value"
+
+
+def test_config_file_watcher_invalid_file_never_loaded_falls_through_to_none(
+    tmp_path: Path,
+) -> None:
+    """An invalid file that was *never* valid keeps the all-``None`` starting settings."""
+    path = tmp_path / "config.toml"
+    path.write_text("[shadow_fork]\nmax_tokens = not valid toml\n")
+    watcher = ConfigFileWatcher(path)
+    state = watcher.current()
+    assert state.parse_error is not None
+    assert state.settings == ShadowForkSettings()
+
+
+# -- merge_shadow_fork --------------------------------------------------------
+
+
+def _config(tmp_path: Path, **overrides: object) -> Config:
+    fields: dict[str, object] = {
+        "host": "127.0.0.1",
+        "port": 8787,
+        "upstream": "https://api.anthropic.com",
+        "state_dir": tmp_path,
+        "persist": False,
+        "default_enabled": False,
+        "interval_1h_s": 3000,
+        "interval_5m_s": 240,
+        "max_duration_s": 86400,
+        "on_cache_write": "stop",
+        "max_streams_per_session": 8,
+        "log_level": "INFO",
+        "url": "http://127.0.0.1:8787",
+        "drain_timeout_s": 600,
+        "shadow_fork_max_tokens": 512,
+        "shadow_fork_max_per_min": 6,
+        "shadow_fork_thinking_guard": True,
+        "shadow_fork_model": None,
+        "config_file": tmp_path / "config.toml",
+        "configured_env_vars": frozenset(),
+    }
+    fields.update(overrides)
+    return Config(**fields)  # type: ignore[arg-type]
+
+
+@pytest.mark.invariant(
+    decision="Shadow Fork tuning is hot reloaded from one config file; "
+    "the file wins over the environment for exactly the keys it holds."
+)
+def test_merge_shadow_fork_file_wins_per_key_over_config(tmp_path: Path) -> None:
+    config = _config(tmp_path, shadow_fork_max_tokens=512, shadow_fork_model="env-model")
+    file_settings = ShadowForkSettings(
+        max_tokens=768, max_per_min=None, thinking_guard=None, model=None
+    )
+    merged = merge_shadow_fork(config, file_settings)
+    assert merged.max_tokens == 768  # file wins
+    assert merged.max_per_min == 6  # falls through to config (env/default)
+    assert merged.thinking_guard is True  # falls through to config
+    assert merged.model == "env-model"  # falls through to config

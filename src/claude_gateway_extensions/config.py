@@ -10,12 +10,16 @@ directly.
 from __future__ import annotations
 
 import ipaddress
+import logging
 import os
+import tomllib
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 from urllib.parse import urlsplit
+
+logger = logging.getLogger(__name__)
 
 OnCacheWrite = Literal["stop", "continue"]
 
@@ -56,7 +60,24 @@ DAEMON_ENV_VARS: tuple[str, ...] = (
     "CGX_SHADOW_FORK_MAX_PER_MIN",
     "CGX_SHADOW_FORK_THINKING_GUARD",
     "CGX_SHADOW_FORK_MODEL",
+    "CGX_CONFIG_FILE",
 )
+
+#: The four keys :func:`parse_shadow_fork_file` accepts in the ``[shadow_fork]``
+#: table -- any other key in that table is a rejecting error (see
+#: "Shadow Fork tuning is hot reloaded..." in ``docs/DESIGN.md``).
+_SHADOW_FORK_FILE_KEYS = frozenset({"max_tokens", "max_per_min", "thinking_guard", "model"})
+
+#: ``CGX_*`` names whose value in the file, when present, wins over both the
+#: environment and the built-in default for that key -- keyed the same as
+#: :class:`ShadowForkSettings`'s fields, used by ``server/control.py`` to
+#: report each effective value's source.
+SHADOW_FORK_ENV_VARS: Mapping[str, str] = {
+    "max_tokens": "CGX_SHADOW_FORK_MAX_TOKENS",
+    "max_per_min": "CGX_SHADOW_FORK_MAX_PER_MIN",
+    "thinking_guard": "CGX_SHADOW_FORK_THINKING_GUARD",
+    "model": "CGX_SHADOW_FORK_MODEL",
+}
 
 
 class ConfigError(ValueError):
@@ -94,6 +115,186 @@ def _default_state_dir(env: Mapping[str, str]) -> Path:
     if local_app_data:
         return Path(local_app_data) / "claude-gateway-extensions"
     return resolve_home(env) / ".local" / "state" / "claude-gateway-extensions"
+
+
+def resolve_config_file(env: Mapping[str, str]) -> Path:
+    r"""Return the Shadow Fork tuning file's path, following ``_template_dir``'s env-only style.
+
+    Precedence: ``CGX_CONFIG_FILE`` if set, then ``XDG_CONFIG_HOME``, then
+    (Windows signalled by ``APPDATA`` being present in ``env``, never by
+    ``sys.platform``) ``%APPDATA%\cgx\config.toml``, then the POSIX/XDG
+    default ``~/.config/cgx/config.toml`` under :func:`resolve_home` -- the
+    same ``cgx`` directory ``cli/shadow_fork.py``'s ``_template_dir`` resolves
+    templates under. See the "Shadow Fork tuning is hot reloaded..." decision
+    in ``docs/DESIGN.md``.
+    """
+    override = env.get("CGX_CONFIG_FILE")
+    if override:
+        return Path(override).expanduser()
+    xdg_config_home = env.get("XDG_CONFIG_HOME")
+    if xdg_config_home:
+        return Path(xdg_config_home) / "cgx" / "config.toml"
+    appdata = env.get("APPDATA")
+    if appdata:
+        return Path(appdata) / "cgx" / "config.toml"
+    return resolve_home(env) / ".config" / "cgx" / "config.toml"
+
+
+@dataclass(frozen=True)
+class ShadowForkSettings:
+    """The four Shadow Fork keys as read from ``[shadow_fork]`` in ``CGX_CONFIG_FILE``.
+
+    Every field is ``None`` when the file omits it (or the file has never
+    been loaded), meaning "fall through to the environment/default" per the
+    precedence rule in the "Shadow Fork tuning is hot reloaded..." decision
+    in ``docs/DESIGN.md``.
+    """
+
+    max_tokens: int | None = None
+    max_per_min: int | None = None
+    thinking_guard: bool | None = None
+    model: str | None = None
+
+
+def parse_shadow_fork_file(path: Path) -> ShadowForkSettings:
+    """Parse ``path``'s ``[shadow_fork]`` table into a :class:`ShadowForkSettings`.
+
+    Raises :class:`ConfigError` on a syntax error, an unknown key inside
+    ``[shadow_fork]``, a ``[shadow_fork]`` that is not a table, or a value of
+    the wrong type -- the whole file is rejected as one unit, per the
+    "applies atomically or not at all" rule in ``docs/DESIGN.md``. A missing
+    ``[shadow_fork]`` table (or a key it omits) resolves to ``None`` for that
+    field, same as an entirely absent file.
+    """
+    try:
+        with path.open("rb") as f:
+            data = tomllib.load(f)
+    except tomllib.TOMLDecodeError as exc:
+        raise ConfigError(f"{path}: invalid TOML: {exc}") from exc
+    except OSError as exc:
+        raise ConfigError(f"{path}: cannot read file: {exc}") from exc
+
+    table = data.get("shadow_fork", {})
+    if not isinstance(table, dict):
+        raise ConfigError(f"{path}: [shadow_fork] must be a table")
+
+    unknown = set(table) - _SHADOW_FORK_FILE_KEYS
+    if unknown:
+        raise ConfigError(f"{path}: unknown key(s) in [shadow_fork]: {', '.join(sorted(unknown))}")
+
+    max_tokens = table.get("max_tokens")
+    if max_tokens is not None and (isinstance(max_tokens, bool) or not isinstance(max_tokens, int)):
+        raise ConfigError(f"{path}: shadow_fork.max_tokens must be an integer")
+    max_per_min = table.get("max_per_min")
+    if max_per_min is not None and (
+        isinstance(max_per_min, bool) or not isinstance(max_per_min, int)
+    ):
+        raise ConfigError(f"{path}: shadow_fork.max_per_min must be an integer")
+    thinking_guard = table.get("thinking_guard")
+    if thinking_guard is not None and not isinstance(thinking_guard, bool):
+        raise ConfigError(f"{path}: shadow_fork.thinking_guard must be a boolean")
+    model = table.get("model")
+    if model is not None and not isinstance(model, str):
+        raise ConfigError(f"{path}: shadow_fork.model must be a string")
+
+    return ShadowForkSettings(
+        max_tokens=max_tokens,
+        max_per_min=max_per_min,
+        thinking_guard=thinking_guard,
+        model=model,
+    )
+
+
+@dataclass(frozen=True)
+class ConfigFileState:
+    """A :class:`ConfigFileWatcher` snapshot: resolved path, load status and last-good settings.
+
+    ``settings`` holds the last successfully parsed :class:`ShadowForkSettings`
+    (all-``None`` if the file has never loaded, whether because it is
+    missing or because every attempt so far has failed to parse).
+    """
+
+    path: Path
+    present: bool
+    parse_error: str | None
+    settings: ShadowForkSettings
+
+
+class ConfigFileWatcher:
+    """Re-reads a Shadow Fork tuning file only when its ``stat`` changes.
+
+    :meth:`current` is cheap to call on every fork request and every ``GET
+    /cgx/config`` (see the "checked at most once per fork request..." rule in
+    ``docs/DESIGN.md``): it always ``stat``s the file, but only re-parses it
+    when ``(mtime, size, inode)`` differs from the last check. A file that
+    fails to parse keeps the previously loaded settings (or all-``None`` if
+    none ever loaded) and logs one WARNING naming the file and the error,
+    exactly once per distinct ``stat`` -- a file that never changes again
+    never re-logs. A file that disappears resolves to all-``None`` settings
+    (the environment) rather than keeping the last-good ones: "missing" and
+    "present but invalid" are deliberately different outcomes.
+    """
+
+    def __init__(self, path: Path) -> None:
+        """Watch ``path``; nothing is read until the first :meth:`current` call."""
+        self._path = path
+        self._stat_key: tuple[int, int, int] | None = None
+        self._settings = ShadowForkSettings()
+        self._parse_error: str | None = None
+
+    def current(self) -> ConfigFileState:
+        """Return the file's current load state, re-parsing only if its ``stat`` changed."""
+        try:
+            st = self._path.stat()
+        except OSError:
+            self._stat_key = None
+            self._parse_error = None
+            self._settings = ShadowForkSettings()
+            return ConfigFileState(self._path, False, None, self._settings)
+
+        stat_key = (int(st.st_mtime_ns), st.st_size, st.st_ino)
+        if stat_key == self._stat_key:
+            return ConfigFileState(self._path, True, self._parse_error, self._settings)
+
+        self._stat_key = stat_key
+        try:
+            self._settings = parse_shadow_fork_file(self._path)
+        except ConfigError as exc:
+            logger.warning("%s", exc)
+            self._parse_error = str(exc)
+        else:
+            self._parse_error = None
+        return ConfigFileState(self._path, True, self._parse_error, self._settings)
+
+
+def merge_shadow_fork(config: Config, file_settings: ShadowForkSettings) -> ShadowForkSettings:
+    """Merge ``file_settings`` over ``config``'s env/default values, file winning per key.
+
+    Every field of the result is non-``None`` (the config's own fields always
+    have a value): callers that need the resolved values without a fork
+    request's own override use this directly; :meth:`Scheduler.fork_now`
+    applies the request field on top.
+    """
+    return ShadowForkSettings(
+        max_tokens=(
+            file_settings.max_tokens
+            if file_settings.max_tokens is not None
+            else config.shadow_fork_max_tokens
+        ),
+        max_per_min=(
+            file_settings.max_per_min
+            if file_settings.max_per_min is not None
+            else config.shadow_fork_max_per_min
+        ),
+        thinking_guard=(
+            file_settings.thinking_guard
+            if file_settings.thinking_guard is not None
+            else config.shadow_fork_thinking_guard
+        ),
+        model=(
+            file_settings.model if file_settings.model is not None else config.shadow_fork_model
+        ),
+    )
 
 
 def _parse_bool(name: str, raw: str) -> bool:
@@ -204,6 +405,8 @@ class Config:
     shadow_fork_max_per_min: int
     shadow_fork_thinking_guard: bool
     shadow_fork_model: str | None
+    config_file: Path
+    configured_env_vars: frozenset[str]
 
     @classmethod
     def from_env(cls, environ: Mapping[str, str] | None = None) -> Config:
@@ -248,6 +451,8 @@ class Config:
             "CGX_SHADOW_FORK_THINKING_GUARD", env.get("CGX_SHADOW_FORK_THINKING_GUARD", "true")
         )
         shadow_fork_model = env.get("CGX_SHADOW_FORK_MODEL") or None
+        config_file = resolve_config_file(env)
+        configured_env_vars = frozenset(name for name in DAEMON_ENV_VARS if env.get(name))
 
         return cls(
             host=host,
@@ -268,6 +473,8 @@ class Config:
             shadow_fork_max_per_min=shadow_fork_max_per_min,
             shadow_fork_thinking_guard=shadow_fork_thinking_guard,
             shadow_fork_model=shadow_fork_model,
+            config_file=config_file,
+            configured_env_vars=configured_env_vars,
         )
 
     def is_local_host(self) -> bool:

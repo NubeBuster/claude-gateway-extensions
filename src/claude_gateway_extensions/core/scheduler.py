@@ -17,7 +17,12 @@ import asyncio
 import contextlib
 import dataclasses
 
-from claude_gateway_extensions.config import Config
+from claude_gateway_extensions.config import (
+    Config,
+    ConfigFileState,
+    ConfigFileWatcher,
+    merge_shadow_fork,
+)
 from claude_gateway_extensions.core.bump import BumpResult, bump_once
 from claude_gateway_extensions.core.clock import Clock
 from claude_gateway_extensions.core.selector import TargetSelector
@@ -70,13 +75,24 @@ class Scheduler:
         selector: TargetSelector,
         upstream: Upstream,
         clock: Clock,
+        config_file_watcher: ConfigFileWatcher | None = None,
     ) -> None:
-        """Wire the scheduler to its collaborators; does not start any tasks yet."""
+        """Wire the scheduler to its collaborators; does not start any tasks yet.
+
+        ``config_file_watcher`` defaults to a fresh :class:`ConfigFileWatcher`
+        over ``config.config_file`` -- overridable so tests can inject one
+        pointed at a scratch file without touching real paths.
+        """
         self._config = config
         self._store = store
         self._selector = selector
         self._upstream = upstream
         self._clock = clock
+        self._config_file_watcher = (
+            config_file_watcher
+            if config_file_watcher is not None
+            else ConfigFileWatcher(config.config_file)
+        )
         self._tasks: dict[str, asyncio.Task[None]] = {}
         self._in_flight: dict[str, int] = {}
         self._last_result: dict[str, BumpResult | None] = {}
@@ -238,14 +254,22 @@ class Scheduler:
         the main conversation.
 
         ``model`` overrides the reviewer model for this fork only, else
-        falling back to ``CGX_SHADOW_FORK_MODEL`` (the daemon-wide default), else
+        falling back to the effective ``CGX_SHADOW_FORK_MODEL`` (the tuning
+        file if it sets one, else the daemon-wide environment default), else
         the snapshot's own model -- the only choice that reads the
         parent's cached prefix. Never raises and never touches bump
         bookkeeping: it does not set ``last_bump_at``, does not increment
         ``bump_count``, does not stop the session on a paid write, and
         does not reset any timer. A fork is a side channel, not a
         cache-warming replay, so none of the bump effects apply to it.
+
+        The four Shadow Fork tuning values (max tokens, the per-minute rate
+        limit, the thinking guard and the reviewer model) are resolved fresh
+        on every call through :attr:`_config_file_watcher`, so a tuning-file
+        edit takes effect on the very next fork -- see the "Shadow Fork
+        tuning is hot reloaded..." decision in ``docs/DESIGN.md``.
         """
+        effective = merge_shadow_fork(self._config, self._config_file_watcher.current().settings)
         state = self._store.get_state(session_id)
         snapshots = self._store.get_snapshots(session_id)
         main_snapshots = [snap for snap in snapshots if snap.is_subagent is False]
@@ -259,7 +283,8 @@ class Scheduler:
             return ForkVerdict(
                 verdict="ok", reason="no_snapshot", mutation=None, usage=None, paid_write=False
             )
-        if self._fork_rate_limited(session_id):
+        assert effective.max_per_min is not None  # merge_shadow_fork always fills this in
+        if self._fork_rate_limited(session_id, effective.max_per_min):
             return ForkVerdict(
                 verdict="ok", reason="rate_limited", mutation=None, usage=None, paid_write=False
             )
@@ -269,8 +294,9 @@ class Scheduler:
             )
         self._record_fork(session_id)
         credential = state.last_credential if state is not None else None
-        cap = max_tokens if max_tokens is not None else self._config.shadow_fork_max_tokens
-        model_override = model if model is not None else self._config.shadow_fork_model
+        cap = max_tokens if max_tokens is not None else effective.max_tokens
+        model_override = model if model is not None else effective.model
+        assert cap is not None  # merge_shadow_fork always fills this in
         result = await fork_once(
             self._upstream,
             self._config.upstream,
@@ -279,7 +305,7 @@ class Scheduler:
             prompt,
             payload,
             cap,
-            self._config.shadow_fork_thinking_guard,
+            bool(effective.thinking_guard),
             model_override,
         )
         if subagent_snapshot:
@@ -298,12 +324,12 @@ class Scheduler:
             return True
         return self._clock.now() - snapshot.captured_at > ttl_s
 
-    def _fork_rate_limited(self, session_id: str) -> bool:
-        """Return whether ``session_id`` has already made the max forks in the trailing 60s."""
+    def _fork_rate_limited(self, session_id: str, max_per_min: int) -> bool:
+        """Return whether ``session_id`` already made ``max_per_min`` forks in the trailing 60s."""
         window_start = self._clock.now() - 60.0
         times = [t for t in self._fork_times.get(session_id, []) if t >= window_start]
         self._fork_times[session_id] = times
-        return len(times) >= self._config.shadow_fork_max_per_min
+        return len(times) >= max_per_min
 
     def _record_fork(self, session_id: str) -> None:
         """Record a fork attempt for ``session_id`` at the current time."""
@@ -382,6 +408,15 @@ class Scheduler:
     def status_all(self) -> list[dict[str, object]]:
         """Return :meth:`status` for every session known to the store."""
         return [self.status(session_id) for session_id in self._store.list_sessions()]
+
+    def config_file_state(self) -> ConfigFileState:
+        """Return the Shadow Fork tuning file's current load state, re-``stat``ing it now.
+
+        The same :class:`~claude_gateway_extensions.config.ConfigFileWatcher`
+        instance :meth:`fork_now` reads from, so ``GET /cgx/config`` reports
+        exactly what the next fork would use, not a separate read of the file.
+        """
+        return self._config_file_watcher.current()
 
     # -- internals ---------------------------------------------------------
 

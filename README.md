@@ -340,13 +340,50 @@ edit claude-gateway-extensions.service`.
 | `CGX_SHADOW_FORK_MAX_PER_MIN`        | `6`                                                            | how many shadow forks a single session may fire in a trailing 60s window                   |
 | `CGX_SHADOW_FORK_THINKING_GUARD`     | `true`                                                         | refuse a fork against a thinking snapshot on a model below its measured thinking-preservation minimum, instead of paying a full cold write |
 | `CGX_SHADOW_FORK_MODEL`              | unset                                                          | send shadow forks to this model instead of the snapshot's own; forfeits the cached prefix, since Anthropic namespaces the cache per model |
+| `CGX_CONFIG_FILE`             | `${XDG_CONFIG_HOME:-~/.config}/cgx/config.toml` (POSIX); `%APPDATA%\cgx\config.toml` (Windows) | the hot-reloaded Shadow Fork tuning file, see below |
 
-`CGX_SHADOW_FORK_MAX_TOKENS`, `CGX_SHADOW_FORK_MAX_PER_MIN`, `CGX_SHADOW_FORK_THINKING_GUARD`
-and `CGX_SHADOW_FORK_MODEL` are read once when `cgx serve` starts and frozen into
-that run's scheduler, unlike the hook-side variables below (`CGX_SHADOW_FORK_QUIET`,
-`CGX_TEMPLATE_DIR`), which `cgx shadow-fork` reads fresh on every hook
-invocation; changing one of the four daemon-side vars needs a daemon
-restart to take effect.
+Every variable in this table is read once when `cgx serve` starts and
+frozen for that run; changing one needs a daemon restart. The hook-side
+variables above (`CGX_SHADOW_FORK_QUIET`, `CGX_TEMPLATE_DIR`) have no such
+lag: `cgx shadow-fork` reads them fresh on every hook invocation, as it
+does the templates themselves.
+
+### Shadow Fork tuning file (hot reload)
+
+The four Shadow Fork settings (`CGX_SHADOW_FORK_MAX_TOKENS`,
+`CGX_SHADOW_FORK_MAX_PER_MIN`, `CGX_SHADOW_FORK_THINKING_GUARD`,
+`CGX_SHADOW_FORK_MODEL`) can also be set in `CGX_CONFIG_FILE` (default
+`~/.config/cgx/config.toml`, next to your templates), where a change
+takes effect on the next fork without restarting `cgx serve`:
+
+```toml
+[shadow_fork]
+max_tokens = 768
+max_per_min = 10
+thinking_guard = true
+# model = "<model id>"  # omitted: fork on the session's own model (cache read)
+```
+
+For these four keys the file wins over the environment, the environment
+wins over the built-in default, and a fork request's own `max_tokens` or
+`model` field wins over all three. A key the file does not mention falls
+through to the environment value the daemon started with. Nothing else
+can be set in the file; every other daemon variable stays
+environment-only.
+
+The daemon re-reads the file when its modification time changes, checked
+on each fork request and each `GET /cgx/config`. The file applies as a
+whole or not at all: a syntax error, an unknown key or a wrongly typed
+value keeps the previously loaded values (or the environment's) and logs
+one WARNING naming the error; a missing file means the environment. `GET
+/cgx/config` (see `docs/API.md`) shows the resolved path, whether it
+loaded, and every effective value with its source (`file`, `env` or
+`default`); `cgx doctor` reports the same file, its parse error if any,
+and whether the running daemon resolves the same path this shell does.
+
+Hooks themselves are a different matter: Claude Code reads
+`settings.json` `hooks` at session start, so a `cgx configure
+--shadow-fork` run applies to sessions started after it.
 
 If a table and the code ever disagree, `config.py` is the source of truth.
 
@@ -399,10 +436,8 @@ curl -s -X POST "http://127.0.0.1:8787/cgx/sessions/$SESSION_ID/bump"
 - Move template definitions off today's `.txt` line-based front matter
   onto Markdown agent definitions whose front matter follows the official
   [Claude Code subagent frontmatter fields](https://code.claude.com/docs/en/sub-agents#supported-frontmatter-fields).
-- Hot reload: pick up a definition's changes, and the daemon-side fork
-  configuration (`CGX_SHADOW_FORK_MAX_TOKENS`, `CGX_SHADOW_FORK_MAX_PER_MIN`,
-  `CGX_SHADOW_FORK_THINKING_GUARD`, `CGX_SHADOW_FORK_MODEL`), without a `cgx serve`
-  restart -- both are currently frozen at daemon start.
+- Hot reload: pick up a definition's changes without a `cgx serve` restart
+  -- currently frozen at daemon start.
 - Implement support for Windows.
 
 Shadow Fork reviews a hook event with a one-shot fork of the session's own

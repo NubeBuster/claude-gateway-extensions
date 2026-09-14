@@ -33,6 +33,44 @@ listener is closed immediately), so this `503` is only ever seen by a client
 that already had a connection open — the request line itself still resolves
 just fine, only the shape of the answer changes.
 
+## GET /cgx/config
+
+The Shadow Fork tuning file's resolved path and load state, and each of the
+four Shadow Fork settings' effective value and source. See `docs/DESIGN.md`'s
+"Shadow Fork tuning is hot reloaded..." decision for the full design; this
+section documents only the response shape. The file is re-read here exactly
+as it is before a fork (its `stat` is checked and, if changed, it is
+re-parsed), so this always reports what the *next* fork would use.
+
+Response `200`:
+
+```json
+{"path": "/home/user/.config/cgx/config.toml", "present": true,
+  "parse_error": null,
+  "shadow_fork": {
+    "max_tokens": {"value": 768, "source": "file"},
+    "max_per_min": {"value": 6, "source": "default"},
+    "thinking_guard": {"value": true, "source": "env"},
+    "model": {"value": null, "source": "default"}}}
+```
+
+`path` is this daemon's resolved `CGX_CONFIG_FILE` (see the README's
+Configuration table for the default). `present` is whether the file exists
+on disk as of this check. `parse_error` is a human-readable message naming
+what was wrong with the file the last time it was loaded (syntax error,
+unknown key, or a value of the wrong type), or `null` when the file is
+absent or the last load succeeded -- a present-but-invalid file still
+reports its *previous* good values below (or the environment's, if none
+were ever loaded), per the "applies atomically or not at all" rule.
+
+Each of the four `shadow_fork` entries has `value` (the effective value that
+would be used for the next fork, after the file/environment/default
+precedence) and `source`: `"file"` when the tuning file sets that key,
+`"env"` when the corresponding `CGX_SHADOW_FORK_*` variable was set in the
+daemon's environment, otherwise `"default"`. A fork request's own
+`max_tokens`/`model` field, when given, overrides these further; that
+per-request override is never reflected here.
+
 ## GET /cgx/sessions
 
 Status for every session the daemon currently knows about.

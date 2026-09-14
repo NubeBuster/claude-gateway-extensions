@@ -22,7 +22,7 @@ from claude_gateway_extensions.cli.client import (
     ControlClient,
     DaemonUnreachable,
 )
-from claude_gateway_extensions.config import Config
+from claude_gateway_extensions.config import Config, ConfigError, parse_shadow_fork_file
 
 Status = Literal["ok", "warn", "fail"]
 
@@ -296,6 +296,47 @@ def check_service(
     )
 
 
+def check_config_file(config: Config, client: ControlClient, daemon_reachable: bool) -> CheckResult:
+    """Check the Shadow Fork tuning file: parses with the daemon's own parser.
+
+    Reports ``config.config_file`` (this shell's own resolution of
+    ``CGX_CONFIG_FILE``) and its parse error, if any, using the same
+    :func:`~claude_gateway_extensions.config.parse_shadow_fork_file` the
+    daemon uses. When the daemon is reachable, also warns if it resolves a
+    different path than this shell does -- ``CGX_CONFIG_FILE`` not being
+    forwarded into the daemon's environment the way ``configure`` expects
+    would otherwise go unnoticed until a tuning-file edit silently did
+    nothing.
+    """
+    path = config.config_file
+    if not path.is_file():
+        result = CheckResult(
+            "ok", f"Shadow Fork tuning file not present at {path}; using environment/defaults"
+        )
+    else:
+        try:
+            parse_shadow_fork_file(path)
+        except ConfigError as exc:
+            result = CheckResult("fail", f"Shadow Fork tuning file invalid: {exc}")
+        else:
+            result = CheckResult("ok", f"Shadow Fork tuning file {path} parses cleanly")
+
+    if daemon_reachable:
+        try:
+            daemon_config = client.get_config()
+        except (DaemonUnreachable, ApiError):
+            return result
+        daemon_path = daemon_config.get("path") if isinstance(daemon_config, dict) else None
+        if isinstance(daemon_path, str) and daemon_path != str(path):
+            return CheckResult(
+                "warn",
+                f"daemon resolves the Shadow Fork tuning file to {daemon_path}, "
+                f"but this shell resolves {path} -- CGX_CONFIG_FILE may not agree "
+                "between the daemon's environment and this shell's",
+            )
+    return result
+
+
 def check_state_dir(config: Config) -> CheckResult:
     """Check that the state directory, if it exists, is mode 0700."""
     if not config.state_dir.is_dir():
@@ -339,6 +380,7 @@ def run_doctor(
         check_credentials(environ, cwd),
         service_check,
         check_state_dir(config),
+        check_config_file(config, client, daemon_check.status == "ok"),
         *check_shadow_fork_templates(environ, cwd),
     ]
     for check in checks:
@@ -348,6 +390,7 @@ def run_doctor(
 
 __all__ = [
     "CheckResult",
+    "check_config_file",
     "check_port_consistency",
     "check_shadow_fork_templates",
     "run_doctor",

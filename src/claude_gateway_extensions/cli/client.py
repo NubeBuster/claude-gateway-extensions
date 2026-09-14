@@ -100,6 +100,11 @@ class ControlClient:
         result: dict[str, Any] = self._get("/cgx/health")
         return result
 
+    def get_config(self) -> dict[str, Any]:
+        """Return the daemon's ``GET /cgx/config`` response (Shadow Fork tuning file state)."""
+        result: dict[str, Any] = self._get("/cgx/config")
+        return result
+
     def list_sessions(self) -> list[dict[str, Any]]:
         """Return every session's status via ``GET /cgx/sessions``.
 

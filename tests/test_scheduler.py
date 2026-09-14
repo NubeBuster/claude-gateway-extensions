@@ -116,6 +116,8 @@ def _config(tmp_path: Path, **overrides: object) -> Config:
         "shadow_fork_max_per_min": 6,
         "shadow_fork_thinking_guard": True,
         "shadow_fork_model": None,
+        "config_file": tmp_path / "config.toml",
+        "configured_env_vars": frozenset(),
     }
     fields.update(overrides)
     return Config(**fields)  # type: ignore[arg-type]

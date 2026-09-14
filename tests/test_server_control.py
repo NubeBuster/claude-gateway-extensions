@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import gzip
 import json
+import os
 
 import pytest
 from aiohttp import web
 
-from claude_gateway_extensions.server.keys import DRAIN_STATE_KEY
+from claude_gateway_extensions.server.keys import CONFIG_KEY, DRAIN_STATE_KEY
 from conftest import ServerHarness
 
 #: A deadline far enough ahead that the scheduler never reaches it mid-test
@@ -30,6 +31,76 @@ async def test_health_returns_503_while_draining(harness: ServerHarness) -> None
     resp = await harness.client.get("/cgx/health")
     assert resp.status == 503
     assert await resp.json() == {"status": "draining"}
+
+
+async def test_get_config_reports_missing_file_as_defaults(harness: ServerHarness) -> None:
+    resp = await harness.client.get("/cgx/config")
+    assert resp.status == 200
+    data = await resp.json()
+    config = harness.app[CONFIG_KEY]
+    assert data["path"] == str(config.config_file)
+    assert data["present"] is False
+    assert data["parse_error"] is None
+    assert data["shadow_fork"]["max_tokens"] == {
+        "value": config.shadow_fork_max_tokens,
+        "source": "default",
+    }
+    assert data["shadow_fork"]["max_per_min"] == {
+        "value": config.shadow_fork_max_per_min,
+        "source": "default",
+    }
+    assert data["shadow_fork"]["thinking_guard"] == {
+        "value": config.shadow_fork_thinking_guard,
+        "source": "default",
+    }
+    assert data["shadow_fork"]["model"] == {"value": None, "source": "default"}
+
+
+@pytest.mark.invariant(
+    decision="Shadow Fork tuning is hot reloaded from one config file; "
+    "the file wins over the environment for exactly the keys it holds."
+)
+async def test_get_config_reports_file_source_and_reloads_on_edit(
+    harness: ServerHarness,
+) -> None:
+    config = harness.app[CONFIG_KEY]
+    config.config_file.parent.mkdir(parents=True, exist_ok=True)
+    config.config_file.write_text("[shadow_fork]\nmax_tokens = 999\n")
+
+    resp = await harness.client.get("/cgx/config")
+    data = await resp.json()
+    assert data["present"] is True
+    assert data["parse_error"] is None
+    assert data["shadow_fork"]["max_tokens"] == {"value": 999, "source": "file"}
+    assert data["shadow_fork"]["max_per_min"]["source"] == "default"
+
+    mtime = os.stat(config.config_file).st_mtime + 5
+    os.utime(config.config_file, (mtime, mtime))
+    config.config_file.write_text("[shadow_fork]\nmax_tokens = 111\n")
+
+    resp2 = await harness.client.get("/cgx/config")
+    data2 = await resp2.json()
+    assert data2["shadow_fork"]["max_tokens"] == {"value": 111, "source": "file"}
+
+
+async def test_get_config_reports_parse_error_and_keeps_last_good(
+    harness: ServerHarness,
+) -> None:
+    config = harness.app[CONFIG_KEY]
+    config.config_file.parent.mkdir(parents=True, exist_ok=True)
+    config.config_file.write_text("[shadow_fork]\nmax_tokens = 100\n")
+    resp = await harness.client.get("/cgx/config")
+    assert (await resp.json())["shadow_fork"]["max_tokens"]["value"] == 100
+
+    mtime = os.stat(config.config_file).st_mtime + 5
+    os.utime(config.config_file, (mtime, mtime))
+    config.config_file.write_text("[shadow_fork]\nmax_tokens = not valid toml\n")
+
+    resp2 = await harness.client.get("/cgx/config")
+    data2 = await resp2.json()
+    assert data2["present"] is True
+    assert data2["parse_error"] is not None
+    assert data2["shadow_fork"]["max_tokens"]["value"] == 100  # kept the last good value
 
 
 async def test_get_unknown_session_404(harness: ServerHarness) -> None:

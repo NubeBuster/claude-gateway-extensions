@@ -29,6 +29,14 @@ class _FakeClient:
             raise DaemonUnreachable("nope")
         return {"ok": True, "version": "0.0.0-test", "upstream": "http://example", "sessions": 0}
 
+    def get_config(self) -> dict[str, Any]:
+        # ``path: None`` deliberately never matches a real path, so the
+        # "daemon resolves a different path" warning never fires here --
+        # this fake exists to satisfy check_daemon/check_config_file's
+        # daemon-reachable branch, not to test the mismatch itself (that has
+        # its own dedicated test below).
+        return {"path": None, "present": False, "parse_error": None, "shadow_fork": {}}
+
 
 def _healthy_factory(base_url: str) -> _FakeClient:
     return _FakeClient(base_url, healthy=True)
@@ -338,3 +346,62 @@ def test_state_dir_wrong_mode_is_a_warning(tmp_path: Path) -> None:
     output = stdout.getvalue()
     assert code == 0
     assert "warn: state dir" in output
+
+
+def test_check_config_file_ok_when_absent(tmp_path: Path) -> None:
+    config = Config.from_env({"CGX_URL": URL, "HOME": str(tmp_path)})
+    client = _healthy_factory(URL)
+    result = doctor.check_config_file(config, client, daemon_reachable=True)  # type: ignore[arg-type]
+    assert result.status == "ok"
+    assert "not present" in result.message
+
+
+def test_check_config_file_ok_when_valid(tmp_path: Path) -> None:
+    config = Config.from_env(
+        {"CGX_URL": URL, "HOME": str(tmp_path), "XDG_CONFIG_HOME": str(tmp_path / "xdg")}
+    )
+    config.config_file.parent.mkdir(parents=True)
+    config.config_file.write_text("[shadow_fork]\nmax_tokens = 512\n")
+    client = _healthy_factory(URL)
+    result = doctor.check_config_file(config, client, daemon_reachable=True)  # type: ignore[arg-type]
+    assert result.status == "ok"
+    assert "parses cleanly" in result.message
+
+
+def test_check_config_file_fail_on_invalid_toml(tmp_path: Path) -> None:
+    config = Config.from_env(
+        {"CGX_URL": URL, "HOME": str(tmp_path), "XDG_CONFIG_HOME": str(tmp_path / "xdg")}
+    )
+    config.config_file.parent.mkdir(parents=True)
+    config.config_file.write_text("[shadow_fork]\nmax_tokens = not valid toml\n")
+    client = _healthy_factory(URL)
+    result = doctor.check_config_file(config, client, daemon_reachable=True)  # type: ignore[arg-type]
+    assert result.status == "fail"
+    assert "invalid" in result.message
+
+
+def test_check_config_file_warns_when_daemon_resolves_a_different_path(tmp_path: Path) -> None:
+    config = Config.from_env(
+        {"CGX_URL": URL, "HOME": str(tmp_path), "XDG_CONFIG_HOME": str(tmp_path / "xdg")}
+    )
+
+    class _MismatchedClient:
+        def get_config(self) -> dict[str, Any]:
+            return {"path": "/somewhere/else/config.toml"}
+
+    result = doctor.check_config_file(
+        config,
+        _MismatchedClient(),  # type: ignore[arg-type]
+        daemon_reachable=True,
+    )
+    assert result.status == "warn"
+    assert "daemon resolves" in result.message
+
+
+def test_check_config_file_skips_daemon_comparison_when_unreachable(tmp_path: Path) -> None:
+    config = Config.from_env(
+        {"CGX_URL": URL, "HOME": str(tmp_path), "XDG_CONFIG_HOME": str(tmp_path / "xdg")}
+    )
+    client = _unhealthy_factory(URL)
+    result = doctor.check_config_file(config, client, daemon_reachable=False)  # type: ignore[arg-type]
+    assert result.status == "ok"

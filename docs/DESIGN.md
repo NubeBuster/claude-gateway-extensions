@@ -105,11 +105,14 @@ deliberately absent from this release, not ruled out for the project.
   top-level keys and a parallel file ladder would duplicate Claude Code's.
   `managed` is deliberately not offered as a scope: it is root-owned and
   machine-wide, while the daemon it would point at is per user. Daemon
-  settings are read once at `cgx serve` startup and frozen for that run
-  (e.g. the fork scheduler's `CGX_SHADOW_FORK_MAX_TOKENS`, `CGX_SHADOW_FORK_MAX_PER_MIN`,
-  `CGX_SHADOW_FORK_THINKING_GUARD`, `CGX_SHADOW_FORK_MODEL`), so changing one needs a
-  daemon restart; hook-side variables have no such lag since the hook and
-  CLI re-read the environment on every invocation.
+  settings are read once at `cgx serve` startup and frozen for that run,
+  so changing one needs a daemon restart; hook-side variables have no
+  such lag since the hook and CLI re-read the environment on every
+  invocation. The one exception is the Shadow Fork tuning, which a
+  process cannot pick up from an environment it has already inherited, so
+  it has a reloadable file of its own (see "Shadow Fork tuning is hot
+  reloaded from one config file" below); every other daemon variable
+  stays frozen for the run.
 - **Every file a user owns is diffed and confirmed before it is written.**
   `cgx configure`, `unconfigure` and `cgx service install`/`uninstall`
   compute their changes first and show each one as a colored unified diff,
@@ -496,6 +499,55 @@ review" roadmap line; no part of it ships in 1.0.
   entry the matching `configure` call added and leaves everything else
   (including a hand-written entry at the same event) untouched; it never
   removes the copied template file, since the user may have edited it.
+- **Shadow Fork tuning is hot reloaded from one config file; the file
+  wins over the environment for exactly the keys it holds.** The four
+  daemon-side Shadow Fork settings (`CGX_SHADOW_FORK_MAX_TOKENS`,
+  `CGX_SHADOW_FORK_MAX_PER_MIN`, `CGX_SHADOW_FORK_THINKING_GUARD`,
+  `CGX_SHADOW_FORK_MODEL`) are the ones a user tunes while watching
+  forks land, and a restart per attempt is the wrong feedback loop --
+  but a running process can never observe a change to the environment it
+  inherited, so the environment alone can never hot reload. A TOML file,
+  `config.toml` next to the template directory (`CGX_CONFIG_FILE`, default
+  `$XDG_CONFIG_HOME/cgx/config.toml`, `%APPDATA%\cgx\config.toml` on
+  Windows -- the directory the user already edits templates in, and
+  `tomllib` is stdlib on every Python this project supports), holds a
+  `[shadow_fork]` table with `max_tokens`, `max_per_min`,
+  `thinking_guard` and `model`. Precedence per key is the fork request's
+  own field, then the file, then the environment, then the built-in
+  default: the environment is frozen at start, so the file must outrank
+  it to be useful at all, and a key the file does not mention falls
+  through to whatever the daemon started with rather than silently
+  resetting a value the systemd unit carries. `CGX_CONFIG_FILE` itself is
+  an ordinary frozen daemon variable, forwarded into the unit like
+  `CGX_STATE_DIR`, because the unit does not forward `XDG_CONFIG_HOME`
+  and the daemon and the shell must agree on which file is meant.
+  Nothing else lives in the file: every other daemon setting stays
+  environment-only and frozen, since a `host` or `state_dir` in a file
+  that claims to be hot would be a lie, and a file holding both kinds
+  would need a second precedence rule for the frozen half. The file is
+  re-read when its `stat` (mtime, size, inode) changes, checked at most
+  once per fork request and per `GET /cgx/config` -- a value nobody is
+  about to use has no reason to be loaded, a `stat` costs nothing next
+  to the replay it precedes, and forks are already rate limited, so
+  there is no timer, no watcher thread and no second dependency. The
+  file applies atomically or not at all: a syntax error, an unknown key
+  or a value of the wrong type rejects the whole file, keeps the last
+  good values (or the environment's, if none were ever loaded), logs one
+  WARNING naming the file and the error, and never refuses to start or
+  stops the daemon -- a tuning file must not be able to take the
+  gateway out of the request path, and a rejected key would otherwise
+  be a typo that silently did nothing. A missing file is the environment
+  as before, never an error. `GET /cgx/config` reports the resolved
+  path, whether the file is present, its parse error if any, and each
+  effective value with its source (`file`, `env` or `default`); `cgx
+  doctor` parses the same file with the same parser, reports its path and
+  any error, and warns when the daemon resolves a different path than the
+  shell running `doctor` does. Templates need none of this: the hook is
+  a fresh process per event and reads them from disk each time. Hook
+  wiring in `settings.json` is outside this decision's reach -- Claude
+  Code reads `hooks` at session start, so a `cgx configure --shadow-fork`
+  run still applies to sessions started after it, and no daemon-side
+  mechanism can change that.
 
 ## Live regression harness
 

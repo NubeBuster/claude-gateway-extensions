@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -147,6 +148,8 @@ def _config(tmp_path: Path, **overrides: object) -> Config:
         "shadow_fork_max_per_min": 6,
         "shadow_fork_thinking_guard": True,
         "shadow_fork_model": None,
+        "config_file": tmp_path / "config.toml",
+        "configured_env_vars": frozenset(),
     }
     fields.update(overrides)
     return Config(**fields)  # type: ignore[arg-type]
@@ -873,3 +876,155 @@ async def test_fork_now_leaves_bump_bookkeeping_untouched(tmp_path: Path) -> Non
     assert state.enabled is True
     assert state.bump_count == 5
     assert state.last_bump_at == 1234.0
+
+
+# -- Scheduler.fork_now: CGX_CONFIG_FILE hot reload -------------------------
+
+
+@pytest.mark.invariant(
+    decision="Shadow Fork tuning is hot reloaded from one config file; "
+    "the file wins over the environment for exactly the keys it holds."
+)
+async def test_fork_now_config_file_wins_over_env_default(tmp_path: Path) -> None:
+    config_file = tmp_path / "config.toml"
+    config_file.write_text('[shadow_fork]\nmax_tokens = 768\nmodel = "claude-file-model"\n')
+    clock = FakeClock(start=1000.0)
+    store = MemoryStore(max_streams_per_session=8)
+    store.put_snapshot(_snapshot("sess-1"))  # model="claude-x"
+    store.put_state(
+        SessionState(session_id="sess-1", last_credential=("authorization", "Bearer a"))
+    )
+    upstream = ScriptedUpstream([_verdict_response({"verdict": "ok", "reason": "fine"})])
+    scheduler = Scheduler(
+        _config(tmp_path, shadow_fork_max_tokens=512, config_file=config_file),
+        store,
+        LargestPrefixSelector(),
+        upstream,
+        clock,
+    )
+
+    result = await scheduler.fork_now("sess-1", "review", {}, None)
+
+    assert result.model == "claude-file-model"
+    sent = json.loads(upstream.calls[0][3])
+    assert sent["max_tokens"] == 768
+
+
+async def test_fork_now_request_override_wins_over_config_file(tmp_path: Path) -> None:
+    config_file = tmp_path / "config.toml"
+    config_file.write_text('[shadow_fork]\nmax_tokens = 768\nmodel = "claude-file-model"\n')
+    clock = FakeClock(start=1000.0)
+    store = MemoryStore(max_streams_per_session=8)
+    store.put_snapshot(_snapshot("sess-1"))
+    store.put_state(
+        SessionState(session_id="sess-1", last_credential=("authorization", "Bearer a"))
+    )
+    upstream = ScriptedUpstream([_verdict_response({"verdict": "ok", "reason": "fine"})])
+    scheduler = Scheduler(
+        _config(tmp_path, config_file=config_file),
+        store,
+        LargestPrefixSelector(),
+        upstream,
+        clock,
+    )
+
+    result = await scheduler.fork_now(
+        "sess-1", "review", {}, max_tokens=100, model="claude-request-override"
+    )
+
+    assert result.model == "claude-request-override"
+    sent = json.loads(upstream.calls[0][3])
+    assert sent["max_tokens"] == 100
+
+
+async def test_fork_now_max_per_min_from_file_overrides_env_default(tmp_path: Path) -> None:
+    config_file = tmp_path / "config.toml"
+    config_file.write_text("[shadow_fork]\nmax_per_min = 1\n")
+    clock = FakeClock(start=1000.0)
+    store = MemoryStore(max_streams_per_session=8)
+    store.put_snapshot(_snapshot("sess-1"))
+    store.put_state(
+        SessionState(session_id="sess-1", last_credential=("authorization", "Bearer a"))
+    )
+    upstream = ScriptedUpstream(
+        [
+            _verdict_response({"verdict": "ok", "reason": "fine"}),
+            _verdict_response({"verdict": "ok", "reason": "fine"}),
+        ]
+    )
+    scheduler = Scheduler(
+        _config(tmp_path, shadow_fork_max_per_min=6, config_file=config_file),
+        store,
+        LargestPrefixSelector(),
+        upstream,
+        clock,
+    )
+
+    first = await scheduler.fork_now("sess-1", "review", {}, None)
+    second = await scheduler.fork_now("sess-1", "review", {}, None)
+
+    assert first.reason == "fine"
+    assert second.reason == "rate_limited"  # the file's max_per_min=1, not the env's 6
+    assert len(upstream.calls) == 1
+
+
+async def test_fork_now_picks_up_a_config_file_edit_without_a_new_scheduler(
+    tmp_path: Path,
+) -> None:
+    """A tuning-file edit takes effect on the very next fork, no daemon restart needed."""
+    config_file = tmp_path / "config.toml"
+    config_file.write_text("[shadow_fork]\nmax_tokens = 100\n")
+    clock = FakeClock(start=1000.0)
+    store = MemoryStore(max_streams_per_session=8)
+    store.put_snapshot(_snapshot("sess-1"))
+    store.put_state(
+        SessionState(session_id="sess-1", last_credential=("authorization", "Bearer a"))
+    )
+    upstream = ScriptedUpstream(
+        [
+            _verdict_response({"verdict": "ok", "reason": "fine"}),
+            _verdict_response({"verdict": "ok", "reason": "fine"}),
+        ]
+    )
+    scheduler = Scheduler(
+        _config(tmp_path, config_file=config_file),
+        store,
+        LargestPrefixSelector(),
+        upstream,
+        clock,
+    )
+
+    await scheduler.fork_now("sess-1", "review", {}, None)
+    assert json.loads(upstream.calls[0][3])["max_tokens"] == 100
+
+    mtime = os.stat(config_file).st_mtime + 5
+    os.utime(config_file, (mtime, mtime))
+    config_file.write_text("[shadow_fork]\nmax_tokens = 200\n")
+
+    await scheduler.fork_now("sess-1", "review", {}, None)
+    assert json.loads(upstream.calls[1][3])["max_tokens"] == 200
+
+
+async def test_fork_now_missing_config_file_falls_back_to_env(tmp_path: Path) -> None:
+    clock = FakeClock(start=1000.0)
+    store = MemoryStore(max_streams_per_session=8)
+    store.put_snapshot(_snapshot("sess-1"))
+    store.put_state(
+        SessionState(session_id="sess-1", last_credential=("authorization", "Bearer a"))
+    )
+    upstream = ScriptedUpstream([_verdict_response({"verdict": "ok", "reason": "fine"})])
+    scheduler = Scheduler(
+        _config(
+            tmp_path,
+            shadow_fork_max_tokens=333,
+            config_file=tmp_path / "does-not-exist.toml",
+        ),
+        store,
+        LargestPrefixSelector(),
+        upstream,
+        clock,
+    )
+
+    await scheduler.fork_now("sess-1", "review", {}, None)
+
+    assert json.loads(upstream.calls[0][3])["max_tokens"] == 333

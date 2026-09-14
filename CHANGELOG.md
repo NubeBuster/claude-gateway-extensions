@@ -12,6 +12,19 @@
   directory gains a file during it. `/etc/claude-code/managed-settings.json`
   is a documented limitation the fake `HOME` cannot isolate the subject
   from. See the "Live regression harness" section in `docs/DESIGN.md`.
+- Feat: the four Shadow Fork tuning settings (`CGX_SHADOW_FORK_MAX_TOKENS`,
+  `CGX_SHADOW_FORK_MAX_PER_MIN`, `CGX_SHADOW_FORK_THINKING_GUARD`,
+  `CGX_SHADOW_FORK_MODEL`) can now be set in a TOML file
+  (`CGX_CONFIG_FILE`, default `$XDG_CONFIG_HOME/cgx/config.toml`) that the
+  daemon re-reads on every fork request whose `stat` has changed, so an
+  edit takes effect without a `cgx serve` restart -- the file wins over the
+  environment per key, an invalid file keeps the last good values and logs
+  one WARNING, and a missing file is the environment as before. New `GET
+  /cgx/config` reports the resolved path, load state and each value's
+  source; `cgx doctor` parses the same file with the same parser and warns
+  if the daemon resolves a different path than the shell running it does.
+  See the "Shadow Fork tuning is hot reloaded..." decision in
+  `docs/DESIGN.md`.
 - Fix: `_map_verdict` now logs a WARNING (never the mutation body) when an
   `intervene` verdict on `UserPromptSubmit` or `PostToolUse` carries a
   non-null `mutation` -- previously it was silently dropped, contradicting

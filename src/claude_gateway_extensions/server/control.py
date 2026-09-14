@@ -16,7 +16,7 @@ from typing import Any
 from aiohttp import web
 
 from claude_gateway_extensions import __version__
-from claude_gateway_extensions.config import Config
+from claude_gateway_extensions.config import SHADOW_FORK_ENV_VARS, Config, ShadowForkSettings
 from claude_gateway_extensions.core.scheduler import NoSnapshot, Scheduler
 from claude_gateway_extensions.core.store import SESSION_ID_RE, SnapshotStore
 from claude_gateway_extensions.server.keys import (
@@ -60,6 +60,59 @@ async def health(request: web.Request) -> web.Response:
             "version": __version__,
             "upstream": config.upstream,
             "sessions": len(store.list_sessions()),
+        }
+    )
+
+
+#: Maps each :class:`ShadowForkSettings` field name to the ``Config`` field
+#: holding its env/default-resolved value, for :func:`get_config`.
+_SHADOW_FORK_CONFIG_FIELDS: dict[str, str] = {
+    "max_tokens": "shadow_fork_max_tokens",
+    "max_per_min": "shadow_fork_max_per_min",
+    "thinking_guard": "shadow_fork_thinking_guard",
+    "model": "shadow_fork_model",
+}
+
+
+def _shadow_fork_report(config: Config, file_settings: ShadowForkSettings) -> dict[str, Any]:
+    """Build the ``shadow_fork`` object for ``GET /cgx/config``: each key's value and source.
+
+    ``source`` is ``"file"`` when the tuning file sets that key, else
+    ``"env"`` when the corresponding ``CGX_SHADOW_FORK_*`` variable was
+    actually set in the environment (per ``Config.configured_env_vars``),
+    else ``"default"``.
+    """
+    report: dict[str, Any] = {}
+    for key, config_field in _SHADOW_FORK_CONFIG_FIELDS.items():
+        file_value = getattr(file_settings, key)
+        env_var = SHADOW_FORK_ENV_VARS[key]
+        if file_value is not None:
+            report[key] = {"value": file_value, "source": "file"}
+        elif env_var in config.configured_env_vars:
+            report[key] = {"value": getattr(config, config_field), "source": "env"}
+        else:
+            report[key] = {"value": getattr(config, config_field), "source": "default"}
+    return report
+
+
+async def get_config(request: web.Request) -> web.Response:
+    """``GET /cgx/config``: the Shadow Fork tuning file's resolved path and effective values.
+
+    Reports the resolved ``CGX_CONFIG_FILE`` path, whether it is present,
+    its parse error if the last attempt to load it failed, and each of the
+    four Shadow Fork keys' effective value with its source (``file``,
+    ``env`` or ``default``) -- see the "Shadow Fork tuning is hot
+    reloaded..." decision in ``docs/DESIGN.md``.
+    """
+    config: Config = request.app[CONFIG_KEY]
+    scheduler: Scheduler = request.app[SCHEDULER_KEY]
+    state = scheduler.config_file_state()
+    return web.json_response(
+        {
+            "path": str(state.path),
+            "present": state.present,
+            "parse_error": state.parse_error,
+            "shadow_fork": _shadow_fork_report(config, state.settings),
         }
     )
 
@@ -231,6 +284,7 @@ def _is_optional_number(value: object) -> bool:
 def register(app: web.Application) -> None:
     """Register every ``/cgx/*`` route on ``app``."""
     app.router.add_get("/cgx/health", health)
+    app.router.add_get("/cgx/config", get_config)
     app.router.add_get("/cgx/sessions", list_sessions)
     app.router.add_get("/cgx/sessions/{id}", get_session)
     app.router.add_put("/cgx/sessions/{id}", put_session)
