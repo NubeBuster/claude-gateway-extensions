@@ -49,10 +49,16 @@ def test_no_second_http_or_cli_framework_is_a_runtime_dependency() -> None:
     )
 
 
-#: The four packaged shadow-fork example definitions; see
+#: The five packaged shadow-fork example definitions; see
 #: ``src/claude_gateway_extensions/templates/`` and the "Shadow Fork"
 #: section in ``docs/DESIGN.md``.
-_PACKAGED_TEMPLATES = ["task-assignment", "permission-classifier", "btw", "rename"]
+_PACKAGED_TEMPLATES = [
+    "task-assignment",
+    "task-followup",
+    "permission-classifier",
+    "btw",
+    "rename",
+]
 
 
 @pytest.mark.parametrize("name", _PACKAGED_TEMPLATES)

@@ -11,9 +11,9 @@ kebab-case, two to four words, no punctuation other than hyphens. Prefer
 the concrete subject of the work over generic words like "session" or
 "task".
 
-This is never shown to the user directly and never enters the parent
-conversation -- it is consumed by a rename command outside this
-conversation, so answer only with the label itself in `reason`.
+Your `reason` is never shown to the user directly and never enters the
+parent conversation -- it is consumed by a rename command outside this
+conversation, so answer with nothing but the label itself.
 
-Always reply `intervene` (never `ok`), since an `ok` verdict would discard
-the label instead of handing it to the rename command.
+Always reply `intervene`, never `ok`: an `ok` verdict discards the label
+instead of handing it to the rename command.

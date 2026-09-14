@@ -1278,6 +1278,7 @@ def test_apply_failure_message_suppressed_by_quiet_env(
     ("name", "hook_event_name", "expected_intervene"),
     [
         ("task-assignment", "PreToolUse", "context"),
+        ("task-followup", "PreToolUse", "context"),
         ("permission-classifier", "PreToolUse", "deny"),
         ("btw", "UserPromptSubmit", "deny"),
         ("rename", "UserPromptSubmit", "deny"),

@@ -505,8 +505,9 @@ review" roadmap line; no part of it ships in 1.0.
   is never loaded as a real subagent (a fork calls no tools and takes no
   second turn; see "Non-goals" above) -- familiarity for whoever edits it
   is the whole point, not interoperability with the subagent loader.
-  Four ship as examples — task assignment review at `PreToolUse`
-  `TaskCreate|TaskUpdate`, a permission classifier at `PreToolUse`
+  Five ship as examples — task assignment review at `PreToolUse`
+  `TaskCreate|TaskUpdate`, the same tier-fit review for a `SendMessage`
+  follow-up at `task-followup`, a permission classifier at `PreToolUse`
   `Bash`, and the `UserPromptSubmit` pair `btw` and `rename` below —
   because the feature's value is entirely in prompts the user is
   expected to edit.
