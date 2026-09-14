@@ -183,10 +183,10 @@ class ControlClient:
         max_tokens: int | None = None,
         model: str | None = None,
     ) -> dict[str, Any]:
-        """Run one shadow review fork via ``POST /cgx/sessions/{id}/fork``.
+        """Run one shadow fork via ``POST /cgx/sessions/{id}/fork``.
 
         ``model`` overrides the reviewer model for this fork only; omitted,
-        the daemon uses ``CGX_FORK_MODEL`` if set, else the session's own
+        the daemon uses ``CGX_SHADOW_FORK_MODEL`` if set, else the session's own
         model, which is the only choice that reads the parent's cached
         prefix. Returns the parsed verdict body for any 2xx response,
         including the fail-open degradations the daemon documents
@@ -202,7 +202,9 @@ class ControlClient:
             request_body["max_tokens"] = max_tokens
         if model is not None:
             request_body["model"] = model
-        status, parsed = self._request("POST", f"/cgx/sessions/{session_id}/fork", request_body)
+        status, parsed = self._request(
+            "POST", f"/cgx/sessions/{session_id}/shadow-fork", request_body
+        )
         if not 200 <= status < 300:
             raise ApiError(status, str(parsed))
         result: dict[str, Any] = parsed

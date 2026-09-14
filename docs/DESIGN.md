@@ -106,8 +106,8 @@ deliberately absent from this release, not ruled out for the project.
   `managed` is deliberately not offered as a scope: it is root-owned and
   machine-wide, while the daemon it would point at is per user. Daemon
   settings are read once at `cgx serve` startup and frozen for that run
-  (e.g. the fork scheduler's `CGX_FORK_MAX_TOKENS`, `CGX_FORK_MAX_PER_MIN`,
-  `CGX_FORK_THINKING_GUARD`, `CGX_FORK_MODEL`), so changing one needs a
+  (e.g. the fork scheduler's `CGX_SHADOW_FORK_MAX_TOKENS`, `CGX_SHADOW_FORK_MAX_PER_MIN`,
+  `CGX_SHADOW_FORK_THINKING_GUARD`, `CGX_SHADOW_FORK_MODEL`), so changing one needs a
   daemon restart; hook-side variables have no such lag since the hook and
   CLI re-read the environment on every invocation.
 - **Every file a user owns is diffed and confirmed before it is written.**
@@ -221,7 +221,7 @@ loopback-only control API.
   selection still has no concept of this: a subagent prompt larger than
   the main conversation wins the plain largest-prefix rule, and keeping
   the wrong stream warm is a wasted read, not a wrong answer. A shadow
-  review fork's selection is not subject to this (see its own section
+  shadow fork's selection is not subject to this (see its own section
   below, "The snapshot is chosen..."): it excludes known subagent
   snapshots via `body_is_subagent` before applying the same rule, because
   a fork's cost of getting this wrong is a wrong verdict, not a wasted
@@ -230,9 +230,9 @@ loopback-only control API.
   expansion. If that order changes, the skill body still explains the situation
   to the user.
 
-## Shadow review fork
+## Shadow Fork
 
-A shadow review fork ("microfork") asks one question about a live session
+A shadow fork ("microfork") asks one question about a live session
 without that session ever learning it was asked. At a hook, or any other
 trigger that can reach the control API, the daemon replays the session's
 captured snapshot with a single review turn appended, reads a verdict out
@@ -278,8 +278,8 @@ review" roadmap line; no part of it ships in 1.0.
   the parent's cached prefix and pays a full write, and every user (and
   every company) has a different set of models available, so no shipped
   default list could be right for all of them. The request body's
-  optional `model`, else `CGX_FORK_MODEL` (the daemon-wide default), else
-  `cgx fork-review --model`, overrides it for one fork; an override
+  optional `model`, else `CGX_SHADOW_FORK_MODEL` (the daemon-wide default), else
+  `cgx shadow-fork --model`, overrides it for one fork; an override
   always forfeits the cache read and is logged once at WARNING with that
   reason. The response reports `model` (the model actually sent to) and
   `stream_key` (the selected snapshot's) so a caller can see which model
@@ -317,7 +317,7 @@ review" roadmap line; no part of it ships in 1.0.
   `cache_read_input_tokens: 16046` with `cache_creation_input_tokens: 0`,
   a parsed verdict, and `paid_write: false`.
 - **`stream` is false and `max_tokens` is capped per fork** (request
-  field, else `CGX_FORK_MAX_TOKENS`, default 512). A verdict is a
+  field, else `CGX_SHADOW_FORK_MAX_TOKENS`, default 512). A verdict is a
   sentence and a label, so a runaway twin is a bug, not a use case, and a
   non-streamed reply is one body to parse.
 - **The cap is additive on top of the captured `thinking.budget_tokens`
@@ -328,7 +328,7 @@ review" roadmap line; no part of it ships in 1.0.
   visible answer, the budget is headroom the API demands on top of it.
 - **A fork whose captured body carries thinking blocks is refused ahead
   of the request when the target model is not known to preserve them**
-  (`CGX_FORK_THINKING_GUARD`, default on). On some models the API strips
+  (`CGX_SHADOW_FORK_THINKING_GUARD`, default on). On some models the API strips
   signed thinking blocks when a non-tool-result user turn is appended,
   invalidating the message cache and rewriting the whole conversation as
   `cache_creation` -- the single most expensive thing this feature can
@@ -355,7 +355,7 @@ review" roadmap line; no part of it ships in 1.0.
   a full write; the verdict is still returned (the answer was paid for
   already) but flagged `paid_write: true` so a caller or a statusline can
   see a fork that is quietly costing real money.
-- **Forks are rate limited per session** (`CGX_FORK_MAX_PER_MIN`, default
+- **Forks are rate limited per session** (`CGX_SHADOW_FORK_MAX_PER_MIN`, default
   6; over the limit answers `ok` with reason `rate_limited`). A hook on a
   hot event can fire dozens of times a minute, and a cheap fork times
   fifty is not cheap.
@@ -364,7 +364,7 @@ review" roadmap line; no part of it ships in 1.0.
   a hook failure there would break a session that has done nothing wrong.
 - **A snapshot older than its own cache TTL is refused before any request,
   `ok` with reason `snapshot_stale`, and does not count against
-  `CGX_FORK_MAX_PER_MIN`.** The TTL is read from the snapshot's own body
+  `CGX_SHADOW_FORK_MAX_PER_MIN`.** The TTL is read from the snapshot's own body
   (`wants_1h_ttl` selects the 1h window, else 5m) rather than assumed,
   since a captured request may have asked for either. Bumping needs no
   such check because a bumped session is by definition kept warm; a fork
@@ -378,7 +378,7 @@ review" roadmap line; no part of it ships in 1.0.
   max_tokens?, model?}`, answering `200 {verdict, reason, mutation, usage,
   paid_write, model, stream_key}` — including for the `ok` degradations
   above, since a non-200 would push fail-open logic into every client.
-- **`cgx fork-review --template <name>` is the only hook-side entry
+- **`cgx shadow-fork --template <name>` is the only hook-side entry
   point.** It reads the hook JSON on stdin, renders the named template,
   calls the API and maps the verdict to the output shape of whichever
   event the payload names; it is top-level rather than a `cgx hook
@@ -386,9 +386,9 @@ review" roadmap line; no part of it ships in 1.0.
 - **Fail-open, but visible.** Every failure the hook itself hits (a
   missing template, an unreachable daemon, an API error) exits 0 with no
   decision fields, same as the engine's fail-open verdicts, but also
-  emits `{"systemMessage": "cgx fork-review skipped: <reason>"}` so a
+  emits `{"systemMessage": "cgx shadow-fork skipped: <reason>"}` so a
   broken template or a dead daemon cannot fail invisibly;
-  `CGX_FORK_REVIEW_QUIET=1` suppresses it for scripted use.
+  `CGX_SHADOW_FORK_QUIET=1` suppresses it for scripted use.
 - **The verdict-to-hook mapping is fixed per event, and the template
   picks only the intervention style.** `PreToolUse` gets
   `hookSpecificOutput.permissionDecision` (`deny` by default, `ask` or a
@@ -405,8 +405,8 @@ review" roadmap line; no part of it ships in 1.0.
   `UserPromptSubmit`, `PostToolUse`), anything else (including absent)
   falling back to undeclared exactly like an unrecognised `intervene`
   value; `matcher` a free string (e.g. `Bash`), never validated here.
-  `matcher` is informational only for `cgx fork-review` itself — it is
-  read by `cgx configure --fork-review` to place the hook entry. A
+  `matcher` is informational only for `cgx shadow-fork` itself — it is
+  read by `cgx configure --shadow-fork` to place the hook entry. A
   declared `event` that disagrees with the payload's `hook_event_name`
   is a configuration mistake, not a review outcome: the hook exits 0
   with the existing fail-open skip `systemMessage`, naming both, before
@@ -423,7 +423,7 @@ review" roadmap line; no part of it ships in 1.0.
   on a hot event like `TaskUpdate` would otherwise fire on every status
   flip and description edit, not just the ones a template has anything
   to say about — each one a full replay of the largest prompt prefix on
-  the machine, and `CGX_FORK_MAX_PER_MIN` does not help, since it drops
+  the machine, and `CGX_SHADOW_FORK_MAX_PER_MIN` does not help, since it drops
   whichever reviews land after the noise rather than the noise itself.
   A requirement that does not hold is the same "does not apply here"
   class as a `--prefix` mismatch: silent, exit 0, no fork requested,
@@ -456,7 +456,7 @@ review" roadmap line; no part of it ships in 1.0.
   of a fork's reply.** Each of these turns a stateless one-shot into a
   thing with a lifecycle, and none is needed by the four use cases that
   motivated the feature.
-- **`cgx fork-review --apply <command>` lets an `intervene` verdict act on
+- **`cgx shadow-fork --apply <command>` lets an `intervene` verdict act on
   the side rather than only through the hook's own decision fields.** The
   motivating case is a user-controlled `/rename`: the built-in session
   rename is not customisable, and doing it in-conversation costs a turn and
@@ -468,18 +468,18 @@ review" roadmap line; no part of it ships in 1.0.
   contract, bounded by the same timeout as the hook itself
   (`cli/install.py::_HOOK_TIMEOUT_S`, 5s). A non-zero exit, a timeout or a
   missing command is the existing fail-open skip -- exit 0, a `systemMessage`
-  naming it, suppressed by `CGX_FORK_REVIEW_QUIET` -- attached alongside the
+  naming it, suppressed by `CGX_SHADOW_FORK_QUIET` -- attached alongside the
   verdict's own mapped output rather than replacing it, since the template's
   `intervene:` mode still decides what the parent conversation sees. The
   packaged `rename` template (`intervene: deny`, so the prompt itself is
-  always swallowed) pairs with `cgx fork-review --template rename --prefix
+  always swallowed) pairs with `cgx shadow-fork --template rename --prefix
   /rename --apply '<user command>'` as a `UserPromptSubmit` hook.
-- **`cgx configure --fork-review NAME[:PREFIX]` wires that pairing into
+- **`cgx configure --shadow-fork NAME[:PREFIX]` wires that pairing into
   `settings.json` itself, repeatable, off unless given.** Each value
-  resolves the template the same way `cli/fork_review.py::_load_template`
+  resolves the template the same way `cli/shadow_fork.py::_load_template`
   does (user directory, then the packaged copy), reads its declared
   `event`/`matcher`, and merges one `hooks.<event>` entry running `cgx
-  fork-review --template NAME` (plus `--prefix PREFIX` when given) --
+  shadow-fork --template NAME` (plus `--prefix PREFIX` when given) --
   `merge_hook`/`remove_hook`/`hook_entry_has_command` take the event (and
   an optional `matcher`, set on the entry for `PreToolUse`/`PostToolUse`)
   instead of hard-coding `UserPromptSubmit`, so the same idempotent
@@ -492,7 +492,7 @@ review" roadmap line; no part of it ships in 1.0.
   `PlannedChange`, diffed and confirmed like every other write), since the
   point of the feature is a prompt the user is expected to edit; it is
   never overwritten once present, so an edit survives a later `configure`
-  run. `cgx unconfigure --fork-review NAME[:PREFIX]` reverses exactly the
+  run. `cgx unconfigure --shadow-fork NAME[:PREFIX]` reverses exactly the
   entry the matching `configure` call added and leaves everything else
   (including a hand-written entry at the same event) untouched; it never
   removes the copied template file, since the user may have edited it.

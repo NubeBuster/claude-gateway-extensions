@@ -79,7 +79,7 @@ def test_render_unit_carries_every_daemon_var_and_no_session_var(tmp_path: Path)
     for name in DAEMON_ENV_VARS:
         assert f"Environment={name}=1" in text
 
-    session_side = {"CGX_URL", "CGX_FORK_REVIEW_QUIET", "CGX_TEMPLATE_DIR"}
+    session_side = {"CGX_URL", "CGX_SHADOW_FORK_QUIET", "CGX_TEMPLATE_DIR"}
     assert session_side.isdisjoint(DAEMON_ENV_VARS)
     environ = {"HOME": str(tmp_path), **{name: "1" for name in session_side}}
     text = service.render_unit("/usr/local/bin/cgx", environ)

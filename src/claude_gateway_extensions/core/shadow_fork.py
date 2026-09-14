@@ -1,9 +1,9 @@
-"""Building and classifying a shadow review fork of a captured request.
+"""Building and classifying a shadow fork of a captured request.
 
 A fork replays a session's captured snapshot once with a single extra user
 turn appended, asking a reviewer model a question about the parent session
 at the cost of a cache read plus the twin's own output tokens. See the
-"Shadow review fork" section in ``docs/DESIGN.md`` for the full design.
+"Shadow Fork" section in ``docs/DESIGN.md`` for the full design.
 
 :func:`build_fork_body` turns a snapshot body plus a review prompt/payload
 into the exact request to replay. :func:`parse_verdict` turns the response
@@ -35,7 +35,7 @@ _FORK_PATH = "/v1/messages"
 #: Minimum (family, version) known to preserve signed thinking blocks when a
 #: non-tool-result user turn is appended -- measured behaviour, not a guess.
 #: Lowering an entry needs a new measurement, not a tidy-up; see the "Shadow
-#: review fork" section of docs/DESIGN.md. No Haiku model preserves them at
+#: shadow fork" section of docs/DESIGN.md. No Haiku model preserves them at
 #: any version, so ``haiku`` is deliberately absent rather than ``(0, 0)``.
 _THINKING_SAFE_MINIMUM: dict[str, tuple[int, ...]] = {
     "opus": (4, 5),
@@ -62,7 +62,7 @@ def _thinking_budget(data: Mapping[str, object]) -> int | None:
 def build_fork_body(
     body: bytes, prompt: str, payload: object, max_tokens: int, model: str | None = None
 ) -> bytes:
-    """Return ``body`` re-serialised as a one-shot review fork request.
+    """Return ``body`` re-serialised as a one-shot shadow fork request.
 
     ``model`` defaults to ``None``, which leaves the captured body's
     ``model`` field untouched -- the invariant this default exists to
@@ -240,7 +240,7 @@ def _check_thinking_safety(body: bytes, model: str | None) -> ForkVerdict | None
 
 @dataclass
 class ForkVerdict:
-    """The outcome of one shadow review fork.
+    """The outcome of one shadow fork.
 
     ``model`` and ``stream_key`` are populated once a snapshot has been
     selected and a request built for it: ``model`` is whichever model the
@@ -417,7 +417,7 @@ async def fork_once(
     thinking_guard: bool = True,
     model: str | None = None,
 ) -> ForkVerdict:
-    """Replay ``snapshot`` as a review fork against ``upstream_base`` and classify the reply.
+    """Replay ``snapshot`` as a shadow fork against ``upstream_base`` and classify the reply.
 
     ``model`` overrides the model the fork is sent to; ``None`` (the
     default) sends it to the snapshot's own model, which is the only
@@ -427,7 +427,7 @@ async def fork_once(
     WARNING with that reason. Every returned verdict carries the model
     actually used and the snapshot's ``stream_key``.
 
-    When ``thinking_guard`` is true (``CGX_FORK_THINKING_GUARD``, default
+    When ``thinking_guard`` is true (``CGX_SHADOW_FORK_THINKING_GUARD``, default
     on) and the captured snapshot carries thinking blocks, the effective
     model (the override, if any, else the snapshot's own) is checked
     against the measured thinking-preservation table before anything is

@@ -1,4 +1,4 @@
-"""Tests for claude_gateway_extensions.cli.fork_review."""
+"""Tests for claude_gateway_extensions.cli.shadow_fork."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from typing import Any
 
 import pytest
 
-from claude_gateway_extensions.cli import fork_review
+from claude_gateway_extensions.cli import shadow_fork
 from claude_gateway_extensions.cli.client import ApiError, DaemonUnreachable
 
 
@@ -62,13 +62,13 @@ def _install_client(
     result: dict[str, Any] | None = None,
     exc: Exception | None = None,
 ) -> list[dict[str, Any]]:
-    """Patch ``fork_review.ControlClient`` and return the list its ``fork()`` calls land in."""
+    """Patch ``shadow_fork.ControlClient`` and return the list its ``fork()`` calls land in."""
     calls: list[dict[str, Any]] = []
 
     def factory(base_url: str) -> _ScriptedClient:
         return _ScriptedClient(base_url, result=result, exc=exc, calls=calls)
 
-    monkeypatch.setattr(fork_review, "ControlClient", factory)
+    monkeypatch.setattr(shadow_fork, "ControlClient", factory)
     return calls
 
 
@@ -82,7 +82,7 @@ def _run(
 ) -> tuple[int, str]:
     stdin = io.StringIO(json.dumps(payload))
     stdout = io.StringIO()
-    code = fork_review.run_fork_review(
+    code = shadow_fork.run_shadow_fork(
         stdin, stdout, environ, template, prefix=prefix, model=model, apply=apply
     )
     return code, stdout.getvalue()
@@ -106,7 +106,7 @@ _OK_RESULT = {"verdict": "ok", "reason": "fine", "mutation": None}
 def test_malformed_stdin_json_is_silent() -> None:
     stdin = io.StringIO("not json")
     stdout = io.StringIO()
-    code = fork_review.run_fork_review(stdin, stdout, {}, "btw")
+    code = shadow_fork.run_shadow_fork(stdin, stdout, {}, "btw")
     assert code == 0
     assert stdout.getvalue() == ""
 
@@ -114,7 +114,7 @@ def test_malformed_stdin_json_is_silent() -> None:
 def test_non_dict_stdin_is_silent() -> None:
     stdin = io.StringIO(json.dumps([1, 2, 3]))
     stdout = io.StringIO()
-    code = fork_review.run_fork_review(stdin, stdout, {}, "btw")
+    code = shadow_fork.run_shadow_fork(stdin, stdout, {}, "btw")
     assert code == 0
     assert stdout.getvalue() == ""
 
@@ -160,7 +160,7 @@ def test_missing_template_skips_with_system_message() -> None:
     assert code == 0
     data = json.loads(out)
     assert set(data) == {"systemMessage"}
-    assert data["systemMessage"].startswith("cgx fork-review skipped")
+    assert data["systemMessage"].startswith("cgx shadow-fork skipped")
     assert "decision" not in data
     assert "hookSpecificOutput" not in data
 
@@ -169,7 +169,7 @@ def test_missing_template_skips_with_system_message() -> None:
 def test_missing_template_quiet_env_suppresses_message() -> None:
     code, out = _run(
         {"session_id": "s1", "hook_event_name": "PreToolUse"},
-        {"CGX_FORK_REVIEW_QUIET": "1"},
+        {"CGX_SHADOW_FORK_QUIET": "1"},
         "does-not-exist",
     )
     assert code == 0
@@ -188,7 +188,7 @@ def test_unreachable_daemon_skips_with_system_message(
     assert code == 0
     data = json.loads(out)
     assert set(data) == {"systemMessage"}
-    assert data["systemMessage"].startswith("cgx fork-review skipped")
+    assert data["systemMessage"].startswith("cgx shadow-fork skipped")
 
 
 @pytest.mark.invariant(decision="Fail-open, but visible")
@@ -196,7 +196,7 @@ def test_unreachable_daemon_quiet_env_suppresses_message(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     env = _write_template(tmp_path, "t", "intervene: deny\n\nreview {tool_name}\n")
-    env["CGX_FORK_REVIEW_QUIET"] = "1"
+    env["CGX_SHADOW_FORK_QUIET"] = "1"
     _install_client(monkeypatch, exc=DaemonUnreachable("cannot reach daemon at http://x"))
     code, out = _run(
         {"session_id": "s1", "hook_event_name": "PreToolUse", "tool_name": "Bash"}, env, "t"
@@ -213,7 +213,7 @@ def test_daemon_api_error_skips_with_system_message(
     code, out = _run({"session_id": "s1", "hook_event_name": "PreToolUse"}, env, "t")
     assert code == 0
     data = json.loads(out)
-    assert data["systemMessage"].startswith("cgx fork-review skipped")
+    assert data["systemMessage"].startswith("cgx shadow-fork skipped")
 
 
 # --- ok verdict is completely silent -----------------------------------------
@@ -367,7 +367,7 @@ def test_dropped_mutation_is_logged(
     env = _write_template(tmp_path, "t", "intervene: deny\n\nanswer {argument}\n")
     result = {"verdict": "intervene", "reason": "nope", "mutation": {"command": "ls"}}
     _install_client(monkeypatch, result=result)
-    with caplog.at_level("WARNING", logger="claude_gateway_extensions.cli.fork_review"):
+    with caplog.at_level("WARNING", logger="claude_gateway_extensions.cli.shadow_fork"):
         code, out = _run(
             {"session_id": "s1", "prompt": "/btw hi", "hook_event_name": "UserPromptSubmit"},
             env,
@@ -397,7 +397,7 @@ def test_absent_front_matter_defaults_to_deny(
 
 
 def test_parse_template_reads_event_and_matcher() -> None:
-    intervene, event, matcher, require, body = fork_review._parse_template(
+    intervene, event, matcher, require, body = shadow_fork._parse_template(
         "intervene: ask\nevent: PreToolUse\nmatcher: Bash\n\nreview {tool_name}\n"
     )
     assert intervene == "ask"
@@ -408,7 +408,7 @@ def test_parse_template_reads_event_and_matcher() -> None:
 
 
 def test_parse_template_ignores_unknown_key() -> None:
-    intervene, event, matcher, require, body = fork_review._parse_template(
+    intervene, event, matcher, require, body = shadow_fork._parse_template(
         "intervene: deny\nauthor: someone\n\nreview\n"
     )
     assert intervene == "deny"
@@ -419,14 +419,14 @@ def test_parse_template_ignores_unknown_key() -> None:
 
 
 def test_parse_template_invalid_event_falls_back_to_undeclared() -> None:
-    _intervene, event, _matcher, _require, _body = fork_review._parse_template(
+    _intervene, event, _matcher, _require, _body = shadow_fork._parse_template(
         "intervene: deny\nevent: NotARealEvent\n\nreview\n"
     )
     assert event is None
 
 
 def test_parse_template_no_front_matter_leaves_event_and_matcher_unset() -> None:
-    intervene, event, matcher, require, body = fork_review._parse_template(
+    intervene, event, matcher, require, body = shadow_fork._parse_template(
         "review, no header at all\n"
     )
     assert intervene == "deny"
@@ -437,7 +437,7 @@ def test_parse_template_no_front_matter_leaves_event_and_matcher_unset() -> None
 
 
 def test_parse_template_reads_require() -> None:
-    _intervene, _event, _matcher, require, _body = fork_review._parse_template(
+    _intervene, _event, _matcher, require, _body = shadow_fork._parse_template(
         "intervene: deny\nrequire: tool_input.owner\n\nreview\n"
     )
     assert require == "tool_input.owner"
@@ -456,7 +456,7 @@ def test_declared_event_mismatch_skips_with_message(
     assert code == 0
     data = json.loads(out)
     assert set(data) == {"systemMessage"}
-    assert data["systemMessage"].startswith("cgx fork-review skipped")
+    assert data["systemMessage"].startswith("cgx shadow-fork skipped")
     assert "PreToolUse" in data["systemMessage"]
     assert "UserPromptSubmit" in data["systemMessage"]
     assert calls == []
@@ -468,7 +468,7 @@ def test_declared_event_mismatch_quiet_env_suppresses_message(
     env = _write_template(
         tmp_path, "t", "intervene: deny\nevent: PreToolUse\n\nreview {tool_name}\n"
     )
-    env["CGX_FORK_REVIEW_QUIET"] = "1"
+    env["CGX_SHADOW_FORK_QUIET"] = "1"
     calls = _install_client(monkeypatch, result=_INTERVENE_RESULT)
     code, out = _run(
         {"session_id": "s1", "hook_event_name": "UserPromptSubmit", "prompt": "hi"}, env, "t"
@@ -639,7 +639,7 @@ def test_require_malformed_value_skips_with_message(
     assert code == 0
     data = json.loads(out)
     assert set(data) == {"systemMessage"}
-    assert data["systemMessage"].startswith("cgx fork-review skipped")
+    assert data["systemMessage"].startswith("cgx shadow-fork skipped")
     assert calls == []
 
 
@@ -655,7 +655,7 @@ def test_require_malformed_regex_skips_with_message(
     )
     assert code == 0
     data = json.loads(out)
-    assert data["systemMessage"].startswith("cgx fork-review skipped")
+    assert data["systemMessage"].startswith("cgx shadow-fork skipped")
     assert calls == []
 
 
@@ -765,7 +765,7 @@ def _write_apply_script(tmp_path: Path, *, exit_code: int = 0, sleep_s: float = 
     script and returns a command that runs it via ``sys.executable``, which
     both shells can invoke identically. The echoed ``APPLY-STDOUT-LEAK`` line
     lets a test assert the command's own stdout never reaches
-    ``run_fork_review``'s stdout.
+    ``run_shadow_fork``'s stdout.
     """
     script = tmp_path / "apply.py"
     stdin_capture = tmp_path / "apply-stdin.txt"
@@ -840,14 +840,14 @@ def test_apply_failing_command_skips_with_message_and_keeps_verdict(
     assert code == 0
     data = json.loads(out)
     assert data["hookSpecificOutput"]["permissionDecision"] == "deny"
-    assert data["systemMessage"].startswith("cgx fork-review skipped")
+    assert data["systemMessage"].startswith("cgx shadow-fork skipped")
     assert "APPLY-STDOUT-LEAK" not in out
 
 
 def test_apply_timeout_skips_with_message(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     env = _write_template(tmp_path, "t", "intervene: deny\n\nreview {tool_name}\n")
     _install_client(monkeypatch, result=_INTERVENE_RESULT)
-    monkeypatch.setattr(fork_review, "_APPLY_TIMEOUT_S", 0.2)
+    monkeypatch.setattr(shadow_fork, "_APPLY_TIMEOUT_S", 0.2)
     script = _write_apply_script(tmp_path, sleep_s=2.0)
     code, out = _run(
         {"session_id": "s1", "hook_event_name": "PreToolUse", "tool_name": "Bash"},
@@ -876,14 +876,14 @@ def test_apply_missing_command_skips_with_message(
     assert code == 0
     data = json.loads(out)
     assert data["hookSpecificOutput"]["permissionDecision"] == "deny"
-    assert data["systemMessage"].startswith("cgx fork-review skipped")
+    assert data["systemMessage"].startswith("cgx shadow-fork skipped")
 
 
 def test_apply_failure_message_suppressed_by_quiet_env(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     env = _write_template(tmp_path, "t", "intervene: deny\n\nreview {tool_name}\n")
-    env["CGX_FORK_REVIEW_QUIET"] = "1"
+    env["CGX_SHADOW_FORK_QUIET"] = "1"
     _install_client(monkeypatch, result=_INTERVENE_RESULT)
     script = _write_apply_script(tmp_path, exit_code=1)
     code, out = _run(

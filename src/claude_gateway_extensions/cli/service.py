@@ -102,7 +102,7 @@ def render_unit(
     sees the same daemon-side configuration the installing shell had
     (documented in the README's "Daemon Environment Variables" section) --
     never a session/hook-side ``CGX_*`` variable (``CGX_URL``,
-    ``CGX_FORK_REVIEW_QUIET``, ``CGX_TEMPLATE_DIR``, ...) that only happens
+    ``CGX_SHADOW_FORK_QUIET``, ``CGX_TEMPLATE_DIR``, ...) that only happens
     to be set in that shell and that ``cgx serve`` never reads.
     ``port``/``host``, when given, are written explicitly as
     ``CGX_PORT``/``CGX_HOST``, overriding whatever those two happened to

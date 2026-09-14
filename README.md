@@ -280,8 +280,8 @@ daemon and does not go through a settings.json variable.
 | Variable   | Default                 | What it does                                               |
 | ---------- | ----------------------- | ---------------------------------------------------------- |
 | `CGX_URL` | `http://127.0.0.1:8787` | where the hook, the CLI and the statusline find the daemon; falls back to a loopback `ANTHROPIC_BASE_URL` (which `cgx configure` sets) when unset |
-| `CGX_FORK_REVIEW_QUIET` | unset (false) | suppress `cgx fork-review`'s fail-open `systemMessage` when a review is skipped |
-| `CGX_TEMPLATE_DIR` | `${XDG_CONFIG_HOME:-~/.config}/cgx/templates` (POSIX); `%APPDATA%\cgx\templates` (Windows) | where `cgx fork-review` looks up a named template |
+| `CGX_SHADOW_FORK_QUIET` | unset (false) | suppress `cgx shadow-fork`'s fail-open `systemMessage` when a review is skipped |
+| `CGX_TEMPLATE_DIR` | `${XDG_CONFIG_HOME:-~/.config}/cgx/templates` (POSIX); `%APPDATA%\cgx\templates` (Windows) | where `cgx shadow-fork` looks up a named template |
 
 #### Claude Code Hook
 
@@ -336,15 +336,15 @@ edit claude-gateway-extensions.service`.
 | `CGX_MAX_STREAMS_PER_SESSION` | `8`                                                           | how many separate conversation branches to remember per session                            |
 | `CGX_LOG_LEVEL`               | `INFO`                                                        | how much detail the daemon logs                                                            |
 | `CGX_DRAIN_TIMEOUT_S`         | `600`                                                         | on shutdown, how long to wait for in-flight requests (incl. SSE streams) before exiting     |
-| `CGX_FORK_MAX_TOKENS`         | `512`                                                         | `max_tokens` cap for a review-fork reply, on top of any thinking budget                    |
-| `CGX_FORK_MAX_PER_MIN`        | `6`                                                            | how many review forks a single session may fire in a trailing 60s window                   |
-| `CGX_FORK_THINKING_GUARD`     | `true`                                                         | refuse a fork against a thinking snapshot on a model below its measured thinking-preservation minimum, instead of paying a full cold write |
-| `CGX_FORK_MODEL`              | unset                                                          | send review forks to this model instead of the snapshot's own; forfeits the cached prefix, since Anthropic namespaces the cache per model |
+| `CGX_SHADOW_FORK_MAX_TOKENS`         | `512`                                                         | `max_tokens` cap for a review-fork reply, on top of any thinking budget                    |
+| `CGX_SHADOW_FORK_MAX_PER_MIN`        | `6`                                                            | how many shadow forks a single session may fire in a trailing 60s window                   |
+| `CGX_SHADOW_FORK_THINKING_GUARD`     | `true`                                                         | refuse a fork against a thinking snapshot on a model below its measured thinking-preservation minimum, instead of paying a full cold write |
+| `CGX_SHADOW_FORK_MODEL`              | unset                                                          | send shadow forks to this model instead of the snapshot's own; forfeits the cached prefix, since Anthropic namespaces the cache per model |
 
-`CGX_FORK_MAX_TOKENS`, `CGX_FORK_MAX_PER_MIN`, `CGX_FORK_THINKING_GUARD`
-and `CGX_FORK_MODEL` are read once when `cgx serve` starts and frozen into
-that run's scheduler, unlike the hook-side variables below (`CGX_FORK_REVIEW_QUIET`,
-`CGX_TEMPLATE_DIR`), which `cgx fork-review` reads fresh on every hook
+`CGX_SHADOW_FORK_MAX_TOKENS`, `CGX_SHADOW_FORK_MAX_PER_MIN`, `CGX_SHADOW_FORK_THINKING_GUARD`
+and `CGX_SHADOW_FORK_MODEL` are read once when `cgx serve` starts and frozen into
+that run's scheduler, unlike the hook-side variables below (`CGX_SHADOW_FORK_QUIET`,
+`CGX_TEMPLATE_DIR`), which `cgx shadow-fork` reads fresh on every hook
 invocation; changing one of the four daemon-side vars needs a daemon
 restart to take effect.
 
@@ -396,15 +396,12 @@ curl -s -X POST "http://127.0.0.1:8787/cgx/sessions/$SESSION_ID/bump"
 
 ## Current planned `TODOs`
 
-- Rename the `fork review` feature to `Shadow Fork` throughout: the CLI
-  (`cgx fork-review` and its flags), the `CGX_FORK_*` env vars, the
-  packaged templates, and the docs that describe them.
 - Move template definitions off today's `.txt` line-based front matter
   onto Markdown agent definitions whose front matter follows the official
   [Claude Code subagent frontmatter fields](https://code.claude.com/docs/en/sub-agents#supported-frontmatter-fields).
 - Hot reload: pick up a definition's changes, and the daemon-side fork
-  configuration (`CGX_FORK_MAX_TOKENS`, `CGX_FORK_MAX_PER_MIN`,
-  `CGX_FORK_THINKING_GUARD`, `CGX_FORK_MODEL`), without a `cgx serve`
+  configuration (`CGX_SHADOW_FORK_MAX_TOKENS`, `CGX_SHADOW_FORK_MAX_PER_MIN`,
+  `CGX_SHADOW_FORK_THINKING_GUARD`, `CGX_SHADOW_FORK_MODEL`), without a `cgx serve`
   restart -- both are currently frozen at daemon start.
 - Implement support for Windows.
 

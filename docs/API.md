@@ -212,9 +212,9 @@ Status codes: `204` on success, `400` on an invalid id.
 
 ## POST /cgx/sessions/{id}/fork
 
-Run one shadow review fork now: replay the session's selected snapshot
+Run one shadow fork now: replay the session's selected snapshot
 (the same one bumping would pick) with a single review turn appended, and
-return the verdict. See `docs/DESIGN.md`'s "Shadow review fork" section
+return the verdict. See `docs/DESIGN.md`'s "Shadow Fork" section
 for the design; this section documents only the contract a client sees.
 
 Request body:
@@ -229,12 +229,12 @@ Request body:
 appended user message, followed by `payload` pretty-printed as a fenced
 JSON block. `hook_event` is optional and accepted as any JSON value, but
 the daemon does not validate it, act on it, or log it -- it exists so a
-hook-side caller (`cgx fork-review`) has a place to pass its event name
+hook-side caller (`cgx shadow-fork`) has a place to pass its event name
 through in the same body, purely for the caller's own bookkeeping.
 `payload` is optional (omit or pass `null` for none) and is opaque to the
 daemon: whatever JSON value it is gets embedded verbatim in the fork's
 appended message. `max_tokens` is an optional positive integer that caps
-this one fork's reply, overriding `CGX_FORK_MAX_TOKENS`; `0` or a negative
+this one fork's reply, overriding `CGX_SHADOW_FORK_MAX_TOKENS`; `0` or a negative
 value is rejected rather than clamped, same as `interval_s` above. The
 request actually sent upstream is this cap plus the captured snapshot's
 `thinking.budget_tokens` when extended thinking is enabled there (the API
@@ -242,7 +242,7 @@ requires `max_tokens` strictly greater than the thinking budget); the cap
 itself still bounds the reviewer's visible answer, the budget is headroom
 the API demands on top of it. `model` is an optional non-empty string
 that overrides the reviewer model for this fork only, overriding
-`CGX_FORK_MODEL`; omitted, the fork runs on the snapshot's own model,
+`CGX_SHADOW_FORK_MODEL`; omitted, the fork runs on the snapshot's own model,
 which is the only choice that can read the parent's cached prefix (the
 prompt cache is namespaced per model), so any override always forfeits
 the cache read and pays a full `cache_creation` write.
@@ -285,7 +285,7 @@ branch of its own the way `POST .../bump`'s `409` requires one:
   session id collapses into this same outcome rather than a `404`: unlike
   every other session endpoint, this one does not distinguish "session
   never seen" from "session seen but has no snapshot".
-- `rate_limited`: the session has already made `CGX_FORK_MAX_PER_MIN`
+- `rate_limited`: the session has already made `CGX_SHADOW_FORK_MAX_PER_MIN`
   forks in the trailing 60 seconds (`usage: null`, `paid_write: false`).
   No request reaches the upstream.
 - `snapshot_stale`: the selected snapshot is older than the TTL its own
@@ -293,7 +293,7 @@ branch of its own the way `POST .../bump`'s `409` requires one:
   that TTL the cached prefix is gone upstream and replaying it would pay
   for a full cache write instead of a read (`usage: null`,
   `paid_write: false`). No request reaches the upstream, and the refusal
-  does not count against `CGX_FORK_MAX_PER_MIN`. A snapshot whose body
+  does not count against `CGX_SHADOW_FORK_MAX_PER_MIN`. A snapshot whose body
   cannot be parsed is treated as stale.
 - `fork_failed`: the fork request itself failed -- a network error or a
   non-200 status from the upstream.
@@ -314,7 +314,7 @@ branch of its own the way `POST .../bump`'s `409` requires one:
   (`thinking_model_unknown`) or known not (`thinking_unsafe_model`) to
   preserve them across the appended turn, which would invalidate the
   message cache (`usage: null`, `paid_write: false`). No request reaches
-  the upstream. Set `CGX_FORK_THINKING_GUARD=false` to disable this check
+  the upstream. Set `CGX_SHADOW_FORK_THINKING_GUARD=false` to disable this check
   for a model you have measured yourself.
 
 `400` cases: `{"error": "invalid_session_id"}` for a malformed id (same

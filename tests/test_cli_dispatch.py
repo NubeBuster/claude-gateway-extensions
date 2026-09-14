@@ -669,11 +669,11 @@ def test_unconfigure_with_nothing_installed_is_no_changes(tmp_path: Path) -> Non
     assert out == "no changes\n"
 
 
-def test_configure_fork_review_flag_wires_hook_and_copies_template(tmp_path: Path) -> None:
+def test_configure_shadow_fork_flag_wires_hook_and_copies_template(tmp_path: Path) -> None:
     client = _FakeClient("http://x")
     environ = {"HOME": str(tmp_path)}
     code, _, _ = _run(
-        ["configure", "--scope", "user", "--fork-review", "btw:/btw", "--yes"],
+        ["configure", "--scope", "user", "--shadow-fork", "btw:/btw", "--yes"],
         client,
         environ=environ,
     )
@@ -681,15 +681,15 @@ def test_configure_fork_review_flag_wires_hook_and_copies_template(tmp_path: Pat
     settings_path = tmp_path / ".claude" / "settings.json"
     data = json.loads(settings_path.read_text())
     commands = {e["hooks"][0]["command"] for e in data["hooks"]["UserPromptSubmit"]}
-    assert "cgx fork-review --template btw --prefix /btw" in commands
+    assert "cgx shadow-fork --template btw --prefix /btw" in commands
     assert (tmp_path / ".config" / "cgx" / "templates" / "btw.txt").is_file()
 
 
-def test_configure_fork_review_unknown_template_fails(tmp_path: Path) -> None:
+def test_configure_shadow_fork_unknown_template_fails(tmp_path: Path) -> None:
     client = _FakeClient("http://x")
     environ = {"HOME": str(tmp_path)}
     code, _, err = _run(
-        ["configure", "--scope", "user", "--fork-review", "does-not-exist-at-all", "--yes"],
+        ["configure", "--scope", "user", "--shadow-fork", "does-not-exist-at-all", "--yes"],
         client,
         environ=environ,
     )
@@ -698,18 +698,18 @@ def test_configure_fork_review_unknown_template_fails(tmp_path: Path) -> None:
     assert not (tmp_path / ".claude" / "settings.json").exists()
 
 
-def test_unconfigure_fork_review_round_trip(tmp_path: Path) -> None:
+def test_unconfigure_shadow_fork_round_trip(tmp_path: Path) -> None:
     client = _FakeClient("http://x")
     environ = {"HOME": str(tmp_path)}
     code, _, _ = _run(
-        ["configure", "--scope", "user", "--fork-review", "btw:/btw", "--yes"],
+        ["configure", "--scope", "user", "--shadow-fork", "btw:/btw", "--yes"],
         client,
         environ=environ,
     )
     assert code == EXIT_OK
 
     code, _, _ = _run(
-        ["unconfigure", "--scope", "user", "--fork-review", "btw:/btw", "--yes"],
+        ["unconfigure", "--scope", "user", "--shadow-fork", "btw:/btw", "--yes"],
         client,
         environ=environ,
     )
@@ -718,7 +718,7 @@ def test_unconfigure_fork_review_round_trip(tmp_path: Path) -> None:
     data = json.loads(settings_path.read_text())
     entries = data.get("hooks", {}).get("UserPromptSubmit", [])
     commands = {e["hooks"][0]["command"] for e in entries}
-    assert "cgx fork-review --template btw --prefix /btw" not in commands
+    assert "cgx shadow-fork --template btw --prefix /btw" not in commands
 
 
 @pytest.mark.invariant(

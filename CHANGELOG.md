@@ -8,11 +8,11 @@
   the "logged as ignored" wording of the "mutation is honoured only where
   the hook API has a slot for it" decision in `docs/DESIGN.md`, which
   described a behavior the code never implemented.
-- Docs: documented that `CGX_FORK_MAX_TOKENS`, `CGX_FORK_MAX_PER_MIN`,
-  `CGX_FORK_THINKING_GUARD` and `CGX_FORK_MODEL` are read once at `cgx
+- Docs: documented that `CGX_SHADOW_FORK_MAX_TOKENS`, `CGX_SHADOW_FORK_MAX_PER_MIN`,
+  `CGX_SHADOW_FORK_THINKING_GUARD` and `CGX_SHADOW_FORK_MODEL` are read once at `cgx
   serve` startup and frozen into that run's scheduler, so changing one
-  needs a daemon restart -- unlike the hook-side `CGX_FORK_REVIEW_QUIET`
-  and `CGX_TEMPLATE_DIR`, which `cgx fork-review` re-reads on every
+  needs a daemon restart -- unlike the hook-side `CGX_SHADOW_FORK_QUIET`
+  and `CGX_TEMPLATE_DIR`, which `cgx shadow-fork` re-reads on every
   invocation. README's Claude Code Settings table now also lists those
   two hook-side variables with their real defaults.
 - Fix: the bump interval and `cache_expires_at` are now derived from a
@@ -62,11 +62,11 @@
   the "Rewarm" decision in `docs/DESIGN.md`.
 - Fix: `cgx service install`'s systemd unit no longer bakes in
   session/hook-side `CGX_*` variables from the installing shell (`CGX_URL`,
-  `CGX_FORK_REVIEW_QUIET`, `CGX_TEMPLATE_DIR`, ...) that `cgx serve` never
+  `CGX_SHADOW_FORK_QUIET`, `CGX_TEMPLATE_DIR`, ...) that `cgx serve` never
   reads. `render_unit` now passes through only the new
   `config.DAEMON_ENV_VARS` allow-list -- the single place every daemon-side
   `CGX_*` variable is named, kept in sync by hand with `Config.from_env`.
-- `cgx doctor` now checks every `cgx fork-review --template X` hook entry it
+- `cgx doctor` now checks every `cgx shadow-fork --template X` hook entry it
   finds in any scope's settings: a template that cannot be resolved (moved
   or deleted since `cgx configure` wired it in) is a `fail`, and a
   front-matter `event:` that disagrees with the `hooks.<event>` key the
@@ -90,7 +90,7 @@
   when the resolved daemon URL answers the session-list route with a 404
   (e.g. `ANTHROPIC_BASE_URL` pointing at some other loopback HTTP server).
   It now reports `no session list at <url> (is this the cgx daemon?)`.
-- Tests: the `--apply` tests in `tests/test_fork_review.py` now drive a
+- Tests: the `--apply` tests in `tests/test_shadow_fork.py` now drive a
   `sys.executable` inline script instead of a `#!/bin/sh` fixture, so they
   run under Windows' `cmd.exe` shell (`_run_apply` always uses
   `subprocess.run(..., shell=True)`, which is portable already; only the
@@ -105,7 +105,7 @@
   became `-qq`, which drops pytest's "N passed" summary line entirely --
   `make check` ended on a bare row of dots, forcing anyone reading the
   output to count them for the pass/fail totals it exists to report.
-- Shadow review fork: a template's front matter can now declare
+- Shadow Fork: a template's front matter can now declare
   `require:`, a comma-separated, ANDed list of conditions on the hook
   payload (`path` for "exists and is a non-empty string", `path=regex`
   for "exists and matches"), evaluated before the template is rendered
@@ -115,12 +115,12 @@
   settings `matcher` (a tool name), so a hook on a hot event like
   `TaskUpdate` fired on every status flip and description edit, not just
   the ones worth a review -- each one a full replay of the largest
-  prompt prefix on the machine, with `CGX_FORK_MAX_PER_MIN` dropping
+  prompt prefix on the machine, with `CGX_SHADOW_FORK_MAX_PER_MIN` dropping
   whichever reviews landed after the noise rather than the noise itself.
   The packaged `task-assignment` template now declares `require:
   tool_input.owner`.
-- `cgx configure`/`cgx unconfigure` gained a repeatable `--fork-review
-  NAME[:PREFIX]` flag (off unless given), wiring a `cgx fork-review
+- `cgx configure`/`cgx unconfigure` gained a repeatable `--shadow-fork
+  NAME[:PREFIX]` flag (off unless given), wiring a `cgx shadow-fork
   --template NAME` hook into `settings.json` using the named template's
   own `event`/`matcher` front matter to place it, plus `--prefix PREFIX`
   on a `UserPromptSubmit` template. `merge_hook`/`remove_hook`/
@@ -133,7 +133,7 @@
   matching `configure` call added and leaves a hand-written entry at the
   same event untouched. A template with no declared `event` is an
   `InstallError` naming it.
-- Shadow review fork: a template's front matter can now declare `event`
+- Shadow Fork: a template's front matter can now declare `event`
   and `matcher`, the hook event and Claude Code hook matcher it was
   written for. A payload's `hook_event_name` disagreeing with a declared
   `event` now exits 0 with the existing fail-open skip `systemMessage`,
@@ -142,7 +142,7 @@
   since `_map_verdict` already returned `None` for it. The three
   packaged templates (plus the new `rename`) declare their own event and
   matcher.
-- Shadow review fork: `cgx fork-review` gained `--apply <command>`, run
+- Shadow Fork: `cgx shadow-fork` gained `--apply <command>`, run
   through the shell exactly as given, with the verdict JSON
   (`{"verdict", "reason", "mutation"}`) on its stdin, only on an
   `intervene` verdict. Its own stdout is discarded, it is bounded by the
@@ -152,7 +152,7 @@
   packaged `rename` template (`intervene: deny`) pairs with it for a
   custom `/rename` that composes the label from the fork's own context
   and applies it outside the conversation being renamed.
-- Shadow review fork: a fork's snapshot selection now excludes known
+- Shadow Fork: a fork's snapshot selection now excludes known
   subagent traffic before applying the usual largest-prefix rule, falling
   back to selecting over every snapshot (flagged `subagent_snapshot:
   true` on the response) only when no snapshot is known not to be a
@@ -165,17 +165,17 @@
   selection and the verdict would be a confident answer about a
   conversation the hook never fired in. Bumping's own selection is
   unchanged.
-- Shadow review fork: the reviewer model is now stated and enforced as the
+- Shadow Fork: the reviewer model is now stated and enforced as the
   reviewed session's own model by default (an invariant test pins
   `build_fork_body` to never change it), with an opt-in override -- an
   optional `model` in the `POST /cgx/sessions/{id}/fork` request body,
-  else new `CGX_FORK_MODEL`, else `cgx fork-review --model`. An override
+  else new `CGX_SHADOW_FORK_MODEL`, else `cgx shadow-fork --model`. An override
   always forfeits the cache read (the prompt cache is namespaced per
   model) and is logged once per fork at WARNING with that reason. The
   response now reports `model` (the model actually sent to) and
   `stream_key` (the selected snapshot's) alongside the existing verdict
   fields.
-- Shadow review fork: the fork body no longer strips `tools`/`tool_choice`
+- Shadow Fork: the fork body no longer strips `tools`/`tool_choice`
   before replay -- Anthropic hashes the cache prefix over `tools`, then
   `system`, then `messages`, so dropping either key invalidated the whole
   prefix and turned every fork into a full `cache_creation` write. A twin
@@ -184,7 +184,7 @@
   never call a tool) and by `parse_verdict`, which now treats a reply
   whose `content` carries a `tool_use` block as the fail-open `ok` result
   with reason `tool_use_reply`.
-- Shadow review fork: `max_tokens` sent to the upstream now adds the
+- Shadow Fork: `max_tokens` sent to the upstream now adds the
   captured snapshot's `thinking.budget_tokens` on top of the fork cap when
   extended thinking is enabled there, since the API requires `max_tokens`
   strictly greater than the thinking budget; a thinking-enabled session
@@ -197,15 +197,15 @@
   `tests/test_cli_dispatch.py` tests exercised `cgx service` (Linux-only
   by design) without the `skipif(sys.platform == "win32")` marker every
   other `service` test in the file already carries.
-- Shadow review fork: a fork whose captured body carries thinking blocks
+- Shadow Fork: a fork whose captured body carries thinking blocks
   now refuses ahead of the request, with reason `thinking_unsafe_model` or
   `thinking_model_unknown`, when the target model is not known to preserve
   them across the appended turn -- some models strip signed thinking
   blocks on a non-tool-result user turn, which invalidates the message
   cache and pays a full `cache_creation` write of the whole conversation.
-  New `CGX_FORK_THINKING_GUARD` (default `true`) opts a session out for a
+  New `CGX_SHADOW_FORK_THINKING_GUARD` (default `true`) opts a session out for a
   user who has measured their own model.
-- Shadow review fork: the appended review turn is now `system`, not
+- Shadow Fork: the appended review turn is now `system`, not
   `user`, when the captured body's last message is itself `system` --
   the API requires an inline `system` message to precede an assistant
   turn or end the array, so a `user` turn appended behind Claude Code's
@@ -215,15 +215,15 @@
   one-line error when `.venv` is missing instead of silently falling back
   to a bare `python`/`ruff`/`pyright`/`pytest` from `PATH`. New `venv`
   target bootstraps it.
-- Shadow review fork: a fork now refuses a snapshot older than its own
+- Shadow Fork: a fork now refuses a snapshot older than its own
   cache TTL, reason `snapshot_stale`, before any request reaches the
-  upstream and without counting against `CGX_FORK_MAX_PER_MIN`. Past the
+  upstream and without counting against `CGX_SHADOW_FORK_MAX_PER_MIN`. Past the
   TTL the cached prefix is already gone upstream, so the previous
   behaviour replayed the whole conversation as a paid `cache_creation`
   write before the verdict was even read. The TTL is read from the
   snapshot's own body (`wants_1h_ttl`); an unparseable body is treated as
   stale.
-- Shadow review fork: a new side channel that asks one question about a
+- Shadow Fork: a new side channel that asks one question about a
   live session without that session learning it was asked. `POST
   /cgx/sessions/{id}/fork` replays the session's captured snapshot with a
   single review turn appended, parses a strict-JSON verdict
@@ -232,10 +232,10 @@
   twin's output tokens and never sees the exchange. Fail-open
   throughout: every degradation (`no_snapshot`, `rate_limited`,
   `unparseable_verdict`, `fork_failed`) answers `200` with `verdict:
-  "ok"`. New `CGX_FORK_MAX_TOKENS` (default 512) and
-  `CGX_FORK_MAX_PER_MIN` (default 6). A fork never touches the session's
+  "ok"`. New `CGX_SHADOW_FORK_MAX_TOKENS` (default 512) and
+  `CGX_SHADOW_FORK_MAX_PER_MIN` (default 6). A fork never touches the session's
   bump state.
-- Shadow review fork: new `cgx fork-review --template NAME`, the
+- Shadow Fork: new `cgx shadow-fork --template NAME`, the
   hook-side entry point for the above. It reads the hook JSON on stdin,
   renders a template from `CGX_TEMPLATE_DIR` (default
   `$XDG_CONFIG_HOME/cgx/templates`, falling back to the packaged copy),
@@ -244,7 +244,7 @@
   `decision: "block"` elsewhere, nothing at all for `ok`. `--prefix`
   restricts it to prompts starting with a given word. Every failure the
   hook itself hits exits 0 and emits a `systemMessage` naming the reason
-  (`CGX_FORK_REVIEW_QUIET=1` suppresses it). Packaged templates:
+  (`CGX_SHADOW_FORK_QUIET=1` suppresses it). Packaged templates:
   `task-assignment`, `permission-classifier` and `btw`.
 
 ## 1.0.0 - 2026-09-09

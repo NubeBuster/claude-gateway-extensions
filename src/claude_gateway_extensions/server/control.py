@@ -127,7 +127,7 @@ async def bump_session(request: web.Request) -> web.Response:
 
 
 async def fork_session(request: web.Request) -> web.Response:
-    """``POST /cgx/sessions/{id}/fork``: run one shadow review fork now.
+    """``POST /cgx/sessions/{id}/fork``: run one shadow fork now.
 
     Always answers ``200`` with the verdict shape, including for the
     fail-open degradations (``no_snapshot``, ``rate_limited``,
@@ -235,5 +235,5 @@ def register(app: web.Application) -> None:
     app.router.add_get("/cgx/sessions/{id}", get_session)
     app.router.add_put("/cgx/sessions/{id}", put_session)
     app.router.add_post("/cgx/sessions/{id}/bump", bump_session)
-    app.router.add_post("/cgx/sessions/{id}/fork", fork_session)
+    app.router.add_post("/cgx/sessions/{id}/shadow-fork", fork_session)
     app.router.add_delete("/cgx/sessions/{id}", delete_session)

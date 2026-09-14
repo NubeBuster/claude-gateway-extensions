@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Literal, TextIO
 from urllib.parse import urlsplit
 
-from claude_gateway_extensions.cli import fork_review, install, service
+from claude_gateway_extensions.cli import install, service, shadow_fork
 from claude_gateway_extensions.cli.client import (
     ApiError,
     ClientFactory,
@@ -176,27 +176,27 @@ def check_skill(environ: Mapping[str, str], cwd: Path) -> CheckResult:
     return CheckResult("warn", "cache skill not found; run `cgx configure`")
 
 
-#: Matches a ``cgx fork-review --template NAME ...`` hook command, the exact
-#: string :func:`~claude_gateway_extensions.cli.install.fork_review_command`
+#: Matches a ``cgx shadow-fork --template NAME ...`` hook command, the exact
+#: string :func:`~claude_gateway_extensions.cli.install.shadow_fork_command`
 #: writes; captures the template name.
-_FORK_REVIEW_COMMAND_RE = re.compile(r"^cgx fork-review --template (\S+)")
+_SHADOW_FORK_COMMAND_RE = re.compile(r"^cgx shadow-fork --template (\S+)")
 
 
-def check_fork_review_templates(environ: Mapping[str, str], cwd: Path) -> list[CheckResult]:
-    """Check that every ``cgx fork-review --template X`` hook entry resolves.
+def check_shadow_fork_templates(environ: Mapping[str, str], cwd: Path) -> list[CheckResult]:
+    """Check that every ``cgx shadow-fork --template X`` hook entry resolves.
 
     Scans ``hooks.<event>`` in every scope's settings (the same files the
-    other checks read) for a ``cgx fork-review`` command, resolves its
+    other checks read) for a ``cgx shadow-fork`` command, resolves its
     template the same way the hook does
-    (:func:`~claude_gateway_extensions.cli.fork_review.load_template_declaration`,
+    (:func:`~claude_gateway_extensions.cli.shadow_fork.load_template_declaration`,
     reused rather than re-implemented), and reports one result per entry: a
     missing/unreadable template is ``fail`` (it fails open, silently, at
     hook time -- this is the only place it is surfaced up front); a
     front-matter ``event:`` that disagrees with the ``hooks.<event>`` key
     the entry is actually wired under is ``warn`` (the hook still runs, just
-    never matches, per ``run_fork_review``'s declared-event skip); otherwise
+    never matches, per ``run_shadow_fork``'s declared-event skip); otherwise
     ``ok`` naming where it resolved from. Returns an empty list if no
-    ``--fork-review`` hook entries exist in any scope.
+    ``--shadow-fork`` hook entries exist in any scope.
     """
     results: list[CheckResult] = []
     for scope in _SCOPES:
@@ -217,19 +217,19 @@ def check_fork_review_templates(environ: Mapping[str, str], cwd: Path) -> list[C
                     command = hook.get("command")
                     if not isinstance(command, str):
                         continue
-                    match = _FORK_REVIEW_COMMAND_RE.match(command)
+                    match = _SHADOW_FORK_COMMAND_RE.match(command)
                     if match is None:
                         continue
                     name = match.group(1)
-                    where = f"fork-review template {name!r} (hooks.{event} in {settings_path})"
+                    where = f"shadow-fork template {name!r} (hooks.{event} in {settings_path})"
                     try:
-                        declared_event, _matcher = fork_review.load_template_declaration(
+                        declared_event, _matcher = shadow_fork.load_template_declaration(
                             name, environ
                         )
-                    except fork_review.TemplateError as exc:
+                    except shadow_fork.TemplateError as exc:
                         results.append(CheckResult("fail", f"{where}: {exc}"))
                         continue
-                    user_path = fork_review.user_template_path(name, environ)
+                    user_path = shadow_fork.user_template_path(name, environ)
                     location = str(user_path) if user_path.is_file() else "the packaged template"
                     if declared_event is not None and declared_event != event:
                         results.append(
@@ -339,7 +339,7 @@ def run_doctor(
         check_credentials(environ, cwd),
         service_check,
         check_state_dir(config),
-        *check_fork_review_templates(environ, cwd),
+        *check_shadow_fork_templates(environ, cwd),
     ]
     for check in checks:
         stdout.write(f"{check.status}: {check.message}\n")
@@ -348,7 +348,7 @@ def run_doctor(
 
 __all__ = [
     "CheckResult",
-    "check_fork_review_templates",
     "check_port_consistency",
+    "check_shadow_fork_templates",
     "run_doctor",
 ]

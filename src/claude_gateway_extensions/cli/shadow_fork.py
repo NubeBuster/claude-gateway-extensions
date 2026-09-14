@@ -1,6 +1,6 @@
-"""``cgx fork-review`` -- turn any Claude Code hook event into a shadow review.
+"""``cgx shadow-fork`` -- turn any Claude Code hook event into a shadow review.
 
-Per the "Shadow review fork" section in ``docs/DESIGN.md``, this is the only
+Per the "Shadow Fork" section in ``docs/DESIGN.md``, this is the only
 hook-side entry point: it reads the hook JSON on stdin, renders a named
 template into a review prompt, calls ``POST /cgx/sessions/{id}/fork`` via
 :class:`~claude_gateway_extensions.cli.client.ControlClient`, and maps the
@@ -11,8 +11,8 @@ Fail-open, but visible: a review that cannot run must never block or alter
 the session, so every failure path (missing template, unreachable daemon,
 API error, unexpected exception) exits 0 with no decision fields. It is not
 silent, though -- each failure emits a ``systemMessage`` starting with
-``"cgx fork-review skipped"`` so a broken template or a dead daemon cannot
-fail invisibly. Set ``CGX_FORK_REVIEW_QUIET=1`` to suppress that message.
+``"cgx shadow-fork skipped"`` so a broken template or a dead daemon cannot
+fail invisibly. Set ``CGX_SHADOW_FORK_QUIET=1`` to suppress that message.
 
 ``--apply <command>`` lets an ``intervene`` verdict act on the side rather
 than only speaking through the hook's own decision fields: the command runs
@@ -68,7 +68,7 @@ _FRONT_MATTER_LINE_RE = re.compile(r"^([A-Za-z][A-Za-z0-9_-]*):\s*(.*)$")
 #: needs escaping.
 _PLACEHOLDER_RE = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")
 
-#: Boolean-ish values ``CGX_FORK_REVIEW_QUIET`` accepts as true, matching
+#: Boolean-ish values ``CGX_SHADOW_FORK_QUIET`` accepts as true, matching
 #: ``config.py``'s ``_parse_bool`` set.
 _TRUE_VALUES = {"true", "1", "yes"}
 
@@ -137,7 +137,7 @@ def packaged_template_text(name: str) -> str:
     """Return the packaged example template's raw text, ignoring any user override.
 
     Raises :class:`TemplateError` if no packaged template named ``name``
-    exists. Used by ``cgx configure --fork-review`` to seed the user's
+    exists. Used by ``cgx configure --shadow-fork`` to seed the user's
     template directory with an editable copy -- never to decide what to load
     at review time, which stays :func:`_load_template`'s job.
     """
@@ -160,9 +160,9 @@ def load_template_declaration(
 ) -> tuple[str | None, str | None]:
     """Return the ``(event, matcher)`` template ``name`` declares in its front matter.
 
-    Resolves the same way :func:`run_fork_review` does (user directory
+    Resolves the same way :func:`run_shadow_fork` does (user directory
     first, then the packaged copy). Raises :class:`TemplateError` if the
-    template cannot be found or read -- ``cgx configure --fork-review``
+    template cannot be found or read -- ``cgx configure --shadow-fork``
     turns that into an ``InstallError`` naming the template.
     """
     text = _load_template(name, environ)
@@ -372,7 +372,7 @@ def _map_verdict(
     return None
 
 
-def run_fork_review(
+def run_shadow_fork(
     stdin: TextIO,
     stdout: TextIO,
     environ: Mapping[str, str],
@@ -390,11 +390,11 @@ def run_fork_review(
     hook does not apply here", not failures. Every failure past that point
     (missing template, unreachable daemon, a non-2xx API response, or any other
     exception) is fail-open: no decision fields, and a ``systemMessage``
-    (unless ``CGX_FORK_REVIEW_QUIET`` is set) naming the reason. An ``ok``
+    (unless ``CGX_SHADOW_FORK_QUIET`` is set) naming the reason. An ``ok``
     verdict from the daemon is also silent -- only ``intervene`` produces
     output, and only an ``intervene`` verdict ever runs ``apply``. ``model``
     overrides the reviewer model for this fork only, always forfeiting the
-    cache read; omitted, the daemon falls back to ``CGX_FORK_MODEL`` then the
+    cache read; omitted, the daemon falls back to ``CGX_SHADOW_FORK_MODEL`` then the
     session's own model. ``apply``, when given, is a shell command run on an
     ``intervene`` verdict with the verdict JSON (``{"verdict", "reason",
     "mutation"}``) on its stdin, for a side effect the parent session should
@@ -402,7 +402,7 @@ def run_fork_review(
     usual, so ``apply`` composes with the template's ``intervene:`` mode
     rather than replacing it. A failing, timing-out or missing ``apply``
     command never blocks the mapped output; it only adds the usual skip
-    ``systemMessage`` alongside it (suppressed by ``CGX_FORK_REVIEW_QUIET``).
+    ``systemMessage`` alongside it (suppressed by ``CGX_SHADOW_FORK_QUIET``).
     """
     raw = stdin.read()
     try:
@@ -429,8 +429,8 @@ def run_fork_review(
         argument = rest.strip()
 
     def _skip(reason: str) -> int:
-        if not _env_flag(environ, "CGX_FORK_REVIEW_QUIET"):
-            stdout.write(json.dumps({"systemMessage": f"cgx fork-review skipped: {reason}"}))
+        if not _env_flag(environ, "CGX_SHADOW_FORK_QUIET"):
+            stdout.write(json.dumps({"systemMessage": f"cgx shadow-fork skipped: {reason}"}))
             stdout.write("\n")
         return 0
 
@@ -463,7 +463,7 @@ def run_fork_review(
     client = ControlClient(config.url)
     try:
         result = client.fork(
-            session_id, rendered_prompt, hook_event, payload, config.fork_max_tokens, model
+            session_id, rendered_prompt, hook_event, payload, config.shadow_fork_max_tokens, model
         )
     except DaemonUnreachable as exc:
         return _skip(f"daemon not reachable ({exc})")
@@ -489,8 +489,8 @@ def run_fork_review(
     if apply:
         verdict_json = json.dumps({"verdict": "intervene", "reason": reason, "mutation": mutation})
         apply_skip_reason = _run_apply(apply, verdict_json)
-        if apply_skip_reason is not None and not _env_flag(environ, "CGX_FORK_REVIEW_QUIET"):
-            output = {**output, "systemMessage": f"cgx fork-review skipped: {apply_skip_reason}"}
+        if apply_skip_reason is not None and not _env_flag(environ, "CGX_SHADOW_FORK_QUIET"):
+            output = {**output, "systemMessage": f"cgx shadow-fork skipped: {apply_skip_reason}"}
 
     stdout.write(json.dumps(output))
     stdout.write("\n")
@@ -501,6 +501,6 @@ __all__ = [
     "TemplateError",
     "load_template_declaration",
     "packaged_template_text",
-    "run_fork_review",
+    "run_shadow_fork",
     "user_template_path",
 ]

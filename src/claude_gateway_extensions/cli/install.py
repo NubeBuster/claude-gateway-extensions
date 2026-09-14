@@ -4,12 +4,12 @@ Merges ``env.ANTHROPIC_BASE_URL`` and the ``UserPromptSubmit`` hook into the
 chosen ``settings.json`` and copies the ``cache`` skill. See the "Skill as
 pure fall-through" and "Environment variables only, split by process" (why
 no config file) decisions in ``docs/DESIGN.md`` "Decisions" for the
-rationale; without ``--fork-review``, the only ``settings.json`` keys ever
+rationale; without ``--shadow-fork``, the only ``settings.json`` keys ever
 written are ``env`` (``ANTHROPIC_BASE_URL``, plus ``CGX_URL`` on a
 non-default port) and ``hooks.UserPromptSubmit`` (one entry). Each
-``--fork-review NAME[:PREFIX]`` adds one more ``hooks.<event>`` entry,
+``--shadow-fork NAME[:PREFIX]`` adds one more ``hooks.<event>`` entry,
 ``<event>`` and an optional ``matcher`` read from the named template's own
-front matter (see ``cli/fork_review.py``), plus a one-time copy of that
+front matter (see ``cli/shadow_fork.py``), plus a one-time copy of that
 template into the user's template directory if not already there.
 ``statusLine`` is deliberately not touched — ``cgx statusline`` is something
 the user appends to their own command, per the README.
@@ -33,7 +33,7 @@ from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import urlsplit
 
-from claude_gateway_extensions.cli import fork_review
+from claude_gateway_extensions.cli import shadow_fork
 from claude_gateway_extensions.cli.confirm import PlannedChange
 from claude_gateway_extensions.config import resolve_home
 
@@ -283,39 +283,39 @@ def remove_hook(settings: dict[str, Any], event: str, command: str = HOOK_COMMAN
 
 
 @dataclass(frozen=True)
-class ForkReviewSpec:
-    """One parsed ``--fork-review NAME[:PREFIX]`` value."""
+class ShadowForkSpec:
+    """One parsed ``--shadow-fork NAME[:PREFIX]`` value."""
 
     name: str
     prefix: str | None
 
 
-def parse_fork_review_spec(value: str) -> ForkReviewSpec:
-    """Parse a ``--fork-review NAME[:PREFIX]`` argument value.
+def parse_shadow_fork_spec(value: str) -> ShadowForkSpec:
+    """Parse a ``--shadow-fork NAME[:PREFIX]`` argument value.
 
     Splits on the first ``:`` only, so a ``PREFIX`` may itself contain a
     colon (e.g. ``rename:/rename:``, unlikely but not worth forbidding).
     """
     name, sep, prefix = value.partition(":")
-    return ForkReviewSpec(name=name, prefix=prefix if sep else None)
+    return ShadowForkSpec(name=name, prefix=prefix if sep else None)
 
 
-def fork_review_command(spec: ForkReviewSpec) -> str:
-    """Return the exact ``cgx fork-review`` command line for ``spec``.
+def shadow_fork_command(spec: ShadowForkSpec) -> str:
+    """Return the exact ``cgx shadow-fork`` command line for ``spec``.
 
     This string is the removal marker :func:`hook_entry_has_command` and
     :func:`remove_hook` match on, so ``configure`` and ``unconfigure`` must
-    both reconstruct it identically from the same ``--fork-review`` value --
+    both reconstruct it identically from the same ``--shadow-fork`` value --
     which this one function does for both.
     """
-    command = f"cgx fork-review --template {spec.name}"
+    command = f"cgx shadow-fork --template {spec.name}"
     if spec.prefix:
         command += f" --prefix {shlex.quote(spec.prefix)}"
     return command
 
 
-def resolve_fork_review_hook(
-    spec: ForkReviewSpec, environ: Mapping[str, str]
+def resolve_shadow_fork_hook(
+    spec: ShadowForkSpec, environ: Mapping[str, str]
 ) -> tuple[str, str | None]:
     """Return the ``(event, matcher)`` declared by ``spec.name``'s template.
 
@@ -325,13 +325,13 @@ def resolve_fork_review_hook(
     guesses one.
     """
     try:
-        event, matcher = fork_review.load_template_declaration(spec.name, environ)
-    except fork_review.TemplateError as exc:
+        event, matcher = shadow_fork.load_template_declaration(spec.name, environ)
+    except shadow_fork.TemplateError as exc:
         raise InstallError(str(exc)) from exc
     if event is None:
         raise InstallError(
             f"template {spec.name!r} does not declare an `event:` front-matter "
-            "line; cgx fork-review needs to know which hook to attach it to"
+            "line; cgx shadow-fork needs to know which hook to attach it to"
         )
     return event, matcher
 
@@ -342,8 +342,8 @@ def _write_template_file(path: Path, text: str) -> None:
     path.write_text(text, encoding="utf-8")
 
 
-def copy_fork_review_templates(
-    fork_reviews: Sequence[ForkReviewSpec], environ: Mapping[str, str]
+def copy_shadow_fork_templates(
+    shadow_forks: Sequence[ShadowForkSpec], environ: Mapping[str, str]
 ) -> None:
     """Seed each spec's packaged template into the user's template directory if absent.
 
@@ -352,14 +352,14 @@ def copy_fork_review_templates(
     hand them an editable starting copy of the prompt that is now running
     on their session, not to keep it in sync with the package.
     """
-    for spec in fork_reviews:
-        user_path = fork_review.user_template_path(spec.name, environ)
+    for spec in shadow_forks:
+        user_path = shadow_fork.user_template_path(spec.name, environ)
         if user_path.is_file():
             continue
         try:
-            text = fork_review.packaged_template_text(spec.name)
-        except fork_review.TemplateError:
-            # No packaged template under this name; resolve_fork_review_hook
+            text = shadow_fork.packaged_template_text(spec.name)
+        except shadow_fork.TemplateError:
+            # No packaged template under this name; resolve_shadow_fork_hook
             # already required a user-directory template to exist for the
             # declaration to have resolved, so there is nothing to seed.
             continue
@@ -425,15 +425,15 @@ def install(
     dry_run: bool,
     environ: Mapping[str, str],
     cwd: Path,
-    fork_reviews: Sequence[ForkReviewSpec] = (),
+    shadow_forks: Sequence[ShadowForkSpec] = (),
 ) -> InstallResult:
     """Idempotently install the Claude Code integration for ``scope``.
 
     Raises :class:`InstallError` if ``env.ANTHROPIC_BASE_URL`` already points
-    elsewhere and ``force`` is ``False``, or if a ``fork_reviews`` entry
+    elsewhere and ``force`` is ``False``, or if a ``shadow_forks`` entry
     names a template that cannot be resolved or declares no ``event:``.
     With ``dry_run=True``, computes and returns the resulting settings
-    without writing anything -- ``fork_reviews`` template resolution still
+    without writing anything -- ``shadow_forks`` template resolution still
     runs, and still raises, since it is a validation step, not a write.
     """
     path = settings_path(scope, environ, cwd)
@@ -443,14 +443,14 @@ def install(
     if url != DEFAULT_URL:
         merge_cgx_url(settings, url)
     merge_hook(settings, "UserPromptSubmit")
-    for spec in fork_reviews:
-        event, matcher = resolve_fork_review_hook(spec, environ)
-        merge_hook(settings, event, fork_review_command(spec), matcher=matcher)
+    for spec in shadow_forks:
+        event, matcher = resolve_shadow_fork_hook(spec, environ)
+        merge_hook(settings, event, shadow_fork_command(spec), matcher=matcher)
     if dry_run:
         return InstallResult(path, skill_dir, settings, True)
     write_settings(path, settings)
     copy_skill(skill_dir)
-    copy_fork_review_templates(fork_reviews, environ)
+    copy_shadow_fork_templates(shadow_forks, environ)
     return InstallResult(path, skill_dir, settings, False)
 
 
@@ -461,7 +461,7 @@ def uninstall(
     environ: Mapping[str, str],
     cwd: Path,
     dry_run: bool = False,
-    fork_reviews: Sequence[ForkReviewSpec] = (),
+    shadow_forks: Sequence[ShadowForkSpec] = (),
 ) -> InstallResult:
     """Reverse exactly what :func:`install` added for ``scope``.
 
@@ -478,9 +478,9 @@ def uninstall(
     remove_base_url(settings, url)
     remove_cgx_url(settings, url)
     remove_hook(settings, "UserPromptSubmit")
-    for spec in fork_reviews:
-        event, _matcher = resolve_fork_review_hook(spec, environ)
-        remove_hook(settings, event, fork_review_command(spec))
+    for spec in shadow_forks:
+        event, _matcher = resolve_shadow_fork_hook(spec, environ)
+        remove_hook(settings, event, shadow_fork_command(spec))
     if dry_run:
         return InstallResult(path, skill_dir, settings, True)
     if path.is_file():
@@ -503,14 +503,14 @@ def plan_install(
     force: bool,
     environ: Mapping[str, str],
     cwd: Path,
-    fork_reviews: Sequence[ForkReviewSpec] = (),
+    shadow_forks: Sequence[ShadowForkSpec] = (),
 ) -> list[PlannedChange]:
     """Compute the settings.json, skill-file and template changes :func:`install` would make.
 
     Nothing is written; raises :class:`InstallError` under the same
     conditions :func:`install` would (bad JSON, a conflicting
     ``ANTHROPIC_BASE_URL`` without ``force``, a missing skill source, a
-    ``fork_reviews`` entry naming an unresolvable or event-less template).
+    ``shadow_forks`` entry naming an unresolvable or event-less template).
     The caller (``cgx configure``) shows each :class:`PlannedChange` as a
     diff and confirms it before calling its ``apply``.
     """
@@ -521,7 +521,7 @@ def plan_install(
         dry_run=True,
         environ=environ,
         cwd=cwd,
-        fork_reviews=fork_reviews,
+        shadow_forks=shadow_forks,
     )
     settings_old = preview.settings_path.read_text() if preview.settings_path.is_file() else None
     settings_new = json.dumps(preview.settings, indent=2) + "\n"
@@ -539,11 +539,11 @@ def plan_install(
     changes.append(
         PlannedChange(skill_file, skill_old, skill_new, lambda: copy_skill(preview.skill_dir))
     )
-    for spec in fork_reviews:
-        user_path = fork_review.user_template_path(spec.name, environ)
+    for spec in shadow_forks:
+        user_path = shadow_fork.user_template_path(spec.name, environ)
         if user_path.is_file():
             continue
-        text = fork_review.packaged_template_text(spec.name)
+        text = shadow_fork.packaged_template_text(spec.name)
         changes.append(
             PlannedChange(
                 user_path,
@@ -561,7 +561,7 @@ def plan_uninstall(
     url: str,
     environ: Mapping[str, str],
     cwd: Path,
-    fork_reviews: Sequence[ForkReviewSpec] = (),
+    shadow_forks: Sequence[ShadowForkSpec] = (),
 ) -> list[PlannedChange]:
     """Compute the settings.json and skill-file changes :func:`uninstall` would make.
 
@@ -571,7 +571,7 @@ def plan_uninstall(
     file is never planned for removal here either, matching :func:`uninstall`.
     """
     preview = uninstall(
-        scope=scope, url=url, environ=environ, cwd=cwd, dry_run=True, fork_reviews=fork_reviews
+        scope=scope, url=url, environ=environ, cwd=cwd, dry_run=True, shadow_forks=shadow_forks
     )
     changes: list[PlannedChange] = []
     if preview.settings_path.is_file():
@@ -602,20 +602,20 @@ __all__ = [
     "DEFAULT_PORT",
     "DEFAULT_URL",
     "HOOK_COMMAND",
-    "ForkReviewSpec",
     "InstallError",
     "InstallResult",
     "Scope",
-    "fork_review_command",
+    "ShadowForkSpec",
     "hook_entry_has_command",
     "install",
-    "parse_fork_review_spec",
+    "parse_shadow_fork_spec",
     "plan_install",
     "plan_uninstall",
-    "resolve_fork_review_hook",
     "resolve_install_port",
     "resolve_install_url",
+    "resolve_shadow_fork_hook",
     "settings_path",
+    "shadow_fork_command",
     "skills_dir",
     "uninstall",
     "write_settings",

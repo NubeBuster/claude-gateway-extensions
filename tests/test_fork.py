@@ -1,4 +1,4 @@
-"""Tests for claude_gateway_extensions.core.fork and Scheduler.fork_now."""
+"""Tests for claude_gateway_extensions.core.shadow_fork and Scheduler.fork_now."""
 
 from __future__ import annotations
 
@@ -10,14 +10,14 @@ import pytest
 
 from claude_gateway_extensions.config import Config
 from claude_gateway_extensions.core.clock import FakeClock
-from claude_gateway_extensions.core.fork import (
+from claude_gateway_extensions.core.scheduler import Scheduler
+from claude_gateway_extensions.core.selector import LargestPrefixSelector
+from claude_gateway_extensions.core.shadow_fork import (
     ForkVerdict,
     build_fork_body,
     fork_once,
     parse_verdict,
 )
-from claude_gateway_extensions.core.scheduler import Scheduler
-from claude_gateway_extensions.core.selector import LargestPrefixSelector
 from claude_gateway_extensions.core.snapshot import SessionState, Snapshot, Usage
 from claude_gateway_extensions.core.store import MemoryStore
 from claude_gateway_extensions.core.upstream import UpstreamResponse
@@ -143,10 +143,10 @@ def _config(tmp_path: Path, **overrides: object) -> Config:
         "log_level": "INFO",
         "url": "http://127.0.0.1:8787",
         "drain_timeout_s": 600,
-        "fork_max_tokens": 512,
-        "fork_max_per_min": 6,
-        "fork_thinking_guard": True,
-        "fork_model": None,
+        "shadow_fork_max_tokens": 512,
+        "shadow_fork_max_per_min": 6,
+        "shadow_fork_thinking_guard": True,
+        "shadow_fork_model": None,
     }
     fields.update(overrides)
     return Config(**fields)  # type: ignore[arg-type]
@@ -539,7 +539,11 @@ async def test_fork_now_rate_limits_then_recovers_after_a_minute(tmp_path: Path)
         ]
     )
     scheduler = Scheduler(
-        _config(tmp_path, fork_max_per_min=2), store, LargestPrefixSelector(), upstream, clock
+        _config(tmp_path, shadow_fork_max_per_min=2),
+        store,
+        LargestPrefixSelector(),
+        upstream,
+        clock,
     )
 
     first = await scheduler.fork_now("sess-1", "review", {}, None)
@@ -667,7 +671,11 @@ async def test_fork_now_refused_stale_leaves_rate_limit_window_untouched(tmp_pat
     )
     upstream = ScriptedUpstream([_verdict_response({"verdict": "ok", "reason": "fine"})])
     scheduler = Scheduler(
-        _config(tmp_path, fork_max_per_min=1), store, LargestPrefixSelector(), upstream, clock
+        _config(tmp_path, shadow_fork_max_per_min=1),
+        store,
+        LargestPrefixSelector(),
+        upstream,
+        clock,
     )
 
     clock.advance(301.0)
@@ -751,7 +759,7 @@ async def test_fork_now_config_default_model_applies_when_no_request_override(
     )
     upstream = ScriptedUpstream([_verdict_response({"verdict": "ok", "reason": "fine"})])
     scheduler = Scheduler(
-        _config(tmp_path, fork_model="claude-daemon-default"),
+        _config(tmp_path, shadow_fork_model="claude-daemon-default"),
         store,
         LargestPrefixSelector(),
         upstream,

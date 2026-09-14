@@ -34,8 +34,8 @@ from claude_gateway_extensions.cli.client import (
     DaemonUnreachable,
 )
 from claude_gateway_extensions.cli.doctor import check_daemon, run_doctor
-from claude_gateway_extensions.cli.fork_review import run_fork_review
 from claude_gateway_extensions.cli.hook import run_user_prompt_submit
+from claude_gateway_extensions.cli.shadow_fork import run_shadow_fork
 from claude_gateway_extensions.cli.statusline import run_statusline
 from claude_gateway_extensions.cli.when import At, WhenError, local_now, parse_when
 from claude_gateway_extensions.config import Config, ConfigError
@@ -263,11 +263,11 @@ def _cmd_hook(args: argparse.Namespace, config: Config, ctx: _Context) -> int:
     return EXIT_USAGE
 
 
-def _cmd_fork_review(args: argparse.Namespace, config: Config, ctx: _Context) -> int:
-    """Run a shadow review fork against a hook event and print the mapped verdict.
+def _cmd_shadow_fork(args: argparse.Namespace, config: Config, ctx: _Context) -> int:
+    """Run a shadow fork against a hook event and print the mapped verdict.
 
     ``--session``, when given, overrides the hook payload's ``session_id``
-    rather than being threaded through :func:`run_fork_review` as a separate
+    rather than being threaded through :func:`run_shadow_fork` as a separate
     parameter -- mainly useful for invoking this by hand outside a real
     hook, e.g. to try a template against a live session.
     """
@@ -283,7 +283,7 @@ def _cmd_fork_review(args: argparse.Namespace, config: Config, ctx: _Context) ->
             payload["session_id"] = args.session
             raw = json.dumps(payload)
         stdin = io.StringIO(raw)
-    return run_fork_review(
+    return run_shadow_fork(
         stdin,
         ctx.stdout,
         ctx.environ,
@@ -327,7 +327,7 @@ def _cmd_configure(args: argparse.Namespace, config: Config, ctx: _Context) -> i
         return EXIT_USAGE
     installed_port = service.installed_port(ctx.environ)
     url = install.resolve_install_url(args.port, ctx.environ, installed_port)
-    fork_reviews = [install.parse_fork_review_spec(v) for v in (args.fork_review or [])]
+    shadow_forks = [install.parse_shadow_fork_spec(v) for v in (args.shadow_fork or [])]
     try:
         changes = install.plan_install(
             scope=args.scope,
@@ -335,7 +335,7 @@ def _cmd_configure(args: argparse.Namespace, config: Config, ctx: _Context) -> i
             force=args.force,
             environ=ctx.environ,
             cwd=ctx.cwd,
-            fork_reviews=fork_reviews,
+            shadow_forks=shadow_forks,
         )
     except install.InstallError as exc:
         ctx.stderr.write(f"{exc}\n")
@@ -357,14 +357,14 @@ def _cmd_unconfigure(args: argparse.Namespace, config: Config, ctx: _Context) ->
     if args.service:
         ctx.stderr.write(_SERVICE_FLAG_REMOVED.format(cmd="unconfigure", service_cmd="uninstall"))
         return EXIT_USAGE
-    fork_reviews = [install.parse_fork_review_spec(v) for v in (args.fork_review or [])]
+    shadow_forks = [install.parse_shadow_fork_spec(v) for v in (args.shadow_fork or [])]
     try:
         changes = install.plan_uninstall(
             scope=args.scope,
             url=config.url,
             environ=ctx.environ,
             cwd=ctx.cwd,
-            fork_reviews=fork_reviews,
+            shadow_forks=shadow_forks,
         )
     except install.InstallError as exc:
         ctx.stderr.write(f"{exc}\n")
@@ -555,31 +555,31 @@ def _build_parser() -> argparse.ArgumentParser:
     hook_parser = subparsers.add_parser("hook", help="Claude Code hook entry points")
     hook_parser.add_argument("hook_command", choices=["user-prompt-submit"])
 
-    fork_review_parser = subparsers.add_parser(
-        "fork-review",
+    shadow_fork_parser = subparsers.add_parser(
+        "shadow-fork",
         help="review a hook event via a shadow fork and map its verdict to the hook's output",
     )
-    fork_review_parser.add_argument(
+    shadow_fork_parser.add_argument(
         "--template", required=True, help="template name to render (user dir, then packaged)"
     )
-    fork_review_parser.add_argument(
+    shadow_fork_parser.add_argument(
         "--prefix",
         default=None,
         help="only act when the payload's prompt starts with this text (e.g. /btw)",
     )
-    fork_review_parser.add_argument(
+    shadow_fork_parser.add_argument(
         "--session", default=None, help="override the hook payload's session_id"
     )
-    fork_review_parser.add_argument(
+    shadow_fork_parser.add_argument(
         "--model",
         default=None,
         help=(
             "override the reviewer model for this fork only (default: "
-            "CGX_FORK_MODEL, else the session's own model); an override "
+            "CGX_SHADOW_FORK_MODEL, else the session's own model); an override "
             "always forfeits the cache read"
         ),
     )
-    fork_review_parser.add_argument(
+    shadow_fork_parser.add_argument(
         "--apply",
         default=None,
         help=(
@@ -619,13 +619,13 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     configure_parser.add_argument("--service", action="store_true", help=argparse.SUPPRESS)
     configure_parser.add_argument(
-        "--fork-review",
+        "--shadow-fork",
         action="append",
-        dest="fork_review",
+        dest="shadow_fork",
         metavar="NAME[:PREFIX]",
         default=None,
         help=(
-            "wire a `cgx fork-review --template NAME` hook, using the "
+            "wire a `cgx shadow-fork --template NAME` hook, using the "
             "template's own `event`/`matcher` front matter to place it; "
             "repeatable. PREFIX restricts a UserPromptSubmit template to "
             "prompts starting with it, e.g. `btw:/btw`"
@@ -642,12 +642,12 @@ def _build_parser() -> argparse.ArgumentParser:
     unconfigure_parser.add_argument("--yes", "-y", action="store_true", help=_YES_HELP)
     unconfigure_parser.add_argument("--service", action="store_true", help=argparse.SUPPRESS)
     unconfigure_parser.add_argument(
-        "--fork-review",
+        "--shadow-fork",
         action="append",
-        dest="fork_review",
+        dest="shadow_fork",
         metavar="NAME[:PREFIX]",
         default=None,
-        help="remove exactly the hook entry the matching `configure --fork-review` added",
+        help="remove exactly the hook entry the matching `configure --shadow-fork` added",
     )
 
     subparsers.add_parser("doctor", help="check the environment")
@@ -684,7 +684,7 @@ _HANDLERS: dict[str, Callable[[argparse.Namespace, Config, _Context], int]] = {
     "now": _cmd_now,
     "forget": _cmd_forget,
     "hook": _cmd_hook,
-    "fork-review": _cmd_fork_review,
+    "shadow-fork": _cmd_shadow_fork,
     "statusline": _cmd_statusline,
     "configure": _cmd_configure,
     "unconfigure": _cmd_unconfigure,

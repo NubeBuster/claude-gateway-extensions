@@ -20,8 +20,8 @@ import dataclasses
 from claude_gateway_extensions.config import Config
 from claude_gateway_extensions.core.bump import BumpResult, bump_once
 from claude_gateway_extensions.core.clock import Clock
-from claude_gateway_extensions.core.fork import ForkVerdict, fork_once
 from claude_gateway_extensions.core.selector import TargetSelector
+from claude_gateway_extensions.core.shadow_fork import ForkVerdict, fork_once
 from claude_gateway_extensions.core.snapshot import (
     CACHE_TTL_1H_S,
     CACHE_TTL_5M_S,
@@ -224,7 +224,7 @@ class Scheduler:
         max_tokens: int | None = None,
         model: str | None = None,
     ) -> ForkVerdict:
-        """Replay the session's selected snapshot once as a shadow review fork.
+        """Replay the session's selected snapshot once as a shadow fork.
 
         Unlike bumping, selection here prefers a snapshot known *not* to be
         subagent traffic (``is_subagent is False``): the selector runs over
@@ -238,7 +238,7 @@ class Scheduler:
         the main conversation.
 
         ``model`` overrides the reviewer model for this fork only, else
-        falling back to ``CGX_FORK_MODEL`` (the daemon-wide default), else
+        falling back to ``CGX_SHADOW_FORK_MODEL`` (the daemon-wide default), else
         the snapshot's own model -- the only choice that reads the
         parent's cached prefix. Never raises and never touches bump
         bookkeeping: it does not set ``last_bump_at``, does not increment
@@ -269,8 +269,8 @@ class Scheduler:
             )
         self._record_fork(session_id)
         credential = state.last_credential if state is not None else None
-        cap = max_tokens if max_tokens is not None else self._config.fork_max_tokens
-        model_override = model if model is not None else self._config.fork_model
+        cap = max_tokens if max_tokens is not None else self._config.shadow_fork_max_tokens
+        model_override = model if model is not None else self._config.shadow_fork_model
         result = await fork_once(
             self._upstream,
             self._config.upstream,
@@ -279,7 +279,7 @@ class Scheduler:
             prompt,
             payload,
             cap,
-            self._config.fork_thinking_guard,
+            self._config.shadow_fork_thinking_guard,
             model_override,
         )
         if subagent_snapshot:
@@ -303,7 +303,7 @@ class Scheduler:
         window_start = self._clock.now() - 60.0
         times = [t for t in self._fork_times.get(session_id, []) if t >= window_start]
         self._fork_times[session_id] = times
-        return len(times) >= self._config.fork_max_per_min
+        return len(times) >= self._config.shadow_fork_max_per_min
 
     def _record_fork(self, session_id: str) -> None:
         """Record a fork attempt for ``session_id`` at the current time."""

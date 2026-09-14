@@ -224,13 +224,13 @@ def test_port_consistency_ignores_daemon_port_when_unreachable(tmp_path: Path) -
     assert check.status == "ok"
 
 
-def test_fork_review_check_reports_resolving_template(tmp_path: Path) -> None:
+def test_shadow_fork_check_reports_resolving_template(tmp_path: Path) -> None:
     home = tmp_path / "home"
     cwd = tmp_path / "work"
     home.mkdir()
     cwd.mkdir()
     environ = {"HOME": str(home)}
-    spec = install.ForkReviewSpec(name="btw", prefix="/btw")
+    spec = install.ShadowForkSpec(name="btw", prefix="/btw")
     install.install(
         scope="user",
         url=URL,
@@ -238,15 +238,15 @@ def test_fork_review_check_reports_resolving_template(tmp_path: Path) -> None:
         dry_run=False,
         environ=environ,
         cwd=cwd,
-        fork_reviews=[spec],
+        shadow_forks=[spec],
     )
-    results = doctor.check_fork_review_templates(environ, cwd)
+    results = doctor.check_shadow_fork_templates(environ, cwd)
     assert len(results) == 1
     assert results[0].status == "ok"
     assert "'btw'" in results[0].message
 
 
-def test_fork_review_check_fails_on_missing_template(tmp_path: Path) -> None:
+def test_shadow_fork_check_fails_on_missing_template(tmp_path: Path) -> None:
     home = tmp_path / "home"
     cwd = tmp_path / "work"
     cwd.mkdir()
@@ -262,7 +262,7 @@ def test_fork_review_check_fails_on_missing_template(tmp_path: Path) -> None:
                             "hooks": [
                                 {
                                     "type": "command",
-                                    "command": "cgx fork-review --template ghost",
+                                    "command": "cgx shadow-fork --template ghost",
                                 }
                             ]
                         }
@@ -271,14 +271,14 @@ def test_fork_review_check_fails_on_missing_template(tmp_path: Path) -> None:
             }
         )
     )
-    results = doctor.check_fork_review_templates(environ, cwd)
+    results = doctor.check_shadow_fork_templates(environ, cwd)
     assert len(results) == 1
     assert results[0].status == "fail"
     assert "ghost" in results[0].message
     assert "template not found" in results[0].message
 
 
-def test_fork_review_check_warns_on_event_mismatch(tmp_path: Path) -> None:
+def test_shadow_fork_check_warns_on_event_mismatch(tmp_path: Path) -> None:
     home = tmp_path / "home"
     cwd = tmp_path / "work"
     cwd.mkdir()
@@ -301,7 +301,7 @@ def test_fork_review_check_warns_on_event_mismatch(tmp_path: Path) -> None:
                             "hooks": [
                                 {
                                     "type": "command",
-                                    "command": "cgx fork-review --template moved",
+                                    "command": "cgx shadow-fork --template moved",
                                 }
                             ]
                         }
@@ -310,21 +310,21 @@ def test_fork_review_check_warns_on_event_mismatch(tmp_path: Path) -> None:
             }
         )
     )
-    results = doctor.check_fork_review_templates(environ, cwd)
+    results = doctor.check_shadow_fork_templates(environ, cwd)
     assert len(results) == 1
     assert results[0].status == "warn"
     assert "PreToolUse" in results[0].message
     assert "UserPromptSubmit" in results[0].message
 
 
-def test_fork_review_check_empty_when_no_entries(tmp_path: Path) -> None:
+def test_shadow_fork_check_empty_when_no_entries(tmp_path: Path) -> None:
     home = tmp_path / "home"
     cwd = tmp_path / "work"
     home.mkdir()
     cwd.mkdir()
     environ = {"HOME": str(home)}
     install.install(scope="user", url=URL, force=False, dry_run=False, environ=environ, cwd=cwd)
-    assert doctor.check_fork_review_templates(environ, cwd) == []
+    assert doctor.check_shadow_fork_templates(environ, cwd) == []
 
 
 def test_state_dir_wrong_mode_is_a_warning(tmp_path: Path) -> None:

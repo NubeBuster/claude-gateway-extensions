@@ -147,7 +147,8 @@ FORK_KEYS = {
 
 async def test_fork_invalid_session_id_rejected(harness: ServerHarness) -> None:
     resp = await harness.client.post(
-        "/cgx/sessions/bad*id/fork", json={"prompt": "review", "hook_event": "x", "payload": {}}
+        "/cgx/sessions/bad*id/shadow-fork",
+        json={"prompt": "review", "hook_event": "x", "payload": {}},
     )
     assert resp.status == 400
     assert (await resp.json())["error"] == "invalid_session_id"
@@ -155,7 +156,7 @@ async def test_fork_invalid_session_id_rejected(harness: ServerHarness) -> None:
 
 async def test_fork_missing_prompt_rejected(harness: ServerHarness) -> None:
     resp = await harness.client.post(
-        "/cgx/sessions/sess-f/fork", json={"hook_event": "x", "payload": {}}
+        "/cgx/sessions/sess-f/shadow-fork", json={"hook_event": "x", "payload": {}}
     )
     assert resp.status == 400
     assert (await resp.json())["error"] == "invalid_body"
@@ -163,7 +164,7 @@ async def test_fork_missing_prompt_rejected(harness: ServerHarness) -> None:
 
 async def test_fork_non_str_prompt_rejected(harness: ServerHarness) -> None:
     resp = await harness.client.post(
-        "/cgx/sessions/sess-f/fork", json={"prompt": 5, "hook_event": "x", "payload": {}}
+        "/cgx/sessions/sess-f/shadow-fork", json={"prompt": 5, "hook_event": "x", "payload": {}}
     )
     assert resp.status == 400
     assert (await resp.json())["error"] == "invalid_body"
@@ -171,7 +172,7 @@ async def test_fork_non_str_prompt_rejected(harness: ServerHarness) -> None:
 
 async def test_fork_non_positive_max_tokens_rejected(harness: ServerHarness) -> None:
     resp = await harness.client.post(
-        "/cgx/sessions/sess-f/fork",
+        "/cgx/sessions/sess-f/shadow-fork",
         json={"prompt": "review", "hook_event": "x", "payload": {}, "max_tokens": 0},
     )
     assert resp.status == 400
@@ -180,7 +181,7 @@ async def test_fork_non_positive_max_tokens_rejected(harness: ServerHarness) -> 
 
 async def test_fork_empty_string_model_rejected(harness: ServerHarness) -> None:
     resp = await harness.client.post(
-        "/cgx/sessions/sess-f/fork",
+        "/cgx/sessions/sess-f/shadow-fork",
         json={"prompt": "review", "hook_event": "x", "payload": {}, "model": ""},
     )
     assert resp.status == 400
@@ -189,7 +190,7 @@ async def test_fork_empty_string_model_rejected(harness: ServerHarness) -> None:
 
 async def test_fork_non_str_model_rejected(harness: ServerHarness) -> None:
     resp = await harness.client.post(
-        "/cgx/sessions/sess-f/fork",
+        "/cgx/sessions/sess-f/shadow-fork",
         json={"prompt": "review", "hook_event": "x", "payload": {}, "model": 5},
     )
     assert resp.status == 400
@@ -198,7 +199,7 @@ async def test_fork_non_str_model_rejected(harness: ServerHarness) -> None:
 
 async def test_fork_without_snapshot_is_200_ok_no_snapshot(harness: ServerHarness) -> None:
     resp = await harness.client.post(
-        "/cgx/sessions/sess-empty2/fork",
+        "/cgx/sessions/sess-empty2/shadow-fork",
         json={"prompt": "review", "hook_event": "x", "payload": {}},
     )
     assert resp.status == 200
@@ -253,7 +254,7 @@ async def test_fork_returns_the_verdict_shape(harness: ServerHarness) -> None:
 
     harness.fake.script(fork_handler)
     resp = await harness.client.post(
-        "/cgx/sessions/sess-fork/fork",
+        "/cgx/sessions/sess-fork/shadow-fork",
         json={"prompt": "review this", "hook_event": "PreToolUse", "payload": {"tool": "Bash"}},
     )
     assert resp.status == 200

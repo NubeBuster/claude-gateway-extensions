@@ -33,7 +33,7 @@ DEFAULT_DRAIN_TIMEOUT_S = 600
 #: ``docs/DESIGN.md``. The single source ``cli/service.py``'s
 #: ``render_unit`` filters against, so a systemd unit only ever gets
 #: variables ``cgx serve`` actually reads, never session/hook-side ones
-#: (``CGX_URL``, ``CGX_FORK_REVIEW_QUIET``, ``CGX_TEMPLATE_DIR``, ...) that
+#: (``CGX_URL``, ``CGX_SHADOW_FORK_QUIET``, ``CGX_TEMPLATE_DIR``, ...) that
 #: happened to be set in the installing shell. Keep in sync with
 #: :meth:`Config.from_env` by hand -- there is no dataclass-field
 #: introspection here, since a field's name does not mechanically produce
@@ -52,10 +52,10 @@ DAEMON_ENV_VARS: tuple[str, ...] = (
     "CGX_MAX_STREAMS_PER_SESSION",
     "CGX_LOG_LEVEL",
     "CGX_DRAIN_TIMEOUT_S",
-    "CGX_FORK_MAX_TOKENS",
-    "CGX_FORK_MAX_PER_MIN",
-    "CGX_FORK_THINKING_GUARD",
-    "CGX_FORK_MODEL",
+    "CGX_SHADOW_FORK_MAX_TOKENS",
+    "CGX_SHADOW_FORK_MAX_PER_MIN",
+    "CGX_SHADOW_FORK_THINKING_GUARD",
+    "CGX_SHADOW_FORK_MODEL",
 )
 
 
@@ -200,10 +200,10 @@ class Config:
     log_level: str
     url: str
     drain_timeout_s: int
-    fork_max_tokens: int
-    fork_max_per_min: int
-    fork_thinking_guard: bool
-    fork_model: str | None
+    shadow_fork_max_tokens: int
+    shadow_fork_max_per_min: int
+    shadow_fork_thinking_guard: bool
+    shadow_fork_model: str | None
 
     @classmethod
     def from_env(cls, environ: Mapping[str, str] | None = None) -> Config:
@@ -238,12 +238,16 @@ class Config:
             "CGX_DRAIN_TIMEOUT_S",
             env.get("CGX_DRAIN_TIMEOUT_S", str(DEFAULT_DRAIN_TIMEOUT_S)),
         )
-        fork_max_tokens = _parse_int("CGX_FORK_MAX_TOKENS", env.get("CGX_FORK_MAX_TOKENS", "512"))
-        fork_max_per_min = _parse_int("CGX_FORK_MAX_PER_MIN", env.get("CGX_FORK_MAX_PER_MIN", "6"))
-        fork_thinking_guard = _parse_bool(
-            "CGX_FORK_THINKING_GUARD", env.get("CGX_FORK_THINKING_GUARD", "true")
+        shadow_fork_max_tokens = _parse_int(
+            "CGX_SHADOW_FORK_MAX_TOKENS", env.get("CGX_SHADOW_FORK_MAX_TOKENS", "512")
         )
-        fork_model = env.get("CGX_FORK_MODEL") or None
+        shadow_fork_max_per_min = _parse_int(
+            "CGX_SHADOW_FORK_MAX_PER_MIN", env.get("CGX_SHADOW_FORK_MAX_PER_MIN", "6")
+        )
+        shadow_fork_thinking_guard = _parse_bool(
+            "CGX_SHADOW_FORK_THINKING_GUARD", env.get("CGX_SHADOW_FORK_THINKING_GUARD", "true")
+        )
+        shadow_fork_model = env.get("CGX_SHADOW_FORK_MODEL") or None
 
         return cls(
             host=host,
@@ -260,10 +264,10 @@ class Config:
             log_level=log_level,
             url=url,
             drain_timeout_s=drain_timeout_s,
-            fork_max_tokens=fork_max_tokens,
-            fork_max_per_min=fork_max_per_min,
-            fork_thinking_guard=fork_thinking_guard,
-            fork_model=fork_model,
+            shadow_fork_max_tokens=shadow_fork_max_tokens,
+            shadow_fork_max_per_min=shadow_fork_max_per_min,
+            shadow_fork_thinking_guard=shadow_fork_thinking_guard,
+            shadow_fork_model=shadow_fork_model,
         )
 
     def is_local_host(self) -> bool:
