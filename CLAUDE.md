@@ -16,7 +16,7 @@ everything under "Roadmap" is designed into that file before code is written.
   the user's explicit choice and logs a warning, it is never refused.
 - `configure`/`unconfigure` write only `env.ANTHROPIC_BASE_URL`,
   `env.CGX_URL` (non-default port only), `hooks.UserPromptSubmit`, one
-  `hooks.<event>` per `--fork-review NAME[:PREFIX]` (event and matcher from
+  `hooks.<event>` per `--shadow-fork NAME[:PREFIX]` (event and matcher from
   the template), and the skill and template copies. `managed` is not a scope.
 - `configure`, `unconfigure` and `service install`/`uninstall` show a diff of
   every file they would write and apply it only on consent; `--yes` is the
