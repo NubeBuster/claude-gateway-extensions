@@ -360,6 +360,28 @@ def test_mutation_is_dropped_at_userpromptsubmit(
     assert "mutation" not in data
 
 
+@pytest.mark.invariant(decision="mutation is honoured only where the hook API has a slot for it")
+def test_dropped_mutation_is_logged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    env = _write_template(tmp_path, "t", "intervene: deny\n\nanswer {argument}\n")
+    result = {"verdict": "intervene", "reason": "nope", "mutation": {"command": "ls"}}
+    _install_client(monkeypatch, result=result)
+    with caplog.at_level("WARNING", logger="claude_gateway_extensions.cli.fork_review"):
+        code, out = _run(
+            {"session_id": "s1", "prompt": "/btw hi", "hook_event_name": "UserPromptSubmit"},
+            env,
+            "t",
+            prefix="/btw",
+        )
+    assert code == 0
+    assert json.loads(out) == {"decision": "block", "reason": "nope"}
+    assert any(
+        "mutation" in record.getMessage() and "UserPromptSubmit" in record.getMessage()
+        for record in caplog.records
+    )
+
+
 # --- front-matter parsing -----------------------------------------------------
 
 

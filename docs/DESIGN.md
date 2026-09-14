@@ -104,7 +104,12 @@ deliberately absent from this release, not ruled out for the project.
   user/project/local scoping comes for free. `settings.json` rejects unknown
   top-level keys and a parallel file ladder would duplicate Claude Code's.
   `managed` is deliberately not offered as a scope: it is root-owned and
-  machine-wide, while the daemon it would point at is per user.
+  machine-wide, while the daemon it would point at is per user. Daemon
+  settings are read once at `cgx serve` startup and frozen for that run
+  (e.g. the fork scheduler's `CGX_FORK_MAX_TOKENS`, `CGX_FORK_MAX_PER_MIN`,
+  `CGX_FORK_THINKING_GUARD`, `CGX_FORK_MODEL`), so changing one needs a
+  daemon restart; hook-side variables have no such lag since the hook and
+  CLI re-read the environment on every invocation.
 - **Every file a user owns is diffed and confirmed before it is written.**
   `cgx configure`, `unconfigure` and `cgx service install`/`uninstall`
   compute their changes first and show each one as a colored unified diff,

@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- Fix: `_map_verdict` now logs a WARNING (never the mutation body) when an
+  `intervene` verdict on `UserPromptSubmit` or `PostToolUse` carries a
+  non-null `mutation` -- previously it was silently dropped, contradicting
+  the "logged as ignored" wording of the "mutation is honoured only where
+  the hook API has a slot for it" decision in `docs/DESIGN.md`, which
+  described a behavior the code never implemented.
+- Docs: documented that `CGX_FORK_MAX_TOKENS`, `CGX_FORK_MAX_PER_MIN`,
+  `CGX_FORK_THINKING_GUARD` and `CGX_FORK_MODEL` are read once at `cgx
+  serve` startup and frozen into that run's scheduler, so changing one
+  needs a daemon restart -- unlike the hook-side `CGX_FORK_REVIEW_QUIET`
+  and `CGX_TEMPLATE_DIR`, which `cgx fork-review` re-reads on every
+  invocation. README's Claude Code Settings table now also lists those
+  two hook-side variables with their real defaults.
 - Fix: the bump interval and `cache_expires_at` are now derived from a
   snapshot's *shortest* `cache_control` breakpoint TTL, not "any 1h
   breakpoint present". A body can mix `1h` and `5m` breakpoints (`1h` ones

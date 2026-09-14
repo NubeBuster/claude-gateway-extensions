@@ -39,6 +39,7 @@ visible ``systemMessage`` instead.
 from __future__ import annotations
 
 import json
+import logging
 import re
 import subprocess
 from collections.abc import Mapping
@@ -48,6 +49,8 @@ from typing import Any, TextIO
 
 from claude_gateway_extensions.cli.client import ApiError, ControlClient, DaemonUnreachable
 from claude_gateway_extensions.config import Config, resolve_home
+
+logger = logging.getLogger(__name__)
 
 #: Matches ``cli/install.py::_HOOK_TIMEOUT_S`` -- an ``--apply`` command runs
 #: inside the same hook invocation, so it gets the same budget.
@@ -363,6 +366,8 @@ def _map_verdict(
     if hook_event == "PreToolUse":
         return _pretooluse_output(intervene_mode, reason, mutation)
     if hook_event in _DECISION_BLOCK_EVENTS:
+        if mutation is not None:
+            logger.warning("fork mutation ignored: reason=no_slot event=%s", hook_event)
         return {"decision": "block", "reason": reason}
     return None
 

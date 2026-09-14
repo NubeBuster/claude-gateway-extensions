@@ -280,6 +280,8 @@ daemon and does not go through a settings.json variable.
 | Variable   | Default                 | What it does                                               |
 | ---------- | ----------------------- | ---------------------------------------------------------- |
 | `CGX_URL` | `http://127.0.0.1:8787` | where the hook, the CLI and the statusline find the daemon; falls back to a loopback `ANTHROPIC_BASE_URL` (which `cgx configure` sets) when unset |
+| `CGX_FORK_REVIEW_QUIET` | unset (false) | suppress `cgx fork-review`'s fail-open `systemMessage` when a review is skipped |
+| `CGX_TEMPLATE_DIR` | `${XDG_CONFIG_HOME:-~/.config}/cgx/templates` (POSIX); `%APPDATA%\cgx\templates` (Windows) | where `cgx fork-review` looks up a named template |
 
 #### Claude Code Hook
 
@@ -338,6 +340,13 @@ edit claude-gateway-extensions.service`.
 | `CGX_FORK_MAX_PER_MIN`        | `6`                                                            | how many review forks a single session may fire in a trailing 60s window                   |
 | `CGX_FORK_THINKING_GUARD`     | `true`                                                         | refuse a fork against a thinking snapshot on a model below its measured thinking-preservation minimum, instead of paying a full cold write |
 | `CGX_FORK_MODEL`              | unset                                                          | send review forks to this model instead of the snapshot's own; forfeits the cached prefix, since Anthropic namespaces the cache per model |
+
+`CGX_FORK_MAX_TOKENS`, `CGX_FORK_MAX_PER_MIN`, `CGX_FORK_THINKING_GUARD`
+and `CGX_FORK_MODEL` are read once when `cgx serve` starts and frozen into
+that run's scheduler, unlike the hook-side variables below (`CGX_FORK_REVIEW_QUIET`,
+`CGX_TEMPLATE_DIR`), which `cgx fork-review` reads fresh on every hook
+invocation; changing one of the four daemon-side vars needs a daemon
+restart to take effect.
 
 If a table and the code ever disagree, `config.py` is the source of truth.
 
