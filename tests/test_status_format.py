@@ -11,6 +11,7 @@ from claude_gateway_extensions.core.status_format import (
     format_clock,
     format_countdown,
     format_deadline,
+    format_fork_summary,
     format_rewarm_write,
     format_status_times,
 )
@@ -69,6 +70,7 @@ def test_format_status_times_full() -> None:
         "next_bump_at": "08:33",
         "rewarm_write": None,
         "cache": None,
+        "fork": None,
     }
 
 
@@ -112,6 +114,35 @@ def test_format_status_times_includes_rewarm_write() -> None:
         cache_expires_at=None, next_bump_at=None, now=_NOW, tz=_TZ, rewarm_write=record
     )
     assert result["rewarm_write"] == "128 cache-write tokens at 07:43"
+
+
+# -- format_fork_summary / format_status_times' fork field -------------------
+
+
+def test_format_fork_summary_none_when_never_forked() -> None:
+    assert format_fork_summary(0, 0, None) is None
+
+
+def test_format_fork_summary_renders_sent_over_attempted_and_reason() -> None:
+    assert format_fork_summary(fork_attempts=4, forks_sent=3, last_fork_reason="ok") == (
+        "3/4 last=ok"
+    )
+
+
+def test_format_fork_summary_falls_back_to_placeholder_for_missing_reason() -> None:
+    assert format_fork_summary(1, 1, None) == "1/1 last=?"
+
+
+def test_format_status_times_includes_fork_summary() -> None:
+    result = format_status_times(
+        cache_expires_at=None,
+        next_bump_at=None,
+        now=_NOW,
+        fork_attempts=2,
+        forks_sent=1,
+        last_fork_reason="rate_limited",
+    )
+    assert result["fork"] == "1/2 last=rate_limited"
 
 
 # -- format_deadline: local-calendar-day classification ----------------------

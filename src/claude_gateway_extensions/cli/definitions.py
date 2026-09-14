@@ -18,6 +18,11 @@ import re
 from dataclasses import dataclass
 
 #: Hook events whose output uses the top-level ``decision: "block"`` shape.
+#: These events have no ``ask`` decision of their own in the hook contract
+#: (unlike ``PreToolUse``'s ``permissionDecision``), so a definition that
+#: declares one of these as its ``event:`` and asks for ``intervene: ask``
+#: is rejected at parse time -- see the "ask is rejected for a declared
+#: non-PreToolUse event" decision in ``docs/DESIGN.md``.
 DECISION_BLOCK_EVENTS = frozenset({"UserPromptSubmit", "PostToolUse"})
 
 #: Every event a definition's ``event:`` front-matter line may declare.
@@ -150,6 +155,14 @@ def parse_definition(text: str, *, default_name: str) -> Definition:
     unrecognised ``event`` or ``intervene`` value is a :class:`DefinitionError`
     naming it -- unlike the old ``.txt`` format, there is no silent fallback
     once front matter (and therefore ``description``) is mandatory.
+    ``intervene: ask`` combined with a declared ``event:`` in
+    :data:`DECISION_BLOCK_EVENTS` is also a :class:`DefinitionError`: those
+    events have no ``ask`` decision of their own, so accepting it here would
+    let a definition silently degrade to ``deny`` at hook time instead of
+    telling its author up front. A definition with no declared ``event:``
+    cannot be checked this way -- it is still accepted, and behaves as
+    ``deny`` at runtime when the hook that ends up calling it fires for one
+    of these events (see ``cli/shadow_fork.py::_map_verdict``).
     """
     lines = text.splitlines()
     if not lines or lines[0].rstrip() != "---":
@@ -185,6 +198,12 @@ def parse_definition(text: str, *, default_name: str) -> Definition:
         raise DefinitionError(
             f"unrecognised `intervene:` value {intervene!r}; "
             f"expected one of {sorted(INTERVENE_VALUES)}"
+        )
+    if intervene == "ask" and event in DECISION_BLOCK_EVENTS:
+        raise DefinitionError(
+            f"`intervene: ask` is rejected for `event: {event}` -- "
+            f"{sorted(DECISION_BLOCK_EVENTS)} have no `ask` decision of their "
+            "own in the hook contract; use `deny` or `context` instead"
         )
 
     name = front_matter.get("name") or default_name

@@ -357,6 +357,16 @@ review" roadmap line; no part of it ships in 1.0.
   "reason": str, "mutation": object | null}`.** A fixed contract is what
   lets one hook CLI serve every template without each one inventing its
   own reply format.
+- **The output contract is appended to every rendered prompt by `cgx
+  shadow-fork` itself, never repeated in a definition's body.** One
+  constant string (`cli/shadow_fork.py::_OUTPUT_CONTRACT`) is the reply
+  shape every definition shares, so a definition author writes only what
+  to review and, when it needs one, its own `verdict`/`intervene`
+  constraint (e.g. `btw`'s "always reply `intervene`") -- never the JSON
+  shape itself, which stayed duplicated verbatim across all four packaged
+  examples before this. `parse_verdict`'s strictness is unaffected: moving
+  where the contract text comes from changes nothing about how the reply
+  is parsed.
 - **Anything unparseable is `ok`, with a warning logged and never the
   text itself.** A broken prompt, a truncated reply or a chatty model
   must never block the user's work, so the fail-open direction is an
@@ -389,6 +399,19 @@ review" roadmap line; no part of it ships in 1.0.
   max_tokens?, model?}`, answering `200 {verdict, reason, mutation, usage,
   paid_write, model, stream_key}` — including for the `ok` degradations
   above, since a non-200 would push fail-open logic into every client.
+- **Fork status is a per-session counter set, kept and exposed the same
+  way bump status already is.** `SessionState` gains `fork_attempts`
+  (every `Scheduler.fork_now` call), `forks_sent` (only the calls that
+  passed the `no_snapshot`/`rate_limited`/`snapshot_stale` pre-checks and
+  actually reached `fork_once`), `last_fork_at`, and `last_fork_reason` --
+  the last call's outcome, but never as prose: it is always either one of
+  `FAIL_OPEN_REASONS` or the bare `"ok"`/`"intervene"` verdict itself,
+  the same invariant that already governs the daemon's logs, so nothing
+  in status can leak a prompt or a reply. `GET /cgx/sessions/{id}` reports
+  all four fields; `cgx status` renders them as a compact `N/N last=<code>`
+  summary (`formatted.fork`, `None` for a session never forked), the same
+  pattern `breakpoints`/`effective_ttl`/`formatted.cache` used to surface
+  the shortest-breakpoint-TTL work.
 - **`cgx shadow-fork --template <name>` is the only hook-side entry
   point.** It reads the hook JSON on stdin, renders the named template,
   calls the API and maps the verdict to the output shape of whichever
@@ -399,13 +422,33 @@ review" roadmap line; no part of it ships in 1.0.
   decision fields, same as the engine's fail-open verdicts, but also
   emits `{"systemMessage": "cgx shadow-fork skipped: <reason>"}` so a
   broken template or a dead daemon cannot fail invisibly;
-  `CGX_SHADOW_FORK_QUIET=1` suppresses it for scripted use.
+  `CGX_SHADOW_FORK_QUIET=1` suppresses it for scripted use. This now also
+  covers the engine's own fail-open degradations: an `ok` verdict whose
+  `reason` is one of the fixed reason codes (`no_snapshot`,
+  `rate_limited`, `snapshot_stale`, `unparseable_verdict`, `fork_failed`,
+  `tool_use_reply`, `thinking_unsafe_model`, `thinking_model_unknown` --
+  the full set lives in `core/fork_reasons.py::FAIL_OPEN_REASONS`, a leaf
+  module with no `aiohttp` dependency so the CLI hook path can import it
+  without pulling the daemon's transport in) gets the same visible
+  `systemMessage` treatment instead of the silent exit 0 it used to get,
+  since these all mean the review never actually ran. A genuine `ok` from
+  the reviewer model carries its own free-text `reason` and is never
+  mistaken for one of these fixed codes, so it stays silent as before --
+  that is the feature working, not a failure.
 - **The verdict-to-hook mapping is fixed per event, and the template
   picks only the intervention style.** `PreToolUse` gets
   `hookSpecificOutput.permissionDecision` (`deny` by default, `ask` or a
-  plain `additionalContext` advisory when the template says so),
-  `UserPromptSubmit` and the `Post*` events get top-level `decision:
-  "block"` with the reason, and `ok` always exits 0 with no output.
+  plain `additionalContext` advisory when the template says so);
+  `UserPromptSubmit` and `PostToolUse` get `hookSpecificOutput.
+  additionalContext` for `intervene: context` (both events accept it in
+  their own hook contract) and otherwise the top-level `decision: "block"`
+  shape with the reason; `ok` always exits 0 with no output. Neither event
+  has an `ask` decision of its own, so `intervene: ask` combined with a
+  definition's own declared `event: UserPromptSubmit`/`PostToolUse` is
+  rejected at parse time (`DefinitionError`) rather than silently
+  degrading to `deny` at hook time; a definition with no declared `event:`
+  cannot be checked this way and is still accepted, behaving as `deny` at
+  runtime if the hook it ends up wired to fires for one of these events.
 - **`mutation` is honoured only where the hook API has a slot for it.**
   At `PreToolUse` it becomes `updatedInput` (whole object, per the hook
   contract); anywhere else it is logged as ignored rather than
@@ -535,7 +578,11 @@ review" roadmap line; no part of it ships in 1.0.
   - `intervene` (scalar, optional, defaults to `deny`) — one of `deny`,
     `ask`, `context`; unlike the `.txt` format, an unrecognised value is
     now a parse error naming the line rather than a silent fallback to
-    `deny`, for the same reason as `event` above.
+    `deny`, for the same reason as `event` above. `ask` combined with a
+    declared `event: UserPromptSubmit` or `event: PostToolUse` is also a
+    parse error: neither event has an `ask` decision of its own in the
+    hook contract, so accepting it here would only degrade to `deny`
+    silently at hook time.
 
   `name`, `description`, `model` and `tools` are the official Claude
   Code subagent fields this convention borrows; `event`, `matcher`,

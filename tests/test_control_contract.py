@@ -43,6 +43,10 @@ STATUS_KEYS = {
     "rewarm_write",
     "breakpoints",
     "effective_ttl",
+    "fork_attempts",
+    "forks_sent",
+    "last_fork_at",
+    "last_fork_reason",
     "formatted",
 }
 

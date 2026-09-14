@@ -78,6 +78,24 @@ def format_breakpoint_summary(breakpoints: Sequence[Mapping[str, object]]) -> st
     return ", ".join(f"{ttl} x{count}" for ttl, count in counts.items())
 
 
+def format_fork_summary(
+    fork_attempts: int, forks_sent: int, last_fork_reason: str | None
+) -> str | None:
+    """Format the Shadow Fork counters as a compact ``N/N reason`` summary.
+
+    ``None`` when ``fork_attempts`` is zero, so a session that has never
+    been forked shows no fork line at all, same as :func:`format_breakpoint_summary`
+    for a body with no ``cache_control`` blocks. ``last_fork_reason`` is
+    already a fixed enum value (never the model's free-text reason -- see
+    :class:`~claude_gateway_extensions.core.snapshot.SessionState`), so it
+    is safe to render verbatim.
+    """
+    if fork_attempts == 0:
+        return None
+    reason = last_fork_reason or "?"
+    return f"{forks_sent}/{fork_attempts} last={reason}"
+
+
 def format_status_times(
     *,
     cache_expires_at: float | None,
@@ -86,6 +104,9 @@ def format_status_times(
     tz: tzinfo | None = None,
     rewarm_write: Mapping[str, object] | None = None,
     breakpoints: Sequence[Mapping[str, object]] = (),
+    fork_attempts: int = 0,
+    forks_sent: int = 0,
+    last_fork_reason: str | None = None,
 ) -> dict[str, str | None]:
     """Build the ``formatted`` block of a session status dict.
 
@@ -96,6 +117,7 @@ def format_status_times(
     session's ``rewarm_write`` record (see :func:`format_rewarm_write`), or
     ``None`` when the session has never had a rewarm-tolerated write.
     ``cache`` renders ``breakpoints`` via :func:`format_breakpoint_summary`.
+    ``fork`` renders the Shadow Fork counters via :func:`format_fork_summary`.
     """
     ttl_countdown: str | None = None
     expires_at: str | None = None
@@ -116,6 +138,7 @@ def format_status_times(
         "next_bump_at": next_bump_at_formatted,
         "rewarm_write": format_rewarm_write(rewarm_write, tz),
         "cache": format_breakpoint_summary(breakpoints),
+        "fork": format_fork_summary(fork_attempts, forks_sent, last_fork_reason),
     }
 
 
@@ -173,6 +196,7 @@ __all__ = [
     "format_clock",
     "format_countdown",
     "format_deadline",
+    "format_fork_summary",
     "format_rewarm_write",
     "format_status_times",
 ]

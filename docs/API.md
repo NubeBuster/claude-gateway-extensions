@@ -87,9 +87,11 @@ Response `200`:
   "breakpoints": [{"at": "system[0]", "ttl": "1h"},
   {"at": "system[1]", "ttl": "1h"}, {"at": "system[2]", "ttl": "1h"}],
   "effective_ttl": "1h",
+  "fork_attempts": 4, "forks_sent": 3, "last_fork_at": 1700003100.0,
+  "last_fork_reason": "ok",
   "formatted": {"ttl_countdown": "04:37", "expires_at": "20:18",
   "next_bump_countdown": "49:37", "next_bump_at": "21:06",
-  "rewarm_write": null, "cache": "1h x3"}}]}
+  "rewarm_write": null, "cache": "1h x3", "fork": "3/4 last=ok"}}]}
 ```
 
 ## GET /cgx/sessions/{id}
@@ -130,6 +132,21 @@ renders `rewarm_write` below (e.g. `"4096 cache-write tokens at 20:18"`), or
 `formatted.cache` renders `breakpoints` as a compact summary grouped by
 ttl, e.g. `"1h x3"` for three 1h breakpoints or `"1h x2, 5m x1"` for a
 mixed body; `null` when `breakpoints` is empty.
+
+`fork_attempts` counts every Shadow Fork review requested for this
+session (`POST /cgx/sessions/{id}/shadow-fork` calls that reach the
+scheduler); `forks_sent` counts only the ones that passed the
+`no_snapshot`/`rate_limited`/`snapshot_stale` pre-checks and actually
+replayed the snapshot upstream. `last_fork_at` is the epoch time of the
+most recent one; `last_fork_reason` is that fork's outcome, always a
+fixed value -- one of the fail-open reason codes (`no_snapshot`,
+`rate_limited`, `snapshot_stale`, `unparseable_verdict`, `fork_failed`,
+`tool_use_reply`, `thinking_unsafe_model`, `thinking_model_unknown`) or
+the bare verdict `"ok"`/`"intervene"` -- never the model's own free-text
+`reason`, so nothing here can carry prompt or reply content. All four are
+`0`/`null` for a session never forked. `formatted.fork` renders them as a
+compact `"<forks_sent>/<fork_attempts> last=<reason>"` summary, or `null`
+when `fork_attempts` is `0`.
 
 `rewarm` is `true` while the session's rewarm flag is armed (see `PUT
 /cgx/sessions/{id}` below): the next `cache_write` bump result is tolerated

@@ -694,7 +694,7 @@ def test_plan_install_does_not_overwrite_existing_user_template(tmp_path: Path) 
     user_template_path = tmp_path / ".config" / "cgx" / "templates" / "btw.md"
     user_template_path.parent.mkdir(parents=True)
     user_template_path.write_text(
-        "---\ndescription: a test\nintervene: ask\nevent: UserPromptSubmit\n---\n\ncustom\n"
+        "---\ndescription: a test\nintervene: deny\nevent: UserPromptSubmit\n---\n\ncustom\n"
     )
 
     spec = install.ShadowForkSpec(name="btw", prefix="/btw")

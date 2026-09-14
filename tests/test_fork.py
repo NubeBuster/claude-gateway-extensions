@@ -1028,3 +1028,113 @@ async def test_fork_now_missing_config_file_falls_back_to_env(tmp_path: Path) ->
     await scheduler.fork_now("sess-1", "review", {}, None)
 
     assert json.loads(upstream.calls[0][3])["max_tokens"] == 333
+
+
+# -- Scheduler.fork_now: fork status counters -------------------------------
+
+
+async def test_fork_now_counts_attempts_and_sends_and_records_last_reason(
+    tmp_path: Path,
+) -> None:
+    """A successful fork increments both counters and records the bare verdict as the reason."""
+    clock = FakeClock(start=1000.0)
+    store = MemoryStore(max_streams_per_session=8)
+    store.put_snapshot(_snapshot("sess-1"))
+    store.put_state(
+        SessionState(session_id="sess-1", last_credential=("authorization", "Bearer a"))
+    )
+    upstream = ScriptedUpstream([_verdict_response({"verdict": "ok", "reason": "looks fine"})])
+    scheduler = Scheduler(_config(tmp_path), store, LargestPrefixSelector(), upstream, clock)
+
+    await scheduler.fork_now("sess-1", "review", {}, None)
+
+    state = store.get_state("sess-1")
+    assert state is not None
+    assert state.fork_attempts == 1
+    assert state.forks_sent == 1
+    assert state.last_fork_at == 1000.0
+    # The model's own free-text reason ("looks fine") is never persisted --
+    # only the bare verdict, per the "never the model's own reason" invariant.
+    assert state.last_fork_reason == "ok"
+
+
+async def test_fork_now_no_snapshot_counts_attempt_but_not_sent(tmp_path: Path) -> None:
+    clock = FakeClock(start=1000.0)
+    store = MemoryStore(max_streams_per_session=8)
+    upstream = ScriptedUpstream([])
+    scheduler = Scheduler(_config(tmp_path), store, LargestPrefixSelector(), upstream, clock)
+
+    await scheduler.fork_now("sess-unknown", "review", {}, None)
+
+    state = store.get_state("sess-unknown")
+    assert state is not None
+    assert state.fork_attempts == 1
+    assert state.forks_sent == 0
+    assert state.last_fork_reason == "no_snapshot"
+
+
+async def test_fork_now_rate_limited_counts_attempt_but_not_sent(tmp_path: Path) -> None:
+    clock = FakeClock(start=1000.0)
+    store = MemoryStore(max_streams_per_session=8)
+    store.put_snapshot(_snapshot("sess-1"))
+    store.put_state(
+        SessionState(session_id="sess-1", last_credential=("authorization", "Bearer a"))
+    )
+    upstream = ScriptedUpstream([_verdict_response({"verdict": "ok", "reason": "1"})])
+    scheduler = Scheduler(
+        _config(tmp_path, shadow_fork_max_per_min=1),
+        store,
+        LargestPrefixSelector(),
+        upstream,
+        clock,
+    )
+
+    await scheduler.fork_now("sess-1", "review", {}, None)
+    await scheduler.fork_now("sess-1", "review", {}, None)
+
+    state = store.get_state("sess-1")
+    assert state is not None
+    assert state.fork_attempts == 2
+    assert state.forks_sent == 1
+    assert state.last_fork_reason == "rate_limited"
+
+
+async def test_fork_now_intervene_verdict_records_intervene_as_last_reason(
+    tmp_path: Path,
+) -> None:
+    clock = FakeClock(start=1000.0)
+    store = MemoryStore(max_streams_per_session=8)
+    store.put_snapshot(_snapshot("sess-1"))
+    store.put_state(
+        SessionState(session_id="sess-1", last_credential=("authorization", "Bearer a"))
+    )
+    upstream = ScriptedUpstream(
+        [_verdict_response({"verdict": "intervene", "reason": "stop and think"})]
+    )
+    scheduler = Scheduler(_config(tmp_path), store, LargestPrefixSelector(), upstream, clock)
+
+    await scheduler.fork_now("sess-1", "review", {}, None)
+
+    state = store.get_state("sess-1")
+    assert state is not None
+    assert state.last_fork_reason == "intervene"
+
+
+async def test_fork_now_unparseable_reply_records_the_fail_open_reason_code(
+    tmp_path: Path,
+) -> None:
+    clock = FakeClock(start=1000.0)
+    store = MemoryStore(max_streams_per_session=8)
+    store.put_snapshot(_snapshot("sess-1"))
+    store.put_state(
+        SessionState(session_id="sess-1", last_credential=("authorization", "Bearer a"))
+    )
+    upstream = ScriptedUpstream([_verdict_response("not json at all")])
+    scheduler = Scheduler(_config(tmp_path), store, LargestPrefixSelector(), upstream, clock)
+
+    await scheduler.fork_now("sess-1", "review", {}, None)
+
+    state = store.get_state("sess-1")
+    assert state is not None
+    assert state.forks_sent == 1
+    assert state.last_fork_reason == "unparseable_verdict"

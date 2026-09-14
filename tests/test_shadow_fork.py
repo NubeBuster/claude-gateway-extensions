@@ -292,6 +292,100 @@ def test_ok_verdict_produces_empty_stdout(tmp_path: Path, monkeypatch: pytest.Mo
     assert out == ""
 
 
+# --- output contract is appended by the tool, not the definition ------------
+
+
+def test_output_contract_is_appended_to_the_rendered_prompt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    env = _write_template(tmp_path, "t", "intervene: deny\n\nreview {tool_name}\n")
+    calls = _install_client(monkeypatch, result=_OK_RESULT)
+    _run({"session_id": "s1", "hook_event_name": "PreToolUse", "tool_name": "Bash"}, env, "t")
+    prompt = calls[0]["prompt"]
+    assert prompt.startswith("review Bash")
+    assert '"verdict": "ok"|"intervene"' in prompt
+    assert "Reply with strict JSON and nothing else" in prompt
+    assert "Never call a tool" in prompt
+
+
+def test_output_contract_text_is_identical_across_definitions(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The appended contract text is one constant, not re-derived per definition."""
+    env_a = _write_template(tmp_path, "a", "intervene: deny\n\nreview A\n")
+    calls_a = _install_client(monkeypatch, result=_OK_RESULT)
+    _run({"session_id": "s1", "hook_event_name": "PreToolUse"}, env_a, "a")
+    contract_a = calls_a[0]["prompt"].split("review A\n\n", 1)[1]
+
+    env_b = _write_template(tmp_path, "b", "intervene: deny\n\nreview B\n")
+    calls_b = _install_client(monkeypatch, result=_OK_RESULT)
+    _run({"session_id": "s1", "hook_event_name": "PreToolUse"}, env_b, "b")
+    contract_b = calls_b[0]["prompt"].split("review B\n\n", 1)[1]
+
+    assert contract_a == contract_b
+
+
+# --- visible fail-open: a daemon-side fail-open "ok" is not silent ----------
+
+
+@pytest.mark.parametrize(
+    "reason",
+    [
+        "unparseable_verdict",
+        "fork_failed",
+        "tool_use_reply",
+        "thinking_unsafe_model",
+        "thinking_model_unknown",
+        "no_snapshot",
+        "rate_limited",
+        "snapshot_stale",
+    ],
+)
+def test_fail_open_ok_verdict_emits_skip_message(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, reason: str
+) -> None:
+    env = _write_template(tmp_path, "t", "intervene: deny\n\nreview {tool_name}\n")
+    _install_client(monkeypatch, result={"verdict": "ok", "reason": reason, "mutation": None})
+    code, out = _run(
+        {"session_id": "s1", "hook_event_name": "PreToolUse", "tool_name": "Bash"}, env, "t"
+    )
+    assert code == 0
+    data = json.loads(out)
+    assert data["systemMessage"] == f"cgx shadow-fork skipped: {reason}"
+
+
+def test_fail_open_ok_verdict_quiet_env_suppresses_message(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    env = _write_template(tmp_path, "t", "intervene: deny\n\nreview {tool_name}\n")
+    env["CGX_SHADOW_FORK_QUIET"] = "1"
+    _install_client(
+        monkeypatch, result={"verdict": "ok", "reason": "rate_limited", "mutation": None}
+    )
+    code, out = _run(
+        {"session_id": "s1", "hook_event_name": "PreToolUse", "tool_name": "Bash"}, env, "t"
+    )
+    assert code == 0
+    assert out == ""
+
+
+def test_genuine_ok_verdict_from_model_stays_silent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A model's own ``ok`` verdict, with an arbitrary free-text reason, is never mistaken
+    for one of the fixed fail-open reason codes.
+    """
+    env = _write_template(tmp_path, "t", "intervene: deny\n\nreview {tool_name}\n")
+    _install_client(
+        monkeypatch, result={"verdict": "ok", "reason": "this looks fine", "mutation": None}
+    )
+    code, out = _run(
+        {"session_id": "s1", "hook_event_name": "PreToolUse", "tool_name": "Bash"}, env, "t"
+    )
+    assert code == 0
+    assert out == ""
+
+
 def test_model_absent_by_default(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     env = _write_template(tmp_path, "t", "intervene: deny\n\nreview {tool_name}\n")
     calls = _install_client(monkeypatch, result=_OK_RESULT)
@@ -402,6 +496,55 @@ def test_posttooluse_block_mapping(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     env = _write_template(tmp_path, "t", "intervene: deny\n\nreview {tool_name}\n")
     _install_client(monkeypatch, result=_INTERVENE_RESULT)
     code, out = _run({"session_id": "s1", "hook_event_name": "PostToolUse"}, env, "t")
+    assert code == 0
+    assert json.loads(out) == {"decision": "block", "reason": "nope"}
+
+
+def test_userpromptsubmit_context_mapping(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    env = _write_template(tmp_path, "t", "intervene: context\n\nanswer {argument}\n")
+    _install_client(monkeypatch, result=_INTERVENE_RESULT)
+    code, out = _run(
+        {"session_id": "s1", "prompt": "/btw hi", "hook_event_name": "UserPromptSubmit"},
+        env,
+        "t",
+        prefix="/btw",
+    )
+    assert code == 0
+    assert json.loads(out) == {
+        "hookSpecificOutput": {
+            "hookEventName": "UserPromptSubmit",
+            "additionalContext": "nope",
+        }
+    }
+
+
+def test_posttooluse_context_mapping(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    env = _write_template(tmp_path, "t", "intervene: context\n\nreview {tool_name}\n")
+    _install_client(monkeypatch, result=_INTERVENE_RESULT)
+    code, out = _run({"session_id": "s1", "hook_event_name": "PostToolUse"}, env, "t")
+    assert code == 0
+    assert json.loads(out) == {
+        "hookSpecificOutput": {
+            "hookEventName": "PostToolUse",
+            "additionalContext": "nope",
+        }
+    }
+
+
+def test_ask_with_no_declared_event_behaves_as_deny_at_userpromptsubmit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A definition with no ``event:`` line can declare ``ask``; at runtime, on an event with
+    no ``ask`` decision of its own, it falls back to the same ``block`` shape ``deny`` uses.
+    """
+    env = _write_template(tmp_path, "t", "intervene: ask\n\nanswer {argument}\n")
+    _install_client(monkeypatch, result=_INTERVENE_RESULT)
+    code, out = _run(
+        {"session_id": "s1", "prompt": "/btw hi", "hook_event_name": "UserPromptSubmit"},
+        env,
+        "t",
+        prefix="/btw",
+    )
     assert code == 0
     assert json.loads(out) == {"decision": "block", "reason": "nope"}
 
@@ -556,6 +699,24 @@ def test_parse_definition_rejects_invalid_intervene() -> None:
         definitions.parse_definition(
             "---\ndescription: a test\nintervene: maybe\n---\n\nreview\n", default_name="t"
         )
+
+
+@pytest.mark.parametrize("event", ["UserPromptSubmit", "PostToolUse"])
+def test_parse_definition_rejects_ask_for_decision_block_event(event: str) -> None:
+    with pytest.raises(definitions.DefinitionError, match="intervene: ask"):
+        definitions.parse_definition(
+            f"---\ndescription: a test\nintervene: ask\nevent: {event}\n---\n\nreview\n",
+            default_name="t",
+        )
+
+
+def test_parse_definition_allows_ask_with_no_declared_event() -> None:
+    """``ask`` with no ``event:`` line can't be checked statically, so it is accepted."""
+    definition = definitions.parse_definition(
+        "---\ndescription: a test\nintervene: ask\n---\n\nreview\n", default_name="t"
+    )
+    assert definition.intervene == "ask"
+    assert definition.event is None
 
 
 def test_parse_definition_requires_description() -> None:

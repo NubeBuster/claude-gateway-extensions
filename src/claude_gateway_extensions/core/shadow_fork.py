@@ -23,6 +23,13 @@ from dataclasses import dataclass
 from typing import Literal
 
 from claude_gateway_extensions.core.bump import build_bump_headers
+from claude_gateway_extensions.core.fork_reasons import (
+    REASON_FORK_FAILED,
+    REASON_THINKING_MODEL_UNKNOWN,
+    REASON_THINKING_UNSAFE_MODEL,
+    REASON_TOOL_USE_REPLY,
+    REASON_UNPARSEABLE_VERDICT,
+)
 from claude_gateway_extensions.core.snapshot import Snapshot, Usage
 from claude_gateway_extensions.core.upstream import Upstream
 
@@ -233,9 +240,9 @@ def _check_thinking_safety(body: bytes, model: str | None) -> ForkVerdict | None
         return None
     if verdict is None:
         logger.warning("fork refused: reason=thinking_model_unknown model=%s", model)
-        return _fail_open("thinking_model_unknown")
+        return _fail_open(REASON_THINKING_MODEL_UNKNOWN)
     logger.warning("fork refused: reason=thinking_unsafe_model model=%s", model)
-    return _fail_open("thinking_unsafe_model")
+    return _fail_open(REASON_THINKING_UNSAFE_MODEL)
 
 
 @dataclass
@@ -320,7 +327,7 @@ def _unparseable(
 ) -> ForkVerdict:
     """Log and return the fail-open verdict shared by every unparseable-reply path."""
     logger.warning("fork verdict unparseable: reason=unparseable_verdict")
-    return _fail_open("unparseable_verdict", usage, model, stream_key)
+    return _fail_open(REASON_UNPARSEABLE_VERDICT, usage, model, stream_key)
 
 
 def _parse_verdict_payload(
@@ -369,7 +376,7 @@ def parse_verdict(
     """
     if status != 200:
         logger.warning("fork request failed: status=%s", status)
-        return _fail_open("fork_failed", model=model, stream_key=stream_key)
+        return _fail_open(REASON_FORK_FAILED, model=model, stream_key=stream_key)
 
     try:
         data = json.loads(body)
@@ -383,7 +390,7 @@ def parse_verdict(
 
     if _has_tool_use(data):
         logger.warning("fork verdict rejected: reason=tool_use_reply")
-        return _fail_open("tool_use_reply", usage, model, stream_key)
+        return _fail_open(REASON_TOOL_USE_REPLY, usage, model, stream_key)
 
     text = _extract_text(data)
     if text is None:
@@ -460,5 +467,5 @@ async def fork_once(
         response = await upstream.send("POST", url, headers, body)
     except Exception:
         logger.warning("fork request failed: reason=fork_failed")
-        return _fail_open("fork_failed", model=effective_model, stream_key=snapshot.stream_key)
+        return _fail_open(REASON_FORK_FAILED, model=effective_model, stream_key=snapshot.stream_key)
     return parse_verdict(response.status, response.body, effective_model, snapshot.stream_key)

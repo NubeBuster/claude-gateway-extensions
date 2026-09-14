@@ -2,6 +2,40 @@
 
 ## Unreleased
 
+- Refactor: the Shadow Fork JSON output contract (`{"verdict":
+  "ok"|"intervene", "reason", "mutation"}` plus the "answer with JSON
+  only, never call a tool" instruction) is now appended to every rendered
+  prompt by `cgx shadow-fork` itself (`cli/shadow_fork.py::
+  _OUTPUT_CONTRACT`), instead of being duplicated verbatim in each of the
+  four packaged `.md` definitions. A definition's body now states only
+  what to review and, when it needs one, its own `verdict`/`intervene`
+  constraint.
+- Feat: `intervene: context` now works on `UserPromptSubmit` and
+  `PostToolUse`, not just `PreToolUse` -- it emits
+  `hookSpecificOutput.additionalContext` (both events accept it in their
+  own hook contract) instead of always forcing the top-level `decision:
+  "block"` shape regardless of the template's `intervene:` mode.
+  `intervene: ask` combined with a definition's own declared `event:
+  UserPromptSubmit`/`PostToolUse` is now a parse error (`DefinitionError`)
+  instead of silently degrading to `deny` at hook time, since neither
+  event has an `ask` decision of its own; a definition with no declared
+  `event:` still accepts `ask` and behaves as `deny` at runtime for those
+  events.
+- Fix: a fork's own fail-open degradations (`no_snapshot`,
+  `rate_limited`, `snapshot_stale`, `unparseable_verdict`, `fork_failed`,
+  `tool_use_reply`, `thinking_unsafe_model`, `thinking_model_unknown`)
+  now emit the same visible `{"systemMessage": "cgx shadow-fork skipped:
+  <reason>"}` every other fail-open path already used, instead of exiting
+  silently indistinguishable from a genuine `ok` verdict from the
+  reviewer model. `CGX_SHADOW_FORK_QUIET=1` still suppresses it.
+- Feat: the scheduler now keeps per-session Shadow Fork counters
+  (`fork_attempts`, `forks_sent`, `last_fork_at`, `last_fork_reason` --
+  the last one always a fixed reason code or bare verdict, never the
+  model's free-text reason). Exposed as new fields on `GET
+  /cgx/sessions[/{id}]` and as a compact `formatted.fork` summary,
+  rendered by `cgx status` the same way `breakpoints`/`effective_ttl`
+  already are.
+
 - Fix: the live regression harness (`make live`) now launches its subject
   with a fake `HOME` and `CLAUDE_CONFIG_DIR` under the scratch dir, seeded
   with only the OAuth subscription login, instead of the real one --

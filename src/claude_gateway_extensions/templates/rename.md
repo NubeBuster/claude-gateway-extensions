@@ -17,8 +17,3 @@ conversation, so answer only with the label itself in `reason`.
 
 Always reply `intervene` (never `ok`), since an `ok` verdict would discard
 the label instead of handing it to the rename command.
-
-Answer with JSON only. Never call a tool.
-
-Reply with strict JSON and nothing else:
-{"verdict": "intervene", "reason": "<lowercase-kebab-case-label>", "mutation": null}

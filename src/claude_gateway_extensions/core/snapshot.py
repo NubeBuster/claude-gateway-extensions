@@ -94,7 +94,19 @@ class RewarmWrite:
 
 @dataclass
 class SessionState:
-    """Per-session mutable bump state, persisted next to its snapshots."""
+    """Per-session mutable bump state, persisted next to its snapshots.
+
+    ``fork_attempts``/``forks_sent``/``last_fork_at``/``last_fork_reason``
+    are the Shadow Fork counters (see the "Fork status" decision in
+    ``docs/DESIGN.md``): ``fork_attempts`` counts every
+    :meth:`~claude_gateway_extensions.core.scheduler.Scheduler.fork_now`
+    call for this session, ``forks_sent`` only those that actually reached
+    the upstream (past the ``no_snapshot``/``rate_limited``/
+    ``snapshot_stale`` pre-checks). ``last_fork_reason`` is always a fixed
+    enum value -- one of :data:`~.fork_reasons.FAIL_OPEN_REASONS` or the
+    bare verdict ``"ok"``/``"intervene"`` -- never the model's own free-text
+    ``reason``, so nothing persisted here can leak prompt or reply content.
+    """
 
     session_id: str
     enabled: bool = False
@@ -109,6 +121,10 @@ class SessionState:
     rewarm: bool = False
     rewarm_write: RewarmWrite | None = None
     replays_seen: int = 0
+    fork_attempts: int = 0
+    forks_sent: int = 0
+    last_fork_at: float | None = None
+    last_fork_reason: str | None = None
 
 
 def _load_json(body: bytes) -> Any:

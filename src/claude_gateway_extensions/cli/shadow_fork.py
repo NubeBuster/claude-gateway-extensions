@@ -9,10 +9,20 @@ verdict back to whichever event's hook output shape the payload names. On an
 
 Fail-open, but visible: a review that cannot run must never block or alter
 the session, so every failure path (missing template, unreachable daemon,
-API error, unexpected exception) exits 0 with no decision fields. It is not
-silent, though -- each failure emits a ``systemMessage`` starting with
-``"cgx shadow-fork skipped"`` so a broken template or a dead daemon cannot
-fail invisibly. Set ``CGX_SHADOW_FORK_QUIET=1`` to suppress that message.
+API error, unexpected exception, and every fail-open reason the daemon
+itself returns as an ``ok`` verdict) exits 0 with no decision fields. It is
+not silent, though -- each failure emits a ``systemMessage`` starting with
+``"cgx shadow-fork skipped"`` so a broken template, a dead daemon, or a
+fork that never ran (rate limited, no snapshot yet, a stale cache, an
+unparseable reply) cannot fail invisibly. Set ``CGX_SHADOW_FORK_QUIET=1``
+to suppress that message. A genuine ``ok`` verdict from the model stays
+silent, since that is the feature working as intended, not a failure.
+
+This module owns the fixed JSON output contract every definition's
+rendered prompt ends with (:data:`_OUTPUT_CONTRACT`) -- a definition's own
+body never repeats it, so the one place the reply shape can drift is here,
+and :func:`~claude_gateway_extensions.core.shadow_fork.parse_verdict`'s
+strictness is unaffected.
 
 ``--apply <command>`` lets an ``intervene`` verdict act on the side rather
 than only speaking through the hook's own decision fields: the command runs
@@ -53,6 +63,7 @@ from claude_gateway_extensions.cli.definitions import (
 )
 from claude_gateway_extensions.cli.definitions import Definition, DefinitionError, parse_definition
 from claude_gateway_extensions.config import Config, resolve_home
+from claude_gateway_extensions.core.fork_reasons import FAIL_OPEN_REASONS
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +83,20 @@ _TRUE_VALUES = {"true", "1", "yes"}
 
 #: Matches one dotted field path in a ``require:`` item, e.g. ``tool_input.owner``.
 _REQUIRE_PATH_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$")
+
+#: Appended to every rendered prompt, verbatim, by the tool rather than by
+#: each definition -- see the "Output contract is appended by the tool, not
+#: the author" decision in ``docs/DESIGN.md``. A definition's body describes
+#: what to review and, when it needs one, its own ``verdict``/``intervene``
+#: constraint (e.g. "always reply `intervene`"); the JSON reply shape is the
+#: same for every definition, so one constant here is the only place that
+#: shape needs to be right, and :func:`~claude_gateway_extensions.core.
+#: shadow_fork.parse_verdict`'s strictness is exactly what it always was.
+_OUTPUT_CONTRACT = (
+    "Answer with JSON only. Never call a tool. Reply with strict JSON and "
+    'nothing else: {"verdict": "ok"|"intervene", "reason": "<string>", '
+    '"mutation": <object or null>}'
+)
 
 
 class TemplateError(Exception):
@@ -313,6 +338,22 @@ def _pretooluse_output(
     return {"hookSpecificOutput": hook_specific}
 
 
+def _decision_block_output(hook_event: str, intervene_mode: str, reason: str) -> dict[str, Any]:
+    """Build the ``UserPromptSubmit``/``PostToolUse`` output for an ``intervene`` verdict.
+
+    ``intervene: context`` uses the same ``hookSpecificOutput.
+    additionalContext`` shape ``PreToolUse`` does, per both events' own hook
+    contract; ``deny`` and (a definition that never declared ``event:``, so
+    :func:`~claude_gateway_extensions.cli.definitions.parse_definition`
+    could not reject it) ``ask`` both fall back to the top-level ``decision:
+    "block"`` shape, since neither event has an ``ask`` decision of its own
+    -- ``ask`` behaves exactly like ``deny`` here.
+    """
+    if intervene_mode == "context":
+        return {"hookSpecificOutput": {"hookEventName": hook_event, "additionalContext": reason}}
+    return {"decision": "block", "reason": reason}
+
+
 def _map_verdict(
     hook_event: object, intervene_mode: str, reason: str, mutation: dict[str, Any] | None
 ) -> dict[str, Any] | None:
@@ -328,7 +369,8 @@ def _map_verdict(
     if hook_event in _DECISION_BLOCK_EVENTS:
         if mutation is not None:
             logger.warning("fork mutation ignored: reason=no_slot event=%s", hook_event)
-        return {"decision": "block", "reason": reason}
+        assert isinstance(hook_event, str)
+        return _decision_block_output(hook_event, intervene_mode, reason)
     return None
 
 
@@ -351,7 +393,13 @@ def run_shadow_fork(
     (missing template, unreachable daemon, a non-2xx API response, or any other
     exception) is fail-open: no decision fields, and a ``systemMessage``
     (unless ``CGX_SHADOW_FORK_QUIET`` is set) naming the reason. An ``ok``
-    verdict from the daemon is also silent -- only ``intervene`` produces
+    verdict whose ``reason`` is one of :data:`FAIL_OPEN_REASONS` (the fork
+    never actually ran to completion -- rate limited, no snapshot yet, a
+    stale cache, an unparseable reply, and so on) gets the same visible
+    ``systemMessage`` treatment rather than staying silent; a genuine
+    ``ok`` verdict from the model itself (arbitrary ``reason`` text, never
+    one of those fixed codes) is silent, since that is the feature working
+    as intended, not a failure. Only ``intervene`` produces decision-field
     output, and only an ``intervene`` verdict ever runs ``apply``. ``model``
     overrides the reviewer model for this fork only, always forfeiting the
     cache read; omitted, the loaded definition's own ``model:`` front matter
@@ -417,7 +465,7 @@ def run_shadow_fork(
             return 0
 
     fields = _build_fields(payload, argument)
-    rendered_prompt = _render(definition.body, fields)
+    rendered_prompt = _render(definition.body, fields).rstrip() + "\n\n" + _OUTPUT_CONTRACT
 
     # A CLI ``--model`` override wins; failing that, the definition's own
     # ``model:`` front matter is passed through as if it had been given on
@@ -444,12 +492,19 @@ def run_shadow_fork(
     except Exception as exc:
         return _skip(f"unexpected error ({exc})")
 
-    if not isinstance(result, dict) or result.get("verdict") != "intervene":
+    if not isinstance(result, dict):
         return 0
 
+    verdict = result.get("verdict")
     reason = result.get("reason")
     if not isinstance(reason, str):
         reason = ""
+
+    if verdict != "intervene":
+        if verdict == "ok" and reason in FAIL_OPEN_REASONS:
+            return _skip(reason)
+        return 0
+
     mutation = result.get("mutation")
     if not isinstance(mutation, dict):
         mutation = None

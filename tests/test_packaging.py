@@ -69,4 +69,9 @@ def test_packaged_shadow_fork_template_is_resource_readable(name: str) -> None:
     text = resource.read_text(encoding="utf-8")
     assert text.startswith("---\n")
     assert "description:" in text
-    assert "verdict" in text
+    # The JSON output contract is appended by cli/shadow_fork.py, not the
+    # definition itself -- see the "Output contract is appended by the
+    # tool, not the author" decision in docs/DESIGN.md. A packaged
+    # definition must never re-declare it.
+    assert '"verdict"' not in text
+    assert "Reply with strict JSON" not in text

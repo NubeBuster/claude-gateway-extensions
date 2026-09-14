@@ -315,6 +315,7 @@ async def test_status_has_no_cache_expires_at_without_a_snapshot(
         "next_bump_at": None,
         "rewarm_write": None,
         "cache": None,
+        "fork": None,
     }
 
 

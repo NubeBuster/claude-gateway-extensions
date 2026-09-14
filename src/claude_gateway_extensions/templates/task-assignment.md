@@ -21,8 +21,3 @@ Tool call ({tool_name}):
 This is advice only -- your verdict never blocks the tool call, so use
 `intervene` whenever you have something worth saying and `ok` when the
 assignment looks fine.
-
-Answer with JSON only. Never call a tool.
-
-Reply with strict JSON and nothing else:
-{"verdict": "ok"|"intervene", "reason": "<one sentence of advice, or why the assignment is fine>", "mutation": null}

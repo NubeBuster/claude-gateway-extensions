@@ -25,6 +25,12 @@ from claude_gateway_extensions.config import (
 )
 from claude_gateway_extensions.core.bump import BumpResult, bump_once
 from claude_gateway_extensions.core.clock import Clock
+from claude_gateway_extensions.core.fork_reasons import (
+    FAIL_OPEN_REASONS,
+    REASON_NO_SNAPSHOT,
+    REASON_RATE_LIMITED,
+    REASON_SNAPSHOT_STALE,
+)
 from claude_gateway_extensions.core.selector import TargetSelector
 from claude_gateway_extensions.core.shadow_fork import ForkVerdict, fork_once
 from claude_gateway_extensions.core.snapshot import (
@@ -268,6 +274,10 @@ class Scheduler:
         on every call through :attr:`_config_file_watcher`, so a tuning-file
         edit takes effect on the very next fork -- see the "Shadow Fork
         tuning is hot reloaded..." decision in ``docs/DESIGN.md``.
+
+        Every call updates this session's fork counters (see the "Fork
+        status" decision in ``docs/DESIGN.md``) before returning, whichever
+        path it returns by.
         """
         effective = merge_shadow_fork(self._config, self._config_file_watcher.current().settings)
         state = self._store.get_state(session_id)
@@ -280,18 +290,32 @@ class Scheduler:
             snapshot = self._selector.select(snapshots)
             subagent_snapshot = snapshot is not None
         if snapshot is None:
-            return ForkVerdict(
-                verdict="ok", reason="no_snapshot", mutation=None, usage=None, paid_write=False
+            result = ForkVerdict(
+                verdict="ok", reason=REASON_NO_SNAPSHOT, mutation=None, usage=None, paid_write=False
             )
+            self._record_fork_outcome(session_id, sent=False, reason_code=result.reason)
+            return result
         assert effective.max_per_min is not None  # merge_shadow_fork always fills this in
         if self._fork_rate_limited(session_id, effective.max_per_min):
-            return ForkVerdict(
-                verdict="ok", reason="rate_limited", mutation=None, usage=None, paid_write=False
+            result = ForkVerdict(
+                verdict="ok",
+                reason=REASON_RATE_LIMITED,
+                mutation=None,
+                usage=None,
+                paid_write=False,
             )
+            self._record_fork_outcome(session_id, sent=False, reason_code=result.reason)
+            return result
         if self._snapshot_is_stale(snapshot):
-            return ForkVerdict(
-                verdict="ok", reason="snapshot_stale", mutation=None, usage=None, paid_write=False
+            result = ForkVerdict(
+                verdict="ok",
+                reason=REASON_SNAPSHOT_STALE,
+                mutation=None,
+                usage=None,
+                paid_write=False,
             )
+            self._record_fork_outcome(session_id, sent=False, reason_code=result.reason)
+            return result
         self._record_fork(session_id)
         credential = state.last_credential if state is not None else None
         cap = max_tokens if max_tokens is not None else effective.max_tokens
@@ -310,7 +334,45 @@ class Scheduler:
         )
         if subagent_snapshot:
             result = dataclasses.replace(result, subagent_snapshot=True)
+        self._record_fork_outcome(session_id, sent=True, reason_code=self._fork_reason_code(result))
         return result
+
+    @staticmethod
+    def _fork_reason_code(result: ForkVerdict) -> str:
+        """Return the fixed enum value to persist as ``last_fork_reason`` for ``result``.
+
+        Never the model's own free-text ``reason``: a fail-open outcome's
+        ``reason`` is already one of :data:`FAIL_OPEN_REASONS` and is used
+        verbatim, while a genuine verdict from the model collapses to its
+        bare ``verdict`` (``"ok"`` or ``"intervene"``) instead -- both are
+        fixed enum values, never prose that could carry prompt or reply
+        content.
+        """
+        if result.reason in FAIL_OPEN_REASONS:
+            return result.reason
+        return result.verdict
+
+    def _record_fork_outcome(self, session_id: str, sent: bool, reason_code: str) -> None:
+        """Update this session's persisted fork counters after one :meth:`fork_now` call.
+
+        ``fork_attempts`` increments on every call; ``forks_sent`` only when
+        the review passed the ``no_snapshot``/``rate_limited``/
+        ``snapshot_stale`` pre-checks and actually reached
+        :func:`~claude_gateway_extensions.core.shadow_fork.fork_once`.
+        ``last_fork_at`` and ``last_fork_reason`` always refresh to this
+        call's outcome.
+        """
+        state = self._store.get_state(session_id)
+        if state is None:
+            state = SessionState(session_id=session_id, enabled=self._config.default_enabled)
+        state = dataclasses.replace(
+            state,
+            fork_attempts=state.fork_attempts + 1,
+            forks_sent=state.forks_sent + (1 if sent else 0),
+            last_fork_at=self._clock.now(),
+            last_fork_reason=reason_code,
+        )
+        self._store.put_state(state)
 
     def _snapshot_is_stale(self, snapshot: Snapshot) -> bool:
         """Return whether ``snapshot`` is older than the TTL its own body requested.
@@ -396,12 +458,19 @@ class Scheduler:
             "rewarm_write": rewarm_write,
             "breakpoints": breakpoints_json,
             "effective_ttl": effective_ttl,
+            "fork_attempts": state.fork_attempts,
+            "forks_sent": state.forks_sent,
+            "last_fork_at": state.last_fork_at,
+            "last_fork_reason": state.last_fork_reason,
             "formatted": format_status_times(
                 cache_expires_at=cache_expires_at,
                 next_bump_at=next_bump_at,
                 now=now,
                 rewarm_write=rewarm_write,
                 breakpoints=breakpoints_json,
+                fork_attempts=state.fork_attempts,
+                forks_sent=state.forks_sent,
+                last_fork_reason=state.last_fork_reason,
             ),
         }
 

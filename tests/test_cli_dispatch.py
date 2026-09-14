@@ -166,6 +166,32 @@ def test_status_json_passes_through_cache_expires_at_and_formatted() -> None:
     assert payload[0]["formatted"] == formatted
 
 
+def test_status_line_renders_fork_summary_suffix() -> None:
+    client = _FakeClient(
+        "http://x",
+        sessions={
+            "s1": {
+                "session_id": "s1",
+                "enabled": True,
+                "formatted": {"fork": "3/4 last=ok"},
+            }
+        },
+    )
+    code, out, _ = _run(["status"], client)
+    assert code == EXIT_OK
+    assert "fork=3/4 last=ok" in out
+
+
+def test_status_line_omits_fork_suffix_when_never_forked() -> None:
+    client = _FakeClient(
+        "http://x",
+        sessions={"s1": {"session_id": "s1", "enabled": True, "formatted": {"fork": None}}},
+    )
+    code, out, _ = _run(["status"], client)
+    assert code == EXIT_OK
+    assert "fork=" not in out
+
+
 def test_status_unknown_session_is_failure() -> None:
     client = _FakeClient("http://x")
     code, _, err = _run(["status", "--session", "missing"], client)

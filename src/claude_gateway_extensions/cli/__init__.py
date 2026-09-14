@@ -106,10 +106,12 @@ def _format_status_line(session: Mapping[str, Any], now: float) -> str:
     rewarm_suffix = f"  rewarm_write={rewarm_write}" if rewarm_write else ""
     cache = formatted.get("cache") if isinstance(formatted, dict) else None
     cache_suffix = f"  cache={cache}" if cache else ""
+    fork = formatted.get("fork") if isinstance(formatted, dict) else None
+    fork_suffix = f"  fork={fork}" if fork else ""
     return (
         f"{session_id}  enabled={enabled}  next_bump={next_bump}  until={until}  "
         f"last_result={last_outcome or '-'}  stopped={stopped_reason}"
-        f"{cache_suffix}{rewarm_suffix}"
+        f"{cache_suffix}{rewarm_suffix}{fork_suffix}"
     )
 
 

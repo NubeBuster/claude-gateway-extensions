@@ -223,6 +223,10 @@ def _state_to_json(state: SessionState) -> dict[str, object]:
         "rewarm": state.rewarm,
         "rewarm_write": _rewarm_write_to_json(state.rewarm_write),
         "replays_seen": state.replays_seen,
+        "fork_attempts": state.fork_attempts,
+        "forks_sent": state.forks_sent,
+        "last_fork_at": state.last_fork_at,
+        "last_fork_reason": state.last_fork_reason,
     }
 
 
@@ -231,7 +235,10 @@ def _state_from_json(data: dict[str, object]) -> SessionState:
 
     ``rewarm``/``rewarm_write`` default to ``False``/``None`` when absent, and
     ``replays_seen`` to ``0``, so a state persisted before these fields
-    existed loads exactly as if they had never applied.
+    existed loads exactly as if they had never applied. Likewise
+    ``fork_attempts``/``forks_sent`` default to ``0`` and
+    ``last_fork_at``/``last_fork_reason`` to ``None`` for a state persisted
+    before the Shadow Fork counters existed.
     """
     credential = data.get("last_credential")
     return SessionState(
@@ -248,6 +255,10 @@ def _state_from_json(data: dict[str, object]) -> SessionState:
         rewarm=bool(data.get("rewarm", False)),
         rewarm_write=_rewarm_write_from_json(data.get("rewarm_write")),
         replays_seen=int(data.get("replays_seen", 0)),  # type: ignore[arg-type]
+        fork_attempts=int(data.get("fork_attempts", 0)),  # type: ignore[arg-type]
+        forks_sent=int(data.get("forks_sent", 0)),  # type: ignore[arg-type]
+        last_fork_at=data.get("last_fork_at"),  # type: ignore[arg-type]
+        last_fork_reason=data.get("last_fork_reason"),  # type: ignore[arg-type]
     )
 
 
