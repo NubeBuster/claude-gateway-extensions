@@ -396,20 +396,25 @@ curl -s -X POST "http://127.0.0.1:8787/cgx/sessions/$SESSION_ID/bump"
 
 ## Current planned `TODOs`
 
-- Choose a better broader name for this project sooner than later, move it, update links and references.
+- Rename the `fork review` feature to `Shadow Fork` throughout: the CLI
+  (`cgx fork-review` and its flags), the `CGX_FORK_*` env vars, the
+  packaged templates, and the docs that describe them.
+- Move template definitions off today's `.txt` line-based front matter
+  onto Markdown agent definitions whose front matter follows the official
+  [Claude Code subagent frontmatter fields](https://code.claude.com/docs/en/sub-agents#supported-frontmatter-fields).
+- Hot reload: pick up a definition's changes, and the daemon-side fork
+  configuration (`CGX_FORK_MAX_TOKENS`, `CGX_FORK_MAX_PER_MIN`,
+  `CGX_FORK_THINKING_GUARD`, `CGX_FORK_MODEL`), without a `cgx serve`
+  restart -- both are currently frozen at daemon start.
+- Implement support for Windows.
 
-- Add testing setup for preventing regressions during scope expansion and development
-- Add `shadow fork` capability including
-  - `/name` customizability giving full control over the `/rename` without extra overhead.
-  - custom subagent configuration capabilities adhering where possible to the official [Claude Code frontmatter fields format](https://code.claude.com/docs/en/sub-agents#supported-frontmatter-fields) where sensible
-  - a ready to use implementation for a specific pattern this allows for: `fork-review` hook self assessment.
-    For example on TaskCreate at _PreToolUse_ the agent reviews its own tool call parameters, for example the teammate picked to assign to a Task, it can give some verdicts:
-    - `OK` - the session proceeds and the main session is unaffected entirely.
-    - `reject, +reason injected into additionalContext` - **only** if an intervention is decided for does this provide compounding overhead (context growth, disruption)
-    - `mutate tooluse input arguments` & `optional info injected into additionalContext` - auto correct itself with its own model, context, and an entire one-shot prompt that has no persistent overhead. **This can replace many rejecting guardrail hooks with steering and auto correction by a classifier step**
-    - `run some script conditioned on the agent's own decision` - the decision is forgotten and the main session/agent is none the wiser'
-      This allows for [agent-based-hooks](https://code.claude.com/docs/en/hooks#agent-based-hooks) but with the parent context, parent cache hit, and thus low overhead single-shot micro-fork type of agent based hook implementations. Making agent based hooks possibly viable, in contrast to the native implementation.
-- Implement support for Windows
+Shadow Fork reviews a hook event with a one-shot fork of the session's own
+cached context, then maps the verdict to that event's hook output:
+  - `OK` - the session proceeds and the main session is unaffected entirely.
+  - `reject, +reason injected into additionalContext` - **only** if an intervention is decided for does this provide compounding overhead (context growth, disruption)
+  - `mutate tooluse input arguments` & `optional info injected into additionalContext` - auto correct itself with its own model, context, and an entire one-shot prompt that has no persistent overhead. **This can replace many rejecting guardrail hooks with steering and auto correction by a classifier step**
+  - `run some script conditioned on the agent's own decision` - the decision is forgotten and the main session/agent is none the wiser
+    This allows for [agent-based-hooks](https://code.claude.com/docs/en/hooks#agent-based-hooks) but with the parent context, parent cache hit, and thus low overhead single-shot micro-fork type of agent based hook implementations. Making agent based hooks possibly viable, in contrast to the native implementation.
 
 ## Development
 
