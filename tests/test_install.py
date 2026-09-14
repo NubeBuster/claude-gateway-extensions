@@ -636,7 +636,9 @@ def test_shadow_fork_template_without_event_raises_install_error(tmp_path: Path)
     environ = {"HOME": str(tmp_path)}
     template_dir = tmp_path / "templates"
     template_dir.mkdir()
-    (template_dir / "no-event.txt").write_text("intervene: deny\n\nreview\n", encoding="utf-8")
+    (template_dir / "no-event.md").write_text(
+        "---\ndescription: a test\nintervene: deny\n---\n\nreview\n", encoding="utf-8"
+    )
     environ["CGX_TEMPLATE_DIR"] = str(template_dir)
     spec = install.ShadowForkSpec(name="no-event", prefix=None)
 
@@ -672,7 +674,7 @@ def test_shadow_fork_unknown_template_raises_install_error(tmp_path: Path) -> No
 def test_plan_install_copies_packaged_template_into_user_dir(tmp_path: Path) -> None:
     environ = {"HOME": str(tmp_path)}
     spec = install.ShadowForkSpec(name="btw", prefix="/btw")
-    user_template_path = tmp_path / ".config" / "cgx" / "templates" / "btw.txt"
+    user_template_path = tmp_path / ".config" / "cgx" / "templates" / "btw.md"
     assert not user_template_path.exists()
 
     changes = install.plan_install(
@@ -689,9 +691,11 @@ def test_plan_install_copies_packaged_template_into_user_dir(tmp_path: Path) -> 
 
 def test_plan_install_does_not_overwrite_existing_user_template(tmp_path: Path) -> None:
     environ = {"HOME": str(tmp_path)}
-    user_template_path = tmp_path / ".config" / "cgx" / "templates" / "btw.txt"
+    user_template_path = tmp_path / ".config" / "cgx" / "templates" / "btw.md"
     user_template_path.parent.mkdir(parents=True)
-    user_template_path.write_text("intervene: ask\nevent: UserPromptSubmit\n\ncustom\n")
+    user_template_path.write_text(
+        "---\ndescription: a test\nintervene: ask\nevent: UserPromptSubmit\n---\n\ncustom\n"
+    )
 
     spec = install.ShadowForkSpec(name="btw", prefix="/btw")
     changes = install.plan_install(

@@ -25,6 +25,21 @@
   if the daemon resolves a different path than the shell running it does.
   See the "Shadow Fork tuning is hot reloaded..." decision in
   `docs/DESIGN.md`.
+- Feat: Shadow Fork definitions moved from `.txt` line-based front matter
+  to `.md` files with `---`-delimited YAML front matter following the
+  Claude Code subagent frontmatter convention (`name`, `description`,
+  `model`, `tools`, plus this project's own `event`, `matcher`, `require`,
+  `intervene`). `description` is now required; `tools` is rejected
+  outright; `require` is a YAML list instead of a comma-separated string;
+  an unrecognised `event` or `intervene` value is now a parse error
+  instead of a silent fallback; unknown keys are always a parse error. A
+  definition's `model:` field is a new layer in the reviewer-model
+  precedence chain, between the CLI `--model` override and the daemon's
+  file/env/default resolution. `.txt` support is dropped outright (nothing
+  shipped in a release read it); `cgx doctor` flags a leftover `.txt` file
+  in the user's template directory. The four packaged example definitions
+  are converted. See the "Definitions are Markdown files" decision in
+  `docs/DESIGN.md`.
 - Fix: `_map_verdict` now logs a WARNING (never the mutation body) when an
   `intervene` verdict on `UserPromptSubmit` or `PostToolUse` carries a
   non-null `mutation` -- previously it was silently dropped, contradicting

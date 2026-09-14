@@ -1,5 +1,9 @@
-intervene: deny
+---
+name: rename
+description: Compose a short label for the session, applied outside the conversation via --apply.
 event: UserPromptSubmit
+intervene: deny
+---
 
 Look at this session's own context (recent files, its task, the
 conversation so far) and come up with a short label for it: lowercase,

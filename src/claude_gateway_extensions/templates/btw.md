@@ -1,5 +1,9 @@
-intervene: deny
+---
+name: btw
+description: Answer a side question asked via /btw without it ever entering the parent conversation.
 event: UserPromptSubmit
+intervene: deny
+---
 
 Answer the question below directly and concisely, using this session's own
 context (recent files, its task, the conversation so far) as background.

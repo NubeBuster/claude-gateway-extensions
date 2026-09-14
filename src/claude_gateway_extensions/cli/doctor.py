@@ -245,6 +245,32 @@ def check_shadow_fork_templates(environ: Mapping[str, str], cwd: Path) -> list[C
     return results
 
 
+def check_leftover_txt_templates(environ: Mapping[str, str]) -> list[CheckResult]:
+    """Warn about a ``.txt`` file left in the user's template directory.
+
+    Definitions moved from ``.txt`` line-based front matter to ``.md`` with
+    ``---``-delimited YAML front matter; nothing resolves a ``.txt`` file as
+    a definition any more (see the "Definitions are Markdown files" decision
+    in ``docs/DESIGN.md``), so a ``--template NAME`` that used to resolve to
+    one now resolves to nothing and fails open, silently, at hook time. This
+    surfaces that up front instead. Returns an empty list if the directory
+    does not exist or holds no ``.txt`` file.
+    """
+    results: list[CheckResult] = []
+    directory = shadow_fork.template_dir(environ)
+    if not directory.is_dir():
+        return results
+    for path in sorted(directory.glob("*.txt")):
+        results.append(
+            CheckResult(
+                "warn",
+                f"{path} is a leftover .txt definition; it is never read any more "
+                f"-- convert it to {path.with_suffix('.md')}",
+            )
+        )
+    return results
+
+
 def check_credentials(environ: Mapping[str, str], cwd: Path) -> CheckResult:
     """Check that nothing overrides the subscription credential.
 
@@ -382,6 +408,7 @@ def run_doctor(
         check_state_dir(config),
         check_config_file(config, client, daemon_check.status == "ok"),
         *check_shadow_fork_templates(environ, cwd),
+        *check_leftover_txt_templates(environ),
     ]
     for check in checks:
         stdout.write(f"{check.status}: {check.message}\n")
@@ -391,6 +418,7 @@ def run_doctor(
 __all__ = [
     "CheckResult",
     "check_config_file",
+    "check_leftover_txt_templates",
     "check_port_consistency",
     "check_shadow_fork_templates",
     "run_doctor",

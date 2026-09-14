@@ -11,7 +11,7 @@ from typing import Any
 
 import pytest
 
-from claude_gateway_extensions.cli import shadow_fork
+from claude_gateway_extensions.cli import definitions, shadow_fork
 from claude_gateway_extensions.cli.client import ApiError, DaemonUnreachable
 
 
@@ -88,11 +88,43 @@ def _run(
     return code, stdout.getvalue()
 
 
+def _wrap_as_definition(text: str) -> str:
+    """Wrap a bare ``key: value`` (+ blank line + body) string into a full ``.md`` definition.
+
+    Most tests only care about the one or two front-matter fields they are
+    testing, not ``description:`` or the ``---`` delimiters -- so a caller
+    passes exactly what it used to pass the old ``.txt`` parser (front
+    matter lines, a blank separator, then the body) and this adds a default
+    ``description:`` (unless the caller's front matter already declares
+    one) and the delimiters around it.
+    """
+    front, _sep, body = text.partition("\n\n")
+    front_lines = front.splitlines() if front else []
+    if not any(line.startswith("description:") for line in front_lines):
+        front_lines.append("description: a test definition")
+    return "---\n" + "\n".join(front_lines) + "\n---\n\n" + body
+
+
 def _write_template(tmp_path: Path, name: str, text: str) -> dict[str, str]:
-    """Write ``text`` as ``name.txt`` under a fresh ``CGX_TEMPLATE_DIR`` and return that env."""
+    """Write ``text`` (see :func:`_wrap_as_definition`) as ``name.md`` under a fresh
+    ``CGX_TEMPLATE_DIR`` and return that env.
+    """
     template_dir = tmp_path / "templates"
     template_dir.mkdir(parents=True, exist_ok=True)
-    (template_dir / f"{name}.txt").write_text(text, encoding="utf-8")
+    (template_dir / f"{name}.md").write_text(_wrap_as_definition(text), encoding="utf-8")
+    return {"CGX_TEMPLATE_DIR": str(template_dir)}
+
+
+def _write_raw_template(tmp_path: Path, name: str, text: str) -> dict[str, str]:
+    """Write ``text`` verbatim as ``name.md`` under a fresh ``CGX_TEMPLATE_DIR``.
+
+    For tests that need to control the file's exact bytes (malformed front
+    matter, missing delimiters, missing ``description:``), unlike
+    :func:`_write_template` which patches those in.
+    """
+    template_dir = tmp_path / "templates"
+    template_dir.mkdir(parents=True, exist_ok=True)
+    (template_dir / f"{name}.md").write_text(text, encoding="utf-8")
     return {"CGX_TEMPLATE_DIR": str(template_dir)}
 
 
@@ -176,6 +208,37 @@ def test_missing_template_quiet_env_suppresses_message() -> None:
     assert out == ""
 
 
+@pytest.mark.invariant(decision="Definitions are Markdown files")
+def test_tools_key_skips_with_system_message(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``tools:`` is rejected outright: a fork never calls a tool, so the key can never apply."""
+    env = _write_raw_template(
+        tmp_path, "t", "---\ndescription: a test\ntools: Bash\n---\n\nreview\n"
+    )
+    calls = _install_client(monkeypatch, result=_INTERVENE_RESULT)
+    code, out = _run({"session_id": "s1", "hook_event_name": "PreToolUse"}, env, "t")
+    assert code == 0
+    data = json.loads(out)
+    assert data["systemMessage"].startswith("cgx shadow-fork skipped")
+    assert "tools" in data["systemMessage"]
+    assert calls == []
+
+
+@pytest.mark.invariant(decision="Definitions are Markdown files")
+def test_missing_description_skips_with_system_message(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    env = _write_raw_template(tmp_path, "t", "---\nintervene: deny\n---\n\nreview\n")
+    calls = _install_client(monkeypatch, result=_INTERVENE_RESULT)
+    code, out = _run({"session_id": "s1", "hook_event_name": "PreToolUse"}, env, "t")
+    assert code == 0
+    data = json.loads(out)
+    assert data["systemMessage"].startswith("cgx shadow-fork skipped")
+    assert "description" in data["systemMessage"]
+    assert calls == []
+
+
 @pytest.mark.invariant(decision="Fail-open, but visible")
 def test_unreachable_daemon_skips_with_system_message(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -246,6 +309,34 @@ def test_model_override_reaches_the_client(tmp_path: Path, monkeypatch: pytest.M
         model="claude-override",
     )
     assert calls[0]["model"] == "claude-override"
+
+
+def test_model_definition_field_reaches_the_client_when_no_cli_override(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A definition's ``model:`` front matter is passed through like a bare ``--model``."""
+    env = _write_template(
+        tmp_path, "t", "intervene: deny\nmodel: claude-from-definition\n\nreview {tool_name}\n"
+    )
+    calls = _install_client(monkeypatch, result=_OK_RESULT)
+    _run({"session_id": "s1", "hook_event_name": "PreToolUse", "tool_name": "Bash"}, env, "t")
+    assert calls[0]["model"] == "claude-from-definition"
+
+
+def test_model_cli_override_wins_over_definition_field(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    env = _write_template(
+        tmp_path, "t", "intervene: deny\nmodel: claude-from-definition\n\nreview {tool_name}\n"
+    )
+    calls = _install_client(monkeypatch, result=_OK_RESULT)
+    _run(
+        {"session_id": "s1", "hook_event_name": "PreToolUse", "tool_name": "Bash"},
+        env,
+        "t",
+        model="claude-from-cli",
+    )
+    assert calls[0]["model"] == "claude-from-cli"
 
 
 # --- verdict-to-output mapping ------------------------------------------------
@@ -385,62 +476,162 @@ def test_dropped_mutation_is_logged(
 # --- front-matter parsing -----------------------------------------------------
 
 
-def test_absent_front_matter_defaults_to_deny(
+def test_absent_front_matter_skips_with_message(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    env = _write_template(tmp_path, "t", "review {tool_name}, no header at all\n")
-    _install_client(monkeypatch, result=_INTERVENE_RESULT)
+    """A definition with no front matter at all is malformed, not verbatim-body-deny.
+
+    Unlike the old ``.txt`` format, a ``.md`` definition must start with a
+    ``---`` delimiter -- ``description:`` is required, so there is no shape
+    a front-matter-less file could be valid in.
+    """
+    env = _write_raw_template(tmp_path, "t", "review {tool_name}, no header at all\n")
+    calls = _install_client(monkeypatch, result=_INTERVENE_RESULT)
     code, out = _run({"session_id": "s1", "hook_event_name": "PreToolUse"}, env, "t")
     assert code == 0
     data = json.loads(out)
-    assert data["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert data["systemMessage"].startswith("cgx shadow-fork skipped")
+    assert calls == []
 
 
-def test_parse_template_reads_event_and_matcher() -> None:
-    intervene, event, matcher, require, body = shadow_fork._parse_template(
-        "intervene: ask\nevent: PreToolUse\nmatcher: Bash\n\nreview {tool_name}\n"
+# --- definitions.parse_definition: the accepted flat YAML subset ------------
+
+
+def test_parse_definition_reads_event_matcher_and_model() -> None:
+    definition = definitions.parse_definition(
+        "---\n"
+        "description: a test\n"
+        "model: claude-opus-4-5\n"
+        "intervene: ask\n"
+        "event: PreToolUse\n"
+        "matcher: Bash\n"
+        "---\n\n"
+        "review {tool_name}\n",
+        default_name="t",
     )
-    assert intervene == "ask"
-    assert event == "PreToolUse"
-    assert matcher == "Bash"
-    assert require is None
-    assert body == "review {tool_name}"
+    assert definition.name == "t"
+    assert definition.description == "a test"
+    assert definition.model == "claude-opus-4-5"
+    assert definition.intervene == "ask"
+    assert definition.event == "PreToolUse"
+    assert definition.matcher == "Bash"
+    assert definition.require is None
+    assert definition.body == "review {tool_name}"
 
 
-def test_parse_template_ignores_unknown_key() -> None:
-    intervene, event, matcher, require, body = shadow_fork._parse_template(
-        "intervene: deny\nauthor: someone\n\nreview\n"
+def test_parse_definition_name_defaults_to_stem_but_can_be_overridden() -> None:
+    default = definitions.parse_definition(
+        "---\ndescription: a test\n---\n\nbody\n", default_name="stem-name"
     )
-    assert intervene == "deny"
-    assert event is None
-    assert matcher is None
-    assert require is None
-    assert body == "review"
-
-
-def test_parse_template_invalid_event_falls_back_to_undeclared() -> None:
-    _intervene, event, _matcher, _require, _body = shadow_fork._parse_template(
-        "intervene: deny\nevent: NotARealEvent\n\nreview\n"
+    assert default.name == "stem-name"
+    overridden = definitions.parse_definition(
+        "---\nname: custom\ndescription: a test\n---\n\nbody\n", default_name="stem-name"
     )
-    assert event is None
+    assert overridden.name == "custom"
 
 
-def test_parse_template_no_front_matter_leaves_event_and_matcher_unset() -> None:
-    intervene, event, matcher, require, body = shadow_fork._parse_template(
-        "review, no header at all\n"
+def test_parse_definition_rejects_unknown_key() -> None:
+    with pytest.raises(definitions.DefinitionError, match="unknown front matter key 'author'"):
+        definitions.parse_definition(
+            "---\ndescription: a test\nauthor: someone\n---\n\nreview\n", default_name="t"
+        )
+
+
+def test_parse_definition_rejects_tools_key() -> None:
+    with pytest.raises(definitions.DefinitionError, match="tools"):
+        definitions.parse_definition(
+            "---\ndescription: a test\ntools: Bash\n---\n\nreview\n", default_name="t"
+        )
+
+
+def test_parse_definition_rejects_invalid_event() -> None:
+    with pytest.raises(definitions.DefinitionError, match="event"):
+        definitions.parse_definition(
+            "---\ndescription: a test\nevent: NotARealEvent\n---\n\nreview\n", default_name="t"
+        )
+
+
+def test_parse_definition_rejects_invalid_intervene() -> None:
+    with pytest.raises(definitions.DefinitionError, match="intervene"):
+        definitions.parse_definition(
+            "---\ndescription: a test\nintervene: maybe\n---\n\nreview\n", default_name="t"
+        )
+
+
+def test_parse_definition_requires_description() -> None:
+    with pytest.raises(definitions.DefinitionError, match="description"):
+        definitions.parse_definition("---\nevent: PreToolUse\n---\n\nreview\n", default_name="t")
+
+
+def test_parse_definition_requires_opening_delimiter() -> None:
+    with pytest.raises(definitions.DefinitionError, match="---"):
+        definitions.parse_definition("description: a test\n\nreview\n", default_name="t")
+
+
+def test_parse_definition_requires_closing_delimiter() -> None:
+    with pytest.raises(definitions.DefinitionError, match="unterminated"):
+        definitions.parse_definition("---\ndescription: a test\n\nreview\n", default_name="t")
+
+
+def test_parse_definition_rejects_duplicate_key() -> None:
+    with pytest.raises(definitions.DefinitionError, match="duplicate"):
+        definitions.parse_definition(
+            "---\ndescription: one\ndescription: two\n---\n\nreview\n", default_name="t"
+        )
+
+
+def test_parse_definition_rejects_scalar_require() -> None:
+    with pytest.raises(definitions.DefinitionError, match="require"):
+        definitions.parse_definition(
+            "---\ndescription: a test\nrequire: tool_input.owner\n---\n\nreview\n",
+            default_name="t",
+        )
+
+
+def test_parse_definition_rejects_list_for_scalar_key() -> None:
+    with pytest.raises(definitions.DefinitionError, match="event"):
+        definitions.parse_definition(
+            "---\ndescription: a test\nevent:\n  - PreToolUse\n---\n\nreview\n", default_name="t"
+        )
+
+
+def test_parse_definition_reads_require_list() -> None:
+    definition = definitions.parse_definition(
+        "---\ndescription: a test\nrequire:\n  - tool_input.owner\n  - tool_name=^Task\n"
+        "---\n\nreview\n",
+        default_name="t",
     )
-    assert intervene == "deny"
-    assert event is None
-    assert matcher is None
-    assert require is None
-    assert body == "review, no header at all"
+    assert definition.require == ["tool_input.owner", "tool_name=^Task"]
 
 
-def test_parse_template_reads_require() -> None:
-    _intervene, _event, _matcher, require, _body = shadow_fork._parse_template(
-        "intervene: deny\nrequire: tool_input.owner\n\nreview\n"
+def test_parse_definition_ignores_blank_lines_and_comments() -> None:
+    definition = definitions.parse_definition(
+        "---\n"
+        "# a comment\n"
+        "description: a test\n"
+        "\n"
+        "  # an indented comment\n"
+        "event: PreToolUse\n"
+        "---\n\n"
+        "review\n",
+        default_name="t",
     )
-    assert require == "tool_input.owner"
+    assert definition.description == "a test"
+    assert definition.event == "PreToolUse"
+
+
+def test_parse_definition_strips_matching_quotes() -> None:
+    definition = definitions.parse_definition(
+        '---\ndescription: "a quoted: description"\n---\n\nreview\n', default_name="t"
+    )
+    assert definition.description == "a quoted: description"
+
+
+def test_parse_definition_list_item_without_preceding_key_is_an_error() -> None:
+    with pytest.raises(definitions.DefinitionError, match="list item"):
+        definitions.parse_definition(
+            "---\ndescription: a test\n  - stray item\n---\n\nreview\n", default_name="t"
+        )
 
 
 def test_declared_event_mismatch_skips_with_message(
@@ -500,7 +691,9 @@ def test_require_field_present_reaches_the_daemon(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     env = _write_template(
-        tmp_path, "t", "intervene: deny\nrequire: tool_input.owner\n\nreview {tool_input}\n"
+        tmp_path,
+        "t",
+        "intervene: deny\nrequire:\n  - tool_input.owner\n\nreview {tool_input}\n",
     )
     calls = _install_client(monkeypatch, result=_INTERVENE_RESULT)
     code, out = _run(
@@ -521,7 +714,9 @@ def test_require_field_missing_is_silent_with_no_daemon_call(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     env = _write_template(
-        tmp_path, "t", "intervene: deny\nrequire: tool_input.owner\n\nreview {tool_input}\n"
+        tmp_path,
+        "t",
+        "intervene: deny\nrequire:\n  - tool_input.owner\n\nreview {tool_input}\n",
     )
     calls = _install_client(monkeypatch, result=_INTERVENE_RESULT)
     code, out = _run(
@@ -538,7 +733,9 @@ def test_require_empty_string_field_counts_as_missing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     env = _write_template(
-        tmp_path, "t", "intervene: deny\nrequire: tool_input.owner\n\nreview {tool_input}\n"
+        tmp_path,
+        "t",
+        "intervene: deny\nrequire:\n  - tool_input.owner\n\nreview {tool_input}\n",
     )
     calls = _install_client(monkeypatch, result=_INTERVENE_RESULT)
     code, out = _run(
@@ -555,7 +752,7 @@ def test_require_regex_matches(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
     env = _write_template(
         tmp_path,
         "t",
-        "intervene: deny\nrequire: tool_name=^Task(Create|Update)$\n\nreview {tool_name}\n",
+        "intervene: deny\nrequire:\n  - tool_name=^Task(Create|Update)$\n\nreview {tool_name}\n",
     )
     calls = _install_client(monkeypatch, result=_INTERVENE_RESULT)
     code, out = _run(
@@ -572,7 +769,7 @@ def test_require_regex_rejects(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
     env = _write_template(
         tmp_path,
         "t",
-        "intervene: deny\nrequire: tool_name=^Task(Create|Update)$\n\nreview {tool_name}\n",
+        "intervene: deny\nrequire:\n  - tool_name=^Task(Create|Update)$\n\nreview {tool_name}\n",
     )
     calls = _install_client(monkeypatch, result=_INTERVENE_RESULT)
     code, out = _run(
@@ -589,7 +786,8 @@ def test_require_multiple_requirements_are_anded(
     env = _write_template(
         tmp_path,
         "t",
-        "intervene: deny\nrequire: tool_input.owner,tool_name=^Task(Create|Update)$\n\n"
+        "intervene: deny\nrequire:\n  - tool_input.owner\n"
+        "  - tool_name=^Task(Create|Update)$\n\n"
         "review {tool_input}\n",
     )
     calls = _install_client(monkeypatch, result=_INTERVENE_RESULT)
@@ -628,7 +826,9 @@ def test_require_malformed_value_skips_with_message(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     env = _write_template(
-        tmp_path, "t", "intervene: deny\nrequire: tool_input.[owner]\n\nreview {tool_input}\n"
+        tmp_path,
+        "t",
+        "intervene: deny\nrequire:\n  - tool_input.[owner]\n\nreview {tool_input}\n",
     )
     calls = _install_client(monkeypatch, result=_INTERVENE_RESULT)
     code, out = _run(
@@ -647,7 +847,9 @@ def test_require_malformed_regex_skips_with_message(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     env = _write_template(
-        tmp_path, "t", "intervene: deny\nrequire: tool_name=[unterminated\n\nreview\n"
+        tmp_path,
+        "t",
+        "intervene: deny\nrequire:\n  - tool_name=[unterminated\n\nreview\n",
     )
     calls = _install_client(monkeypatch, result=_INTERVENE_RESULT)
     code, out = _run(
@@ -693,7 +895,9 @@ def test_template_dir_uses_xdg_config_home(tmp_path: Path, monkeypatch: pytest.M
     xdg_config_home = tmp_path / "xdg-config"
     template_dir = xdg_config_home / "cgx" / "templates"
     template_dir.mkdir(parents=True)
-    (template_dir / "t.txt").write_text("intervene: deny\n\nreview\n", encoding="utf-8")
+    (template_dir / "t.md").write_text(
+        "---\ndescription: a test\nintervene: deny\n---\n\nreview\n", encoding="utf-8"
+    )
     env = {"XDG_CONFIG_HOME": str(xdg_config_home)}
     # Assert the redirect took effect: XDG_CONFIG_HOME resolves to exactly the
     # directory the template was placed under, inside pytest's tmp_path sandbox.
@@ -710,7 +914,9 @@ def test_template_dir_uses_appdata_when_xdg_absent(
     appdata = tmp_path / "AppData" / "Roaming"
     template_dir = appdata / "cgx" / "templates"
     template_dir.mkdir(parents=True)
-    (template_dir / "t.txt").write_text("intervene: deny\n\nreview\n", encoding="utf-8")
+    (template_dir / "t.md").write_text(
+        "---\ndescription: a test\nintervene: deny\n---\n\nreview\n", encoding="utf-8"
+    )
     env = {"APPDATA": str(appdata)}
     assert Path(env["APPDATA"]) == appdata
     _install_client(monkeypatch, result=_INTERVENE_RESULT)
@@ -723,7 +929,9 @@ def test_template_dir_falls_back_to_home(tmp_path: Path, monkeypatch: pytest.Mon
     home = tmp_path / "home" / "someone"
     template_dir = home / ".config" / "cgx" / "templates"
     template_dir.mkdir(parents=True)
-    (template_dir / "t.txt").write_text("intervene: deny\n\nreview\n", encoding="utf-8")
+    (template_dir / "t.md").write_text(
+        "---\ndescription: a test\nintervene: deny\n---\n\nreview\n", encoding="utf-8"
+    )
     env = {"HOME": str(home)}
     assert Path(env["HOME"]) == home
     _install_client(monkeypatch, result=_INTERVENE_RESULT)
@@ -738,11 +946,15 @@ def test_template_dir_prefers_cgx_template_dir_over_xdg(
     xdg_config_home = tmp_path / "xdg-config"
     decoy_dir = xdg_config_home / "cgx" / "templates"
     decoy_dir.mkdir(parents=True)
-    (decoy_dir / "t.txt").write_text("intervene: ask\n\ndecoy\n", encoding="utf-8")
+    (decoy_dir / "t.md").write_text(
+        "---\ndescription: a test\nintervene: ask\n---\n\ndecoy\n", encoding="utf-8"
+    )
 
     override_dir = tmp_path / "override"
     override_dir.mkdir()
-    (override_dir / "t.txt").write_text("intervene: deny\n\nreal\n", encoding="utf-8")
+    (override_dir / "t.md").write_text(
+        "---\ndescription: a test\nintervene: deny\n---\n\nreal\n", encoding="utf-8"
+    )
 
     env = {"CGX_TEMPLATE_DIR": str(override_dir), "XDG_CONFIG_HOME": str(xdg_config_home)}
     _install_client(monkeypatch, result=_INTERVENE_RESULT)

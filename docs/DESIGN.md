@@ -284,7 +284,15 @@ review" roadmap line; no part of it ships in 1.0.
   optional `model`, else `CGX_SHADOW_FORK_MODEL` (the daemon-wide default), else
   `cgx shadow-fork --model`, overrides it for one fork; an override
   always forfeits the cache read and is logged once at WARNING with that
-  reason. The response reports `model` (the model actually sent to) and
+  reason. A definition's own `model:` front-matter key (see "Definitions
+  are Markdown files" below) slots into this chain as another way to
+  populate the request field, never as a daemon-side concept: `cgx
+  shadow-fork` resolves `--model` if given, else the loaded definition's
+  `model:`, else omits the field entirely and lets the daemon apply its
+  own defaults (a config file, then `CGX_SHADOW_FORK_MODEL`, then the
+  snapshot's own model) exactly as it does today. The daemon never learns
+  a definition exists; it only ever sees the one resolved `model` field
+  the hook CLI sends, same as a bare `--model` override. The response reports `model` (the model actually sent to) and
   `stream_key` (the selected snapshot's) so a caller can see which model
   answered without guessing; both are `null` only for `no_snapshot`,
   reached before a snapshot exists. An override that lands on a model
@@ -416,13 +424,18 @@ review" roadmap line; no part of it ships in 1.0.
   a fork is ever requested — previously a template wired to the wrong
   event evaporated silently, since `_map_verdict` already returned
   `None` for it after paying for the fork.
-- **A template may also declare `require:`, a comma-separated,
-  ANDed list of conditions on the hook payload evaluated before the
-  template is rendered or the daemon is called.** `path` means "this
-  field exists and is a non-empty string"; `path=regex` means "this
-  field exists and `re.search` matches it" (rendered as compact JSON
-  first when the value is not already a string, same as a non-string
-  `{placeholder}`). `matcher` alone can only see a tool name, so a hook
+- **A definition may also declare `require:`, an ANDed list of
+  conditions on the hook payload evaluated before the template is
+  rendered or the daemon is called.** `require:` is a YAML block list (see
+  "Definitions are Markdown files" below), one requirement per item, not
+  the comma-separated scalar the old `.txt` format used -- the format
+  already needs list syntax for the accepted subset to have a reason to
+  exist, and one requirement per line reads better than packing several
+  into one comma-joined string. Each item is `path` or `path=regex`:
+  `path` means "this field exists and is a non-empty string"; `path=regex`
+  means "this field exists and `re.search` matches it" (rendered as
+  compact JSON first when the value is not already a string, same as a
+  non-string `{placeholder}`). `matcher` alone can only see a tool name, so a hook
   on a hot event like `TaskUpdate` would otherwise fire on every status
   flip and description edit, not just the ones a template has anything
   to say about — each one a full replay of the largest prompt prefix on
@@ -438,14 +451,116 @@ review" roadmap line; no part of it ships in 1.0.
   `task-assignment` template declares `require: tool_input.owner`, since
   its `TaskCreate|TaskUpdate` matcher alone cannot express "an owner is
   being set".
-- **Templates are plain text files in the user's config directory**
-  (`CGX_TEMPLATE_DIR`, default `$XDG_CONFIG_HOME/cgx/templates`),
-  `{placeholder}` substituted from the hook payload's top-level fields,
-  unknown placeholders left literal. Four ship as examples — task
-  assignment review at `PreToolUse` `TaskCreate|TaskUpdate`, a permission
-  classifier at `PreToolUse` `Bash`, and the `UserPromptSubmit` pair
-  `btw` and `rename` below — because the feature's value is entirely in
-  prompts the user is expected to edit.
+- **Definitions are Markdown files (`.md`) with `---`-delimited YAML
+  front matter, in the user's config directory** (`CGX_TEMPLATE_DIR`,
+  default `$XDG_CONFIG_HOME/cgx/templates`), the body `{placeholder}`
+  substituted from the hook payload's top-level fields exactly as before,
+  unknown placeholders left literal. The extension and delimiter follow
+  the [Claude Code subagent front-matter
+  convention](https://code.claude.com/docs/en/sub-agents#supported-frontmatter-fields)
+  so a definition reads like any other agent definition, even though it
+  is never loaded as a real subagent (a fork calls no tools and takes no
+  second turn; see "Non-goals" above) -- familiarity for whoever edits it
+  is the whole point, not interoperability with the subagent loader.
+  Four ship as examples — task assignment review at `PreToolUse`
+  `TaskCreate|TaskUpdate`, a permission classifier at `PreToolUse`
+  `Bash`, and the `UserPromptSubmit` pair `btw` and `rename` below —
+  because the feature's value is entirely in prompts the user is
+  expected to edit.
+- **The front matter is parsed by a minimal in-house parser for a flat
+  scalar/list YAML subset, not PyYAML** (the project's one runtime
+  dependency stays `aiohttp`). The file must start with a `---` line and
+  the front matter must end with another `---` line on its own; a
+  missing opening or closing delimiter is an error. Between them, each
+  line is either `key: value` (a scalar: the rest of the line, trimmed;
+  a value wrapped in matching `"` or `'` has the quotes stripped
+  verbatim, no escape processing) or a bare `key:` followed by one or
+  more `  - item` lines (a block list, one item per line, same value
+  rule per item), a blank line, or a full-line `#` comment (leading
+  whitespace then `#` to end of line) — both ignored, since Claude Code's
+  own agent files carry both and the parser gains nothing by refusing
+  them. `key` is `[A-Za-z][A-Za-z0-9_-]*`, matching the old format.
+  Anything else in the front matter block — a nested mapping, a
+  flow-style `[a, b]` or `{a: b}`, a multi-line scalar (`|`/`>`), an
+  inline (not full-line) `#`, a list item with no preceding bare `key:`,
+  a duplicate key — is a parse error naming the line, not a silent
+  fallback: the old `.txt` parser's leniency (unrecognised front matter
+  used verbatim as body) is gone along with the format, because a
+  `description` is now required and a definition that fails to parse its
+  own front matter can never satisfy that. A key given as the wrong
+  shape for what it accepts (e.g. `event:` as a list) is the same class
+  of error.
+- **Unknown keys are a parse error, not silently ignored** — the old
+  `.txt` parser's "any other key is ignored" behaviour let a typo
+  (`evnet:`) evaporate silently; the new parser has a closed, fixed key
+  set and rejects anything outside it by name. The accepted keys:
+  - `name` (scalar, optional, defaults to the file stem) — the Claude
+    Code subagent field; purely cosmetic here, never used to resolve
+    which file loads (that is still the `--template NAME` argument /
+    filename), shown instead of the stem in an error or `cgx doctor`
+    message when set.
+  - `description` (scalar, **required**) — the Claude Code subagent
+    field; human-facing, shown by `cgx doctor`. Required because a
+    definition exists to be read and edited by the user, and an
+    undescribed one defeats that; also the field whose absence makes
+    "front matter is now mandatory" enforceable without a separate rule.
+  - `model` (scalar, optional) — the Claude Code subagent field, reused
+    for the reviewer model override with the same semantics as the
+    request's `model` field and `CGX_SHADOW_FORK_MODEL` (see "A fork
+    runs on the reviewed session's own model by default" above for the
+    full precedence chain).
+  - `tools` (**rejected**, any value) — the Claude Code subagent field,
+    but there is nothing for it to mean here: a fork never calls a tool
+    at all, by design (see "Non-goals" above), so `tools:` restricting
+    which ones it may call is always a no-op at best and a false promise
+    at worst. Rejecting it outright, the same as an unknown key, means a
+    definition author who writes it gets told immediately rather than
+    trusting a restriction that silently never applied.
+  - `event` (scalar, optional) — one of `PreToolUse`, `UserPromptSubmit`,
+    `PostToolUse`; unlike the `.txt` format, an unrecognised value is now
+    a parse error naming the line, not a silent fallback to undeclared.
+    A required `description` plus hard errors everywhere else in the
+    format made the old fallback the odd one out, and the file is
+    user-authored, so a typo (`event: UserPromtSubmit`) is worth hearing
+    about rather than silently never matching. `cgx configure
+    --shadow-fork` still separately turns an absent `event:` into its
+    own explicit `InstallError` naming the template, since "not declared
+    at all" and "declared wrong" are different failures worth different
+    messages.
+  - `matcher` (scalar, optional) — unchanged: a free string (e.g.
+    `Bash`), never validated here, read only by `cgx configure
+    --shadow-fork` to place the hook entry.
+  - `require` (list, optional) — see above; a scalar `require:` value
+    is the wrong shape and a parse error, not a single-item list.
+  - `intervene` (scalar, optional, defaults to `deny`) — one of `deny`,
+    `ask`, `context`; unlike the `.txt` format, an unrecognised value is
+    now a parse error naming the line rather than a silent fallback to
+    `deny`, for the same reason as `event` above.
+
+  `name`, `description`, `model` and `tools` are the official Claude
+  Code subagent fields this convention borrows; `event`, `matcher`,
+  `require` and `intervene` are the fields this project's hooks need
+  that the convention has no equivalent for, carried in the same front
+  matter block rather than a second block, since the parser has no way
+  to tell which section a key belongs to and no reason to care.
+- **The body may still contain `{placeholder}` substitutions** —
+  unchanged from the `.txt` format: the hook payload's top-level fields
+  by name, plus `argument` (the text after a matched `--prefix`), a
+  non-string field rendered as compact JSON, and any placeholder naming
+  a field the payload does not carry left literal rather than raised.
+- **Migration is a hard cut, not a deprecation window: `.txt` support is
+  dropped outright, the four packaged templates become `.md` files with
+  converted front matter, and nothing reads a `.txt` file as a
+  definition again.** Nothing has shipped in a release that reads
+  `.txt` definitions — `cgx shadow-fork` and the packaged templates
+  postdate `v1.0.0` — so there is no installed base to carry forward and
+  no version of the parser needs to accept both shapes at once. `cgx
+  doctor` gains a check that flags a leftover `<name>.txt` file sitting
+  in the user's template directory (a stale copy from editing an example
+  before this change) as a `warn`, naming the `.md` file it should
+  become, since a `--template NAME` that used to resolve there now
+  resolves nowhere and fails open, silently, at hook time — exactly the
+  class of problem `cgx doctor` exists to surface up front.
 - **`/btw <question>` is a `UserPromptSubmit` template that always
   intervenes.** The answer comes back as the block reason, so the
   question and its answer are shown to the user and never enter the

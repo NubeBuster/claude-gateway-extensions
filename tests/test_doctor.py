@@ -293,8 +293,9 @@ def test_shadow_fork_check_warns_on_event_mismatch(tmp_path: Path) -> None:
     environ = {"HOME": str(home)}
     template_dir = tmp_path / "templates"
     template_dir.mkdir()
-    (template_dir / "moved.txt").write_text(
-        "intervene: deny\nevent: PreToolUse\n\nreview\n", encoding="utf-8"
+    (template_dir / "moved.md").write_text(
+        "---\ndescription: a test\nintervene: deny\nevent: PreToolUse\n---\n\nreview\n",
+        encoding="utf-8",
     )
     environ["CGX_TEMPLATE_DIR"] = str(template_dir)
 
@@ -333,6 +334,33 @@ def test_shadow_fork_check_empty_when_no_entries(tmp_path: Path) -> None:
     environ = {"HOME": str(home)}
     install.install(scope="user", url=URL, force=False, dry_run=False, environ=environ, cwd=cwd)
     assert doctor.check_shadow_fork_templates(environ, cwd) == []
+
+
+def test_leftover_txt_template_is_a_warning(tmp_path: Path) -> None:
+    template_dir = tmp_path / "templates"
+    template_dir.mkdir()
+    (template_dir / "old.txt").write_text("intervene: deny\n\nreview\n", encoding="utf-8")
+    environ = {"CGX_TEMPLATE_DIR": str(template_dir)}
+    results = doctor.check_leftover_txt_templates(environ)
+    assert len(results) == 1
+    assert results[0].status == "warn"
+    assert str(template_dir / "old.txt") in results[0].message
+    assert str(template_dir / "old.md") in results[0].message
+
+
+def test_no_leftover_txt_template_is_empty(tmp_path: Path) -> None:
+    template_dir = tmp_path / "templates"
+    template_dir.mkdir()
+    (template_dir / "current.md").write_text(
+        "---\ndescription: a test\n---\n\nreview\n", encoding="utf-8"
+    )
+    environ = {"CGX_TEMPLATE_DIR": str(template_dir)}
+    assert doctor.check_leftover_txt_templates(environ) == []
+
+
+def test_leftover_txt_check_empty_when_template_dir_absent(tmp_path: Path) -> None:
+    environ = {"CGX_TEMPLATE_DIR": str(tmp_path / "does-not-exist")}
+    assert doctor.check_leftover_txt_templates(environ) == []
 
 
 def test_state_dir_wrong_mode_is_a_warning(tmp_path: Path) -> None:

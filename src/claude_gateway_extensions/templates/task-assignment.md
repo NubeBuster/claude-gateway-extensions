@@ -1,7 +1,12 @@
-intervene: context
+---
+name: task-assignment
+description: Advise on a model-to-task tier mismatch when a task is assigned an owner.
 event: PreToolUse
 matcher: TaskCreate|TaskUpdate
-require: tool_input.owner
+require:
+  - tool_input.owner
+intervene: context
+---
 
 Review the task assignment below for a model-to-task mismatch: does
 the task's complexity (interpretation, ambiguity, debugging depth) match

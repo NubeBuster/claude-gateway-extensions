@@ -20,19 +20,19 @@ through the shell with the verdict JSON on its stdin, for something like a
 ``/rename`` that composes a name from the fork's context and applies it
 outside the conversation being renamed.
 
-A template may also declare the ``event`` (and, informationally, the
+A definition may also declare the ``event`` (and, informationally, the
 ``matcher``) it is written for in its front matter. A payload whose
 ``hook_event_name`` disagrees with a declared ``event`` is a configuration
 mistake -- the hook exits 0 with the same fail-open skip ``systemMessage``,
 naming both, rather than the review silently evaporating.
 
-A ``require:`` front-matter line gates a template on the hook payload
-itself -- e.g. ``require: tool_input.owner`` -- so a hot event (every
+A ``require:`` front-matter list gates a definition on the hook payload
+itself -- e.g. ``require: [tool_input.owner]`` -- so a hot event (every
 ``TaskUpdate``, not just ones that set an owner) does not burn the fork
-budget on payloads the template has nothing to say about. A requirement
+budget on payloads the definition has nothing to say about. A requirement
 that does not hold is the same "does not apply here" class as a ``--prefix``
-mismatch: silent, no fork requested. A malformed ``require:`` value is a
-broken template, not a non-match, so it is the usual fail-open skip with a
+mismatch: silent, no fork requested. A malformed ``require:`` item is a
+broken definition, not a non-match, so it is the usual fail-open skip with a
 visible ``systemMessage`` instead.
 """
 
@@ -48,6 +48,10 @@ from pathlib import Path
 from typing import Any, TextIO
 
 from claude_gateway_extensions.cli.client import ApiError, ControlClient, DaemonUnreachable
+from claude_gateway_extensions.cli.definitions import (
+    DECISION_BLOCK_EVENTS as _DECISION_BLOCK_EVENTS,
+)
+from claude_gateway_extensions.cli.definitions import Definition, DefinitionError, parse_definition
 from claude_gateway_extensions.config import Config, resolve_home
 
 logger = logging.getLogger(__name__)
@@ -56,14 +60,8 @@ logger = logging.getLogger(__name__)
 #: inside the same hook invocation, so it gets the same budget.
 _APPLY_TIMEOUT_S = 5
 
-#: The ``intervene:`` front-matter key's allowed values.
-_INTERVENE_VALUES = {"deny", "ask", "context"}
-
-#: Matches one front-matter line, e.g. ``intervene: ask``.
-_FRONT_MATTER_LINE_RE = re.compile(r"^([A-Za-z][A-Za-z0-9_-]*):\s*(.*)$")
-
 #: Matches a ``{placeholder}`` -- deliberately narrower than
-#: :meth:`str.format`'s syntax so a template's JSON contract example
+#: :meth:`str.format`'s syntax so a definition's JSON contract example
 #: (``{"verdict": ...}``) is never mistaken for a placeholder and never
 #: needs escaping.
 _PLACEHOLDER_RE = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")
@@ -72,14 +70,7 @@ _PLACEHOLDER_RE = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")
 #: ``config.py``'s ``_parse_bool`` set.
 _TRUE_VALUES = {"true", "1", "yes"}
 
-#: Hook events whose output uses the top-level ``decision: "block"`` shape.
-_DECISION_BLOCK_EVENTS = {"UserPromptSubmit", "PostToolUse"}
-
-#: Every event a template's ``event:`` front-matter line may declare --
-#: exactly the events :func:`_map_verdict` knows how to map.
-_MAPPABLE_EVENTS = {"PreToolUse", *_DECISION_BLOCK_EVENTS}
-
-#: Matches one dotted field path in a ``require:`` value, e.g. ``tool_input.owner``.
+#: Matches one dotted field path in a ``require:`` item, e.g. ``tool_input.owner``.
 _REQUIRE_PATH_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$")
 
 
@@ -92,13 +83,15 @@ def _env_flag(environ: Mapping[str, str], name: str) -> bool:
     return environ.get(name, "").strip().lower() in _TRUE_VALUES
 
 
-def _template_dir(environ: Mapping[str, str]) -> Path:
+def template_dir(environ: Mapping[str, str]) -> Path:
     r"""Return the user's template directory, following ``config.py``'s env-only style.
 
     Precedence: ``CGX_TEMPLATE_DIR`` if set, then ``XDG_CONFIG_HOME``, then
     (Windows signalled by ``APPDATA`` being present in ``environ``, never by
     ``sys.platform``) ``%APPDATA%\cgx\templates``, then the POSIX/XDG
-    default ``~/.config/cgx/templates`` under :func:`resolve_home`.
+    default ``~/.config/cgx/templates`` under :func:`resolve_home`. Public so
+    ``cgx doctor`` can scan the directory for a leftover ``.txt`` definition
+    from before the Markdown migration.
     """
     override = environ.get("CGX_TEMPLATE_DIR")
     if override:
@@ -112,19 +105,19 @@ def _template_dir(environ: Mapping[str, str]) -> Path:
     return resolve_home(environ) / ".config" / "cgx" / "templates"
 
 
-def _load_template(name: str, environ: Mapping[str, str]) -> str:
-    """Return the named template's raw text: the user directory first, then packaged examples.
+def _load_template_text(name: str, environ: Mapping[str, str]) -> str:
+    """Return the named definition's raw text: the user directory first, then packaged examples.
 
     Raises :class:`TemplateError` if neither location has it or the user
     copy cannot be read.
     """
-    user_path = _template_dir(environ) / f"{name}.txt"
+    user_path = template_dir(environ) / f"{name}.md"
     if user_path.is_file():
         try:
             return user_path.read_text(encoding="utf-8")
         except OSError as exc:
             raise TemplateError(f"cannot read template {name!r} ({exc})") from exc
-    packaged = resources.files("claude_gateway_extensions").joinpath("templates", f"{name}.txt")
+    packaged = resources.files("claude_gateway_extensions").joinpath("templates", f"{name}.md")
     try:
         if packaged.is_file():
             return packaged.read_text(encoding="utf-8")
@@ -133,15 +126,30 @@ def _load_template(name: str, environ: Mapping[str, str]) -> str:
     raise TemplateError(f"template not found: {name!r}")
 
 
+def _load_definition(name: str, environ: Mapping[str, str]) -> Definition:
+    """Load and parse definition ``name``: the user directory first, then packaged examples.
+
+    Raises :class:`TemplateError` if the file cannot be found/read, or if
+    its front matter fails to parse -- a malformed definition is reported
+    through the same channel as a missing one, since both leave
+    :func:`run_shadow_fork` with nothing it can review.
+    """
+    text = _load_template_text(name, environ)
+    try:
+        return parse_definition(text, default_name=name)
+    except DefinitionError as exc:
+        raise TemplateError(f"template {name!r} is malformed ({exc})") from exc
+
+
 def packaged_template_text(name: str) -> str:
     """Return the packaged example template's raw text, ignoring any user override.
 
     Raises :class:`TemplateError` if no packaged template named ``name``
     exists. Used by ``cgx configure --shadow-fork`` to seed the user's
     template directory with an editable copy -- never to decide what to load
-    at review time, which stays :func:`_load_template`'s job.
+    at review time, which stays :func:`_load_definition`'s job.
     """
-    packaged = resources.files("claude_gateway_extensions").joinpath("templates", f"{name}.txt")
+    packaged = resources.files("claude_gateway_extensions").joinpath("templates", f"{name}.md")
     try:
         if packaged.is_file():
             return packaged.read_text(encoding="utf-8")
@@ -152,71 +160,22 @@ def packaged_template_text(name: str) -> str:
 
 def user_template_path(name: str, environ: Mapping[str, str]) -> Path:
     """Return where template ``name`` would live in the user's template directory."""
-    return _template_dir(environ) / f"{name}.txt"
+    return template_dir(environ) / f"{name}.md"
 
 
 def load_template_declaration(
     name: str, environ: Mapping[str, str]
 ) -> tuple[str | None, str | None]:
-    """Return the ``(event, matcher)`` template ``name`` declares in its front matter.
+    """Return the ``(event, matcher)`` definition ``name`` declares in its front matter.
 
     Resolves the same way :func:`run_shadow_fork` does (user directory
     first, then the packaged copy). Raises :class:`TemplateError` if the
-    template cannot be found or read -- ``cgx configure --shadow-fork``
-    turns that into an ``InstallError`` naming the template.
+    definition cannot be found, read, or parsed -- ``cgx configure
+    --shadow-fork`` turns that into an ``InstallError`` naming the template,
+    and ``cgx doctor`` turns it into a ``fail`` result.
     """
-    text = _load_template(name, environ)
-    _intervene, event, matcher, _require, _body = _parse_template(text)
-    return event, matcher
-
-
-def _parse_template(text: str) -> tuple[str, str | None, str | None, str | None, str]:
-    """Split ``text`` into ``intervene``, declared ``event``, ``matcher``, ``require`` and body.
-
-    Optional ``key: value`` lines at the top, then a blank separator line,
-    then the body. Four keys are recognised:
-
-    - ``intervene`` (``deny`` by default): an absent header, or a value
-      outside ``deny``/``ask``/``context``, both fall back to ``deny``.
-    - ``event`` (``None`` by default): the hook event the template is
-      written for, one of the events :func:`_map_verdict` can map --
-      anything else (including absent) is ``None``, matching how an
-      unrecognised ``intervene`` value falls back rather than raising.
-    - ``matcher`` (``None`` by default): a free string, the Claude Code hook
-      matcher (e.g. ``Bash``); never validated, since the set of valid tool
-      names is not this module's to know.
-    - ``require`` (``None`` by default): the raw, still-unparsed value of a
-      comma-separated list of hook-payload requirements; see
-      :func:`_parse_requirements` for its shape. Kept raw here so a
-      malformed value can be reported once, at the point it is evaluated,
-      rather than silently swallowed at parse time like an unrecognised
-      ``intervene``/``event``.
-
-    Any other key is ignored. A template with no front matter at all (no
-    line matching the ``key: value`` shape) is used verbatim as the body,
-    with all four fields at their defaults.
-    """
-    lines = text.splitlines()
-    front_matter: dict[str, str] = {}
-    i = 0
-    while i < len(lines):
-        match = _FRONT_MATTER_LINE_RE.match(lines[i])
-        if match is None:
-            break
-        front_matter[match.group(1)] = match.group(2).strip()
-        i += 1
-    if i > 0 and i < len(lines) and lines[i].strip() == "":
-        i += 1
-    body = "\n".join(lines[i:])
-    intervene = front_matter.get("intervene", "deny")
-    if intervene not in _INTERVENE_VALUES:
-        intervene = "deny"
-    event = front_matter.get("event")
-    if event not in _MAPPABLE_EVENTS:
-        event = None
-    matcher = front_matter.get("matcher") or None
-    require = front_matter.get("require") or None
-    return intervene, event, matcher, require, body
+    definition = _load_definition(name, environ)
+    return definition.event, definition.matcher
 
 
 def _get_path(payload: Mapping[str, Any], path: str) -> Any:
@@ -237,17 +196,18 @@ def _get_path(payload: Mapping[str, Any], path: str) -> Any:
     return value
 
 
-def _parse_requirements(raw: str) -> list[tuple[str, re.Pattern[str] | None]]:
-    """Parse a ``require:`` value into ``(path, pattern)`` pairs, all of which must hold.
+def _parse_requirements(items: list[str]) -> list[tuple[str, re.Pattern[str] | None]]:
+    """Parse a ``require:`` list into ``(path, pattern)`` pairs, all of which must hold.
 
-    ``raw`` is a comma-separated list of ``path`` (existence, non-empty
-    string) or ``path=regex`` (existence, :func:`re.search` match) items.
-    Raises :class:`ValueError` on an empty item, an invalid dotted path, or
-    an unparseable regex -- the caller turns that into the fail-open skip,
-    since a malformed ``require:`` is a broken template, not a non-match.
+    ``items`` is the definition's ``require:`` list, each item ``path``
+    (existence, non-empty string) or ``path=regex`` (existence,
+    :func:`re.search` match). Raises :class:`ValueError` on an empty item, an
+    invalid dotted path, or an unparseable regex -- the caller turns that
+    into the fail-open skip, since a malformed ``require:`` item is a broken
+    definition, not a non-match.
     """
     requirements: list[tuple[str, re.Pattern[str] | None]] = []
-    for item in raw.split(","):
+    for item in items:
         item = item.strip()
         if not item:
             raise ValueError("empty requirement")
@@ -394,8 +354,10 @@ def run_shadow_fork(
     verdict from the daemon is also silent -- only ``intervene`` produces
     output, and only an ``intervene`` verdict ever runs ``apply``. ``model``
     overrides the reviewer model for this fork only, always forfeiting the
-    cache read; omitted, the daemon falls back to ``CGX_SHADOW_FORK_MODEL`` then the
-    session's own model. ``apply``, when given, is a shell command run on an
+    cache read; omitted, the loaded definition's own ``model:`` front matter
+    is used instead, and if that is also absent the daemon falls back to its
+    own defaults (a config file, then ``CGX_SHADOW_FORK_MODEL``, then the
+    session's own model). ``apply``, when given, is a shell command run on an
     ``intervene`` verdict with the verdict JSON (``{"verdict", "reason",
     "mutation"}``) on its stdin, for a side effect the parent session should
     never see happen -- the verdict is still mapped to the hook output as
@@ -435,35 +397,45 @@ def run_shadow_fork(
         return 0
 
     try:
-        template_text = _load_template(template, environ)
+        definition = _load_definition(template, environ)
     except TemplateError as exc:
         return _skip(str(exc))
 
-    intervene_mode, declared_event, _matcher, require_raw, body = _parse_template(template_text)
-
     hook_event = payload.get("hook_event_name")
-    if declared_event is not None and hook_event != declared_event:
+    if definition.event is not None and hook_event != definition.event:
         return _skip(
-            f"template {template!r} declares event {declared_event!r}, "
+            f"template {template!r} declares event {definition.event!r}, "
             f"hook fired for {hook_event!r}"
         )
 
-    if require_raw is not None:
+    if definition.require is not None:
         try:
-            requirements = _parse_requirements(require_raw)
+            requirements = _parse_requirements(definition.require)
         except ValueError as exc:
-            return _skip(f"template {template!r} has a malformed `require:` value ({exc})")
+            return _skip(f"template {template!r} has a malformed `require:` item ({exc})")
         if not all(_requirement_holds(payload, path, pattern) for path, pattern in requirements):
             return 0
 
     fields = _build_fields(payload, argument)
-    rendered_prompt = _render(body, fields)
+    rendered_prompt = _render(definition.body, fields)
+
+    # A CLI ``--model`` override wins; failing that, the definition's own
+    # ``model:`` front matter is passed through as if it had been given on
+    # the command line -- the daemon never learns a definition exists, it
+    # only ever sees this one resolved ``model`` field (see the "A fork
+    # runs on the reviewed session's own model by default" decision).
+    resolved_model = model or definition.model
 
     config = Config.from_env(environ)
     client = ControlClient(config.url)
     try:
         result = client.fork(
-            session_id, rendered_prompt, hook_event, payload, config.shadow_fork_max_tokens, model
+            session_id,
+            rendered_prompt,
+            hook_event,
+            payload,
+            config.shadow_fork_max_tokens,
+            resolved_model,
         )
     except DaemonUnreachable as exc:
         return _skip(f"daemon not reachable ({exc})")
@@ -482,7 +454,7 @@ def run_shadow_fork(
     if not isinstance(mutation, dict):
         mutation = None
 
-    output = _map_verdict(hook_event, intervene_mode, reason, mutation)
+    output = _map_verdict(hook_event, definition.intervene, reason, mutation)
     if output is None:
         return 0
 
@@ -502,5 +474,6 @@ __all__ = [
     "load_template_declaration",
     "packaged_template_text",
     "run_shadow_fork",
+    "template_dir",
     "user_template_path",
 ]

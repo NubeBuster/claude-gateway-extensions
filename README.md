@@ -281,7 +281,7 @@ daemon and does not go through a settings.json variable.
 | ---------- | ----------------------- | ---------------------------------------------------------- |
 | `CGX_URL` | `http://127.0.0.1:8787` | where the hook, the CLI and the statusline find the daemon; falls back to a loopback `ANTHROPIC_BASE_URL` (which `cgx configure` sets) when unset |
 | `CGX_SHADOW_FORK_QUIET` | unset (false) | suppress `cgx shadow-fork`'s fail-open `systemMessage` when a review is skipped |
-| `CGX_TEMPLATE_DIR` | `${XDG_CONFIG_HOME:-~/.config}/cgx/templates` (POSIX); `%APPDATA%\cgx\templates` (Windows) | where `cgx shadow-fork` looks up a named template |
+| `CGX_TEMPLATE_DIR` | `${XDG_CONFIG_HOME:-~/.config}/cgx/templates` (POSIX); `%APPDATA%\cgx\templates` (Windows) | where `cgx shadow-fork` looks up a named `.md` definition |
 
 #### Claude Code Hook
 
@@ -433,9 +433,6 @@ curl -s -X POST "http://127.0.0.1:8787/cgx/sessions/$SESSION_ID/bump"
 
 ## Current planned `TODOs`
 
-- Move template definitions off today's `.txt` line-based front matter
-  onto Markdown agent definitions whose front matter follows the official
-  [Claude Code subagent frontmatter fields](https://code.claude.com/docs/en/sub-agents#supported-frontmatter-fields).
 - Hot reload: pick up a definition's changes without a `cgx serve` restart
   -- currently frozen at daemon start.
 - Implement support for Windows.

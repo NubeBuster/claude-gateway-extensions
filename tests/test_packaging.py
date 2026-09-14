@@ -49,23 +49,24 @@ def test_no_second_http_or_cli_framework_is_a_runtime_dependency() -> None:
     )
 
 
-#: The three packaged shadow-review-fork example templates; see
+#: The four packaged shadow-fork example definitions; see
 #: ``src/claude_gateway_extensions/templates/`` and the "Shadow Fork"
 #: section in ``docs/DESIGN.md``.
-_PACKAGED_TEMPLATES = ["task-assignment", "permission-classifier", "btw"]
+_PACKAGED_TEMPLATES = ["task-assignment", "permission-classifier", "btw", "rename"]
 
 
 @pytest.mark.parametrize("name", _PACKAGED_TEMPLATES)
 def test_packaged_shadow_fork_template_is_resource_readable(name: str) -> None:
-    """Each example template ships inside the package and is readable via ``importlib.resources``.
+    """Each example definition ships inside the package and is readable via ``importlib.resources``.
 
-    This is what :func:`~claude_gateway_extensions.cli.shadow_fork._load_template`
+    This is what :func:`~claude_gateway_extensions.cli.shadow_fork._load_template_text`
     falls back to once the user's own ``CGX_TEMPLATE_DIR`` has nothing by that
     name, in an installed layout (wheel or editable install) where there is
     no ``src/`` checkout to read from directly.
     """
-    resource = resources.files("claude_gateway_extensions").joinpath("templates", f"{name}.txt")
+    resource = resources.files("claude_gateway_extensions").joinpath("templates", f"{name}.md")
     assert resource.is_file(), f"template resource missing from package: {name}"
     text = resource.read_text(encoding="utf-8")
-    assert "intervene:" in text
+    assert text.startswith("---\n")
+    assert "description:" in text
     assert "verdict" in text

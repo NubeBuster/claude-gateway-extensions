@@ -682,7 +682,7 @@ def test_configure_shadow_fork_flag_wires_hook_and_copies_template(tmp_path: Pat
     data = json.loads(settings_path.read_text())
     commands = {e["hooks"][0]["command"] for e in data["hooks"]["UserPromptSubmit"]}
     assert "cgx shadow-fork --template btw --prefix /btw" in commands
-    assert (tmp_path / ".config" / "cgx" / "templates" / "btw.txt").is_file()
+    assert (tmp_path / ".config" / "cgx" / "templates" / "btw.md").is_file()
 
 
 def test_configure_shadow_fork_unknown_template_fails(tmp_path: Path) -> None:
