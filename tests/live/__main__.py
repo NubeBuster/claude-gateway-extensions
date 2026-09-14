@@ -15,7 +15,7 @@ from pathlib import Path
 
 from .daemon import Daemon, default_cgx_bin, free_port
 from .harness import LiveRun, RunConfig
-from .subject import TmuxSubject
+from .subject import FakeHomeError, TmuxSubject, prepare_fake_home
 
 #: Where the run keeps its scratch cwd, daemon state and logs. Fixed rather
 #: than a fresh temp directory per run: a stable path keeps whatever state
@@ -111,11 +111,18 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     require_tmux()
 
+    real_home = Path(os.path.expanduser("~"))
+    try:
+        fake_home = prepare_fake_home(args.scratch, real_home)
+    except FakeHomeError as exc:
+        raise SystemExit(str(exc)) from exc
+
     config = RunConfig(
         claude_bin=resolve_claude_bin(args.claude_bin),
         cgx_bin=args.cgx_bin or default_cgx_bin(),
         scratch_dir=args.scratch,
-        home=Path(os.path.expanduser("~")),
+        subject_config_dir=fake_home.config_dir,
+        real_home=real_home,
         model=args.model,
         tag=args.tag,
         budget_usd=args.budget_usd,
@@ -135,11 +142,13 @@ def main(argv: list[str] | None = None) -> int:
         claude_bin=config.claude_bin,
         model=config.model,
         base_url=daemon.base_url,
+        fake_home=fake_home.home,
+        fake_config_dir=fake_home.config_dir,
     )
 
     print(
         f"live: subject {config.session_name} in {config.subject_cwd}, "
-        f"daemon on :{port}, cap ${config.budget_usd:.2f}",
+        f"HOME={fake_home.home}, daemon on :{port}, cap ${config.budget_usd:.2f}",
         flush=True,
     )
     report = LiveRun(config, dict(os.environ), daemon, subject).execute()

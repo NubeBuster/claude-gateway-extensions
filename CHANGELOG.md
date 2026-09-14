@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Fix: the live regression harness (`make live`) now launches its subject
+  with a fake `HOME` and `CLAUDE_CONFIG_DIR` under the scratch dir, seeded
+  with only the OAuth subscription login, instead of the real one --
+  previously it read the user's real `~/.claude` (settings, hooks,
+  skills), wrote its transcript into the real
+  `~/.claude/projects/<slug>/` and rewrote the real `~/.claude.json`. The
+  redirect is asserted, not assumed: the run aborts if the real project
+  directory gains a file during it. `/etc/claude-code/managed-settings.json`
+  is a documented limitation the fake `HOME` cannot isolate the subject
+  from. See the "Live regression harness" section in `docs/DESIGN.md`.
 - Fix: `_map_verdict` now logs a WARNING (never the mutation body) when an
   `intervene` verdict on `UserPromptSubmit` or `PostToolUse` carries a
   non-null `mutation` -- previously it was silently dropped, contradicting

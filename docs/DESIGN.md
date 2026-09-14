@@ -528,9 +528,10 @@ numbers, deliberately outside `make check`.
   passes on noise and hangs on the frame it was written for. The verdicts
   come from `POST /cgx/sessions/{id}/bump` and `/fork` response bodies and
   from `GET /cgx/sessions`; turn completion and the subject's replies come
-  from `~/.claude/projects/<slug>/<session-id>.jsonl`, which Claude Code
-  writes per turn. `capture-pane` output is collected only into the failure
-  report, as a diagnostic.
+  from `<CLAUDE_CONFIG_DIR>/projects/<slug>/<session-id>.jsonl` (the
+  subject's fake one -- see below), which Claude Code writes per turn.
+  `capture-pane` output is collected only into the failure report, as a
+  diagnostic.
 - **The subject's session id is discovered from the daemon, not from the
   subject.** An interactive session emits no machine-readable init event,
   and a session id derived from a file name goes stale on the first resume.
@@ -547,26 +548,42 @@ numbers, deliberately outside `make check`.
   showed no workspace trust dialog, reaching the input prompt directly.
   So the harness seeds nothing: it waits for the input prompt and fails
   with the captured pane if anything else is on screen when the timeout
-  expires. Writing `projects.<cwd>.hasTrustDialogAccepted` was rejected
-  even as a fallback: `~/.claude.json` is rewritten by every live Claude
-  Code process, so an add-only atomic replace still races one of the
-  user's own sessions, and the measurement says nothing needs it.
-  Answering a dialog with `send-keys` is rejected separately -- it would
-  encode one build's exact key order into the harness and silently
-  mis-answer the next one. If a future build does gate a fresh cwd, the
-  harness must fail loudly on it rather than grow either workaround.
-- **The subject is isolated the way every test subject here is**: an empty
-  scratch cwd under `/tmp`, `--safe-mode`, `--name T-cgx-live-<tag>`,
-  `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`, `ANTHROPIC_API_KEY` and
-  `ANTHROPIC_AUTH_TOKEN` unset so the subject cannot reach a
-  pay-as-you-go organisation, and `ANTHROPIC_BASE_URL` pointed at the
-  harness's own daemon on an ephemeral port with its own `CGX_STATE_DIR`.
-  The subject's environment is built from an explicit allowlist rather
-  than inherited: measured on 2026-09-09, a subject launched with the
-  full environment of an agent session inherits that session's role and
-  answers as it, which is a contaminated subject, not an isolated one.
-  Embedding these rules in the harness is deliberate: a user of this
+  expires. Answering a dialog with `send-keys` is rejected separately --
+  it would encode one build's exact key order into the harness and
+  silently mis-answer the next one. If a future build does gate a fresh
+  cwd, the harness must fail loudly on it rather than grow either
+  workaround.
+- **The subject is launched with a fake `HOME` and `CLAUDE_CONFIG_DIR`,
+  seeded with only the OAuth subscription login.** A subject that
+  inherits the user's real `~/.claude` reads their settings, hooks and
+  skills, writes its transcript into their real
+  `~/.claude/projects/<slug>/` and rewrites their real `~/.claude.json` --
+  none of which the user consented to for an unattended test run. The
+  harness instead builds `<scratch>/home/.claude`, copies in nothing but
+  `.credentials.json` (mode `0600`) so the subject can still authenticate,
+  and fails early with a plain message if that file does not exist,
+  rather than reaching the input prompt and then failing to log in. The
+  subject's environment is otherwise built from an explicit allowlist
+  rather than inherited: measured on 2026-09-09, a subject launched with
+  the full environment of an agent session inherits that session's role
+  and answers as it, which is a contaminated subject, not an isolated
+  one. Embedding these rules in the harness is deliberate: a user of this
   public repo gets the isolation for free instead of reconstructing it.
+- **The redirect is asserted, not assumed.** After the subject's warm-up
+  turns, the harness checks that this run's transcript appeared under the
+  fake `CLAUDE_CONFIG_DIR` and aborts the run if the real
+  `~/.claude/projects/<slug>/` gained a file it did not have before the
+  subject launched -- a file-count delta, never a grep for a fingerprint,
+  because a leaked transcript reads as ordinary Claude Code output. A
+  build that silently falls back to the real `~/.claude` when the env
+  vars it expects are absent would otherwise pass every other check while
+  still writing into the user's real project state.
+- **`/etc/claude-code/managed-settings.json`, where present, still applies
+  to the subject -- including its hooks and env block -- and neither the
+  fake `HOME` nor `--safe-mode` suppresses it.** That file is system-wide
+  and not redirectable by environment, so isolating the subject's `HOME`
+  isolates it from the user's *personal* configuration only; it is a
+  known limitation, not a gap the harness tries to close.
 - **Haiku is the default subject model; the fork assertions that need a
   thinking-safe model take `--model sonnet`.** A run whose model nobody
   chose must be the cheapest one, and the haiku path is not a degraded
@@ -582,12 +599,15 @@ numbers, deliberately outside `make check`.
   another turn once the estimate passes `--budget-usd`. The estimate is
   reported at the end of every run, pass or fail: a live guard whose cost
   is invisible is one nobody runs twice.
-- **Teardown is guaranteed and total.** The tmux session, the daemon
-  process, the scratch state dir and the `~/.claude.json` entry are
-  released in a `finally` that runs on assertion failure, on exception and
-  on `SIGINT`; the daemon is stopped through its own drain path
-  (`SIGTERM`, then a health probe for `draining`, then wait) so the run
-  also proves the documented shutdown behaviour instead of killing it.
+- **Teardown stops the tmux session and the daemon process, and nothing
+  else.** Both are released in a `finally` that runs on assertion failure,
+  on exception and on `SIGINT`; the daemon is stopped through its own
+  drain path (`SIGTERM`, then a health probe for `draining`, then wait) so
+  the run also proves the documented shutdown behaviour instead of
+  killing it. The scratch dir -- including the fake `HOME` -- is left in
+  place: its stable path is deliberate (see `DEFAULT_SCRATCH` in
+  `tests/live/__main__.py`), and with a fake `HOME` there is no
+  `~/.claude.json` entry on the user's real one to clean up.
 - **The assertion list is fixed, and each assertion names what regressing
   it would cost.** In order: a snapshot exists for the session after
   ordinary turns (`streams >= 1`); a bump answers `ok` with

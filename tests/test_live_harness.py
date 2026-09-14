@@ -20,11 +20,20 @@ import pytest
 
 from live.budget import Budget, BudgetExceeded, price_for, usage_cost_usd
 from live.harness import LiveRun, LiveRunError, Report, RunConfig
-from live.subject import ENV_ALLOWLIST, SubjectError, TmuxSubject, pane_is_ready
+from live.subject import (
+    CREDENTIALS_FILENAME,
+    ENV_ALLOWLIST,
+    FakeHomeError,
+    SubjectError,
+    TmuxSubject,
+    pane_is_ready,
+    prepare_fake_home,
+)
 from live.transcript import (
     Transcript,
     TranscriptError,
     existing_transcripts,
+    project_dir,
     project_slug,
 )
 
@@ -61,6 +70,8 @@ def make_subject(runner: FakeTmux, **kwargs) -> TmuxSubject:
         claude_bin=Path("/opt/claude"),
         model="haiku",
         base_url="http://127.0.0.1:9999",
+        fake_home=Path("/tmp/scratch/home"),
+        fake_config_dir=Path("/tmp/scratch/home/.claude"),
         runner=runner,
         sleep=lambda _s: None,
         monotonic=lambda: float(next(ticks)),
@@ -85,13 +96,69 @@ def test_subject_env_is_an_allowlist_not_an_inheritance():
     assert "ANTHROPIC_API_KEY" not in env
     assert "ANTHROPIC_AUTH_TOKEN" not in env
     assert "CLAUDE_CODE_ENTRYPOINT" not in env
-    assert env["HOME"] == "/home/u"
     assert env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] == "1"
     assert env["ANTHROPIC_BASE_URL"] == "http://127.0.0.1:9999"
 
 
+def test_subject_env_always_uses_the_fake_home_never_the_real_one():
+    subject = make_subject(FakeTmux())
+    env = subject.subject_env({"HOME": "/home/real-user", "PATH": "/usr/bin"})
+    assert env["HOME"] == "/tmp/scratch/home"
+    assert env["CLAUDE_CONFIG_DIR"] == "/tmp/scratch/home/.claude"
+
+
+def test_subject_env_sets_the_fake_home_even_when_parent_has_none():
+    subject = make_subject(FakeTmux())
+    env = subject.subject_env({"PATH": "/usr/bin"})
+    assert env["HOME"] == "/tmp/scratch/home"
+    assert env["CLAUDE_CONFIG_DIR"] == "/tmp/scratch/home/.claude"
+
+
 def test_env_allowlist_carries_no_anthropic_or_claude_names():
     assert not [name for name in ENV_ALLOWLIST if name.startswith(("ANTHROPIC_", "CLAUDE_"))]
+
+
+def test_env_allowlist_never_inherits_home():
+    assert "HOME" not in ENV_ALLOWLIST
+
+
+# -- subject: fake home -----------------------------------------------------
+
+
+def test_prepare_fake_home_copies_only_the_credentials_file(tmp_path):
+    real_home = tmp_path / "real"
+    (real_home / ".claude").mkdir(parents=True)
+    (real_home / ".claude" / CREDENTIALS_FILENAME).write_text('{"token": "secret"}')
+    (real_home / ".claude" / "settings.json").write_text("{}")
+    (real_home / ".claude" / "skills").mkdir()
+    (real_home / ".claude.json").write_text("{}")
+
+    scratch = tmp_path / "scratch"
+    fake = prepare_fake_home(scratch, real_home)
+
+    assert fake.home == scratch / "home"
+    assert fake.config_dir == scratch / "home" / ".claude"
+    copied = list(fake.config_dir.iterdir())
+    assert [p.name for p in copied] == [CREDENTIALS_FILENAME]
+    assert (fake.config_dir / CREDENTIALS_FILENAME).read_text() == '{"token": "secret"}'
+    assert not (fake.home / ".claude.json").exists()
+
+
+def test_prepare_fake_home_credentials_are_private(tmp_path):
+    real_home = tmp_path / "real"
+    (real_home / ".claude").mkdir(parents=True)
+    (real_home / ".claude" / CREDENTIALS_FILENAME).write_text("{}")
+
+    fake = prepare_fake_home(tmp_path / "scratch", real_home)
+    mode = (fake.config_dir / CREDENTIALS_FILENAME).stat().st_mode & 0o777
+    assert mode == 0o600
+
+
+def test_prepare_fake_home_fails_early_when_credentials_are_absent(tmp_path):
+    real_home = tmp_path / "real"
+    real_home.mkdir()
+    with pytest.raises(FakeHomeError, match="credentials"):
+        prepare_fake_home(tmp_path / "scratch", real_home)
 
 
 def test_launch_argv_names_and_isolates_the_subject():
@@ -170,6 +237,12 @@ def test_stop_is_idempotent_and_only_kills_a_started_session():
 
 def test_project_slug_matches_claude_codes_directory_naming():
     assert project_slug(Path("/tmp/scripts/cgx-live/subject")) == "-tmp-scripts-cgx-live-subject"
+
+
+def test_project_dir_is_rooted_at_the_given_claude_config_dir_not_home():
+    config_dir = Path("/tmp/scratch/home/.claude")
+    cwd = Path("/tmp/scripts/cgx-live/subject")
+    assert project_dir(config_dir, cwd) == config_dir / "projects" / project_slug(cwd)
 
 
 def write_transcript(directory: Path, lines: list[str]) -> Path:
@@ -281,7 +354,8 @@ def make_config(**kwargs) -> RunConfig:
         claude_bin=Path("/opt/claude"),
         cgx_bin="cgx",
         scratch_dir=Path("/tmp/scratch"),
-        home=Path("/home/u"),
+        subject_config_dir=Path("/tmp/scratch/home/.claude"),
+        real_home=Path("/home/u"),
     )
     defaults.update(kwargs)
     return RunConfig(**defaults)  # pyright: ignore[reportArgumentType]
@@ -300,6 +374,53 @@ def test_an_unknown_model_demands_an_explicit_expectation():
 
 def test_the_subject_name_is_prefixed_and_carries_model_and_tag():
     assert make_config(model="sonnet", tag="B").session_name == "T-cgx-live-sonnet-B"
+
+
+# -- home isolation ----------------------------------------------------------
+
+
+def make_live_run(tmp_path: Path, **config_kwargs) -> LiveRun:
+    """A `LiveRun` wired to a real, throwaway `RunConfig`, no daemon or subject."""
+    config = make_config(
+        scratch_dir=tmp_path / "scratch",
+        subject_config_dir=tmp_path / "fake-home" / ".claude",
+        real_home=tmp_path / "real-home",
+        **config_kwargs,
+    )
+    return LiveRun(
+        config=config,
+        parent_env={},
+        daemon=object(),  # pyright: ignore[reportArgumentType]
+        subject=object(),  # pyright: ignore[reportArgumentType]
+        client_factory=lambda _url: None,  # pyright: ignore[reportArgumentType]
+    )
+
+
+def test_home_redirect_check_passes_when_only_the_fake_dir_gets_a_transcript(tmp_path):
+    run = make_live_run(tmp_path)
+    write_transcript(run.transcript.directory, [assistant_line("banana")])
+    run._assert_home_redirect_took_effect(real_before=frozenset())
+
+
+def test_home_redirect_check_aborts_when_the_real_home_also_gains_a_file(tmp_path):
+    run = make_live_run(tmp_path)
+    write_transcript(run.transcript.directory, [assistant_line("banana")])
+    write_transcript(run.real_project_dir, [assistant_line("leaked")])
+    with pytest.raises(LiveRunError, match="real"):
+        run._assert_home_redirect_took_effect(real_before=frozenset())
+
+
+def test_home_redirect_check_ignores_a_real_file_that_predates_the_run(tmp_path):
+    run = make_live_run(tmp_path)
+    write_transcript(run.transcript.directory, [assistant_line("banana")])
+    stale = write_transcript(run.real_project_dir, [assistant_line("old")])
+    run._assert_home_redirect_took_effect(real_before=frozenset({stale}))
+
+
+def test_home_redirect_check_aborts_when_the_fake_dir_never_got_a_transcript(tmp_path):
+    run = make_live_run(tmp_path)
+    with pytest.raises(LiveRunError, match="fake CLAUDE_CONFIG_DIR"):
+        run._assert_home_redirect_took_effect(real_before=frozenset())
 
 
 # -- assertions ------------------------------------------------------------

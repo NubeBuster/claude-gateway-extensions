@@ -13,6 +13,7 @@ assertion, which reads the control API or the transcript instead.
 from __future__ import annotations
 
 import shlex
+import shutil
 import subprocess
 import time
 from collections.abc import Callable, Sequence
@@ -22,8 +23,55 @@ from pathlib import Path
 #: Environment variables passed through to the subject, by name. Everything
 #: else is dropped: a subject launched with an agent session's environment
 #: inherits that session's role and answers as it, which is a contaminated
-#: subject rather than an isolated one (measured 2026-09-09).
-ENV_ALLOWLIST = ("HOME", "PATH", "USER", "LOGNAME", "LANG", "LC_ALL", "SHELL", "TMPDIR")
+#: subject rather than an isolated one (measured 2026-09-09). ``HOME`` is not
+#: here: the subject always gets the fake one from `prepare_fake_home`,
+#: never the parent's, so a missing override can never fall back to it.
+ENV_ALLOWLIST = ("PATH", "USER", "LOGNAME", "LANG", "LC_ALL", "SHELL", "TMPDIR")
+
+#: The OAuth subscription login file, the only thing copied from the real
+#: `~/.claude` into the subject's fake one. Everything else (settings.json,
+#: hooks, skills, project state) stays on the real side unread.
+CREDENTIALS_FILENAME = ".credentials.json"
+
+
+class FakeHomeError(RuntimeError):
+    """The subject's fake HOME could not be prepared."""
+
+
+@dataclass(frozen=True)
+class FakeHome:
+    """The isolated HOME the subject is launched with."""
+
+    home: Path
+    config_dir: Path
+
+
+def prepare_fake_home(scratch_dir: Path, real_home: Path) -> FakeHome:
+    """Build a fake HOME under ``scratch_dir`` and seed it with only the login.
+
+    The subject must authenticate as the user's subscription, but must never
+    read the user's real settings, hooks, skills or `.claude.json`: those
+    would make it a differently-configured client than the one being tested,
+    and could run the user's own hooks against the harness's fake traffic.
+    Copying nothing but the credentials file gives it a login and nothing
+    else. Failing early and plainly when the file is absent beats a subject
+    that reaches the input prompt and then cannot get past the login step.
+    """
+    real_credentials = real_home / ".claude" / CREDENTIALS_FILENAME
+    if not real_credentials.is_file():
+        raise FakeHomeError(
+            f"{real_credentials} not found; the live harness needs an existing "
+            "subscription login (run `claude` once interactively to create it) "
+            "to authenticate the isolated subject"
+        )
+    home = scratch_dir / "home"
+    config_dir = home / ".claude"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    fake_credentials = config_dir / CREDENTIALS_FILENAME
+    shutil.copyfile(real_credentials, fake_credentials)
+    fake_credentials.chmod(0o600)
+    return FakeHome(home=home, config_dir=config_dir)
+
 
 #: Prompt characters the TUI draws once it is waiting for input. Matched
 #: only at the start of a line (after the pane's own padding) so ordinary
@@ -60,6 +108,8 @@ class TmuxSubject:
     claude_bin: Path
     model: str
     base_url: str
+    fake_home: Path
+    fake_config_dir: Path
     runner: Runner = _run
     sleep: Callable[[float], object] = time.sleep
     monotonic: Callable[[], float] = time.monotonic
@@ -71,12 +121,16 @@ class TmuxSubject:
         """Return the environment the subject is launched with.
 
         Built by allowlist from ``parent_env``, plus the isolation the
-        project's test-subject rules require: no
+        project's test-subject rules require: ``HOME`` and
+        ``CLAUDE_CONFIG_DIR`` always point at this subject's fake home
+        (never the parent's, allowlisted or not), no
         ``ANTHROPIC_API_KEY``/``ANTHROPIC_AUTH_TOKEN`` (so the subject
         cannot reach a pay-as-you-go organisation), non-essential traffic
         off, and ``ANTHROPIC_BASE_URL`` pointed at the harness's own daemon.
         """
         env = {name: parent_env[name] for name in ENV_ALLOWLIST if name in parent_env}
+        env["HOME"] = str(self.fake_home)
+        env["CLAUDE_CONFIG_DIR"] = str(self.fake_config_dir)
         env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1"
         env["ANTHROPIC_BASE_URL"] = self.base_url
         env.setdefault("TERM", "xterm-256color")
@@ -166,4 +220,14 @@ class TmuxSubject:
         self.runner(["tmux", "kill-session", "-t", self.session_name])
 
 
-__all__ = ["ENV_ALLOWLIST", "READY_MARKERS", "SubjectError", "TmuxSubject", "pane_is_ready"]
+__all__ = [
+    "CREDENTIALS_FILENAME",
+    "ENV_ALLOWLIST",
+    "READY_MARKERS",
+    "FakeHome",
+    "FakeHomeError",
+    "SubjectError",
+    "TmuxSubject",
+    "pane_is_ready",
+    "prepare_fake_home",
+]

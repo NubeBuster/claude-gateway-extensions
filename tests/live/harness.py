@@ -135,7 +135,8 @@ class RunConfig:
     claude_bin: Path
     cgx_bin: str
     scratch_dir: Path
-    home: Path
+    subject_config_dir: Path
+    real_home: Path
     model: str = "haiku"
     tag: str = "A"
     budget_usd: float = 1.0
@@ -187,7 +188,10 @@ class LiveRun:
         self.sleep = sleep
         self.budget = Budget(cap_usd=config.budget_usd)
         self.report = Report(cap_usd=config.budget_usd, model=config.model)
-        self.transcript = Transcript(directory=project_dir(config.home, config.subject_cwd))
+        self.transcript = Transcript(
+            directory=project_dir(config.subject_config_dir, config.subject_cwd)
+        )
+        self.real_project_dir = project_dir(config.real_home / ".claude", config.subject_cwd)
 
     def execute(self) -> Report:
         """Run everything, then tear down whatever was started, always."""
@@ -210,12 +214,16 @@ class LiveRun:
 
         # Pinned before launch: the scratch cwd is stable, so its transcript
         # directory still holds every past run's file, and a past run's
-        # completed turns would be counted as this one's progress.
+        # completed turns would be counted as this one's progress. The real
+        # directory is pinned the same way, to catch this run leaking into
+        # it rather than staying on the fake CLAUDE_CONFIG_DIR.
         self.transcript.ignore = existing_transcripts(self.transcript.directory)
+        real_before = existing_transcripts(self.real_project_dir)
 
         self.subject.start(self.parent_env)
         self.subject.wait_ready(self.config.ready_timeout_s)
         self._take_turns(WARMUP_PROMPTS)
+        self._assert_home_redirect_took_effect(real_before)
 
         session_id = self._discover_session_id(client, before)
         self.report.session_id = session_id
@@ -235,6 +243,32 @@ class LiveRun:
             latest = turns[-1]
             self.budget.add(
                 "subject turn", self.transcript.model(latest), self.transcript.usage(latest)
+            )
+
+    def _assert_home_redirect_took_effect(self, real_before: frozenset[Path]) -> None:
+        """Prove the subject actually wrote into the fake HOME, not the real one.
+
+        Setting ``HOME``/``CLAUDE_CONFIG_DIR`` is not evidence they were
+        read: a build that ignores one falls back to the real ``~/.claude``
+        silently, which is exactly the leak this harness exists to prevent.
+        Checked by a file-count delta on the real project directory, never
+        by grepping its contents for a fingerprint -- a leaked transcript
+        looks like ordinary Claude Code output, so a fingerprint grep gives
+        a false negative for precisely the leak that matters.
+        """
+        if self.transcript.path() is None:
+            raise LiveRunError(
+                f"no transcript appeared under the fake CLAUDE_CONFIG_DIR "
+                f"({self.transcript.directory}) after the warm-up turns; the "
+                f"HOME/CLAUDE_CONFIG_DIR redirect did not take effect"
+            )
+        real_after = existing_transcripts(self.real_project_dir)
+        leaked = real_after - real_before
+        if leaked:
+            raise LiveRunError(
+                f"the subject wrote into the real {self.real_project_dir} "
+                f"despite the fake HOME ({sorted(str(p) for p in leaked)}); "
+                f"aborting rather than continuing against a contaminated subject"
             )
 
     def _session_ids(self, client: ControlClient) -> set[str]:

@@ -1,11 +1,13 @@
 """Reading a live subject's own transcript instead of its terminal.
 
 Claude Code appends one JSON object per line to
-``~/.claude/projects/<slug>/<session-id>.jsonl`` as a session runs. That
-file is the subject's own record of what happened -- the assistant turns,
-their ``stop_reason`` and their token usage -- so it answers "did the turn
-finish" and "what did this cost" exactly, where `capture-pane` answers only
-"what is currently rendered".
+``<CLAUDE_CONFIG_DIR>/projects/<slug>/<session-id>.jsonl`` as a session
+runs -- ``<CLAUDE_CONFIG_DIR>`` defaults to ``~/.claude`` but the live
+subject is launched with its own fake one. That file is the subject's own
+record of what happened -- the assistant turns, their ``stop_reason`` and
+their token usage -- so it answers "did the turn finish" and "what did this
+cost" exactly, where `capture-pane` answers only "what is currently
+rendered".
 """
 
 from __future__ import annotations
@@ -31,9 +33,14 @@ def project_slug(cwd: Path) -> str:
     return str(cwd).replace("/", "-")
 
 
-def project_dir(home: Path, cwd: Path) -> Path:
-    """Return the transcript directory for ``cwd`` under ``home``."""
-    return home / ".claude" / "projects" / project_slug(cwd)
+def project_dir(claude_config_dir: Path, cwd: Path) -> Path:
+    """Return the transcript directory for ``cwd`` under a `.claude`-style dir.
+
+    ``claude_config_dir`` is whatever Claude Code resolves as its config
+    root -- the subject's fake ``CLAUDE_CONFIG_DIR`` in the live run, or a
+    real ``~/.claude`` when used to check that the real one stayed untouched.
+    """
+    return claude_config_dir / "projects" / project_slug(cwd)
 
 
 def existing_transcripts(directory: Path) -> frozenset[Path]:
