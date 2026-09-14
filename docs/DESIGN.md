@@ -385,7 +385,7 @@ review" roadmap line; no part of it ships in 1.0.
   conversation as `cache_creation` before the verdict is even read. An
   unparseable body is treated as stale, not fresh, so a fork never spends
   money on a snapshot it cannot classify.
-- **`POST /cgx/sessions/{id}/fork`**, body `{prompt, hook_event, payload,
+- **`POST /cgx/sessions/{id}/shadow-fork`**, body `{prompt, hook_event, payload,
   max_tokens?, model?}`, answering `200 {verdict, reason, mutation, usage,
   paid_write, model, stream_key}` — including for the `ok` degradations
   above, since a non-200 would push fail-open logic into every client.
@@ -693,7 +693,7 @@ numbers, deliberately outside `make check`.
   transcript JSONL, never rendered pane text.** Pane text is a terminal
   rendering: it wraps, redraws and truncates, so an assertion over it
   passes on noise and hangs on the frame it was written for. The verdicts
-  come from `POST /cgx/sessions/{id}/bump` and `/fork` response bodies and
+  come from `POST /cgx/sessions/{id}/bump` and `/shadow-fork` response bodies and
   from `GET /cgx/sessions`; turn completion and the subject's replies come
   from `<CLAUDE_CONFIG_DIR>/projects/<slug>/<session-id>.jsonl` (the
   subject's fake one -- see below), which Claude Code writes per turn.

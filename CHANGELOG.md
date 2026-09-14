@@ -206,7 +206,7 @@
 - Shadow Fork: the reviewer model is now stated and enforced as the
   reviewed session's own model by default (an invariant test pins
   `build_fork_body` to never change it), with an opt-in override -- an
-  optional `model` in the `POST /cgx/sessions/{id}/fork` request body,
+  optional `model` in the `POST /cgx/sessions/{id}/shadow-fork` request body,
   else new `CGX_SHADOW_FORK_MODEL`, else `cgx shadow-fork --model`. An override
   always forfeits the cache read (the prompt cache is namespaced per
   model) and is logged once per fork at WARNING with that reason. The
@@ -263,7 +263,7 @@
   stale.
 - Shadow Fork: a new side channel that asks one question about a
   live session without that session learning it was asked. `POST
-  /cgx/sessions/{id}/fork` replays the session's captured snapshot with a
+  /cgx/sessions/{id}/shadow-fork` replays the session's captured snapshot with a
   single review turn appended, parses a strict-JSON verdict
   (`{"verdict": "ok"|"intervene", "reason", "mutation"}`) out of the
   reply and discards the twin, so the parent pays a cache read plus the

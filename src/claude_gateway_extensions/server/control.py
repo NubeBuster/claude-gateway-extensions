@@ -180,7 +180,7 @@ async def bump_session(request: web.Request) -> web.Response:
 
 
 async def fork_session(request: web.Request) -> web.Response:
-    """``POST /cgx/sessions/{id}/fork``: run one shadow fork now.
+    """``POST /cgx/sessions/{id}/shadow-fork``: run one shadow fork now.
 
     Always answers ``200`` with the verdict shape, including for the
     fail-open degradations (``no_snapshot``, ``rate_limited``,

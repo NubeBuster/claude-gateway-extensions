@@ -248,7 +248,7 @@ returns `204`.
 
 Status codes: `204` on success, `400` on an invalid id.
 
-## POST /cgx/sessions/{id}/fork
+## POST /cgx/sessions/{id}/shadow-fork
 
 Run one shadow fork now: replay the session's selected snapshot
 (the same one bumping would pick) with a single review turn appended, and
