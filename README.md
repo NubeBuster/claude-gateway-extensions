@@ -444,7 +444,9 @@ curl -s -X POST "http://127.0.0.1:8787/cgx/sessions/$SESSION_ID/bump"
 
 - Hot reload: pick up a definition's changes without a `cgx serve` restart
   -- currently frozen at daemon start.
-- Implement support for Windows.
+- Ensure support for Windows.
+- Prune the test bloat that Opus 5 creates. Add preventative instructions
+- Add memory md files maintenance instructions to ensure quality
 
 Shadow Fork reviews a hook event with a one-shot fork of the session's own
 cached context, then maps the verdict to that event's hook output:
