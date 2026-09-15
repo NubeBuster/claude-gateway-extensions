@@ -8,9 +8,12 @@ import os
 
 import pytest
 from aiohttp import web
+from aiohttp.test_utils import TestClient, TestServer
 
+from claude_gateway_extensions.core.clock import FakeClock
+from claude_gateway_extensions.server.app import make_app
 from claude_gateway_extensions.server.keys import CONFIG_KEY, DRAIN_STATE_KEY
-from conftest import ServerHarness
+from conftest import ServerHarness, make_config
 
 #: A deadline far enough ahead that the scheduler never reaches it mid-test
 #: (2100-01-01), for the tests that run against the real clock.
@@ -31,6 +34,41 @@ async def test_health_returns_503_while_draining(harness: ServerHarness) -> None
     resp = await harness.client.get("/cgx/health")
     assert resp.status == 503
     assert await resp.json() == {"status": "draining"}
+
+
+async def test_health_reports_started_at_and_uptime(tmp_path) -> None:
+    clock = FakeClock(start=1_700_000_000.0)
+    config = make_config(tmp_path, "http://example.invalid")
+    app = make_app(config, clock=clock)
+    client = TestClient(TestServer(app))
+    await client.start_server()
+    try:
+        clock.advance(3600)
+        resp = await client.get("/cgx/health")
+        data = await resp.json()
+        assert data["started_at"] == 1_700_000_000.0
+        assert data["uptime_seconds"] == 3600
+        assert "started_local" in data
+        assert "commit" not in data
+        assert "branch" not in data
+    finally:
+        await client.close()
+
+
+async def test_health_reports_git_provenance_when_available(tmp_path) -> None:
+    config = make_config(tmp_path, "http://example.invalid")
+    provenance = {"commit": "abc12345", "branch": "dev", "dirty": True}
+    app = make_app(config, git_provenance=provenance)
+    client = TestClient(TestServer(app))
+    await client.start_server()
+    try:
+        resp = await client.get("/cgx/health")
+        data = await resp.json()
+        assert data["commit"] == "abc12345"
+        assert data["branch"] == "dev"
+        assert data["dirty"] is True
+    finally:
+        await client.close()
 
 
 async def test_get_config_reports_missing_file_as_defaults(harness: ServerHarness) -> None:

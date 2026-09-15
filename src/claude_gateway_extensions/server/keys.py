@@ -10,6 +10,7 @@ resolves to the right type under pyright without casts.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 import aiohttp
 from aiohttp import web
@@ -50,6 +51,17 @@ CLIENT_SESSION_KEY: web.AppKey[aiohttp.ClientSession] = web.AppKey(
     "client_session", aiohttp.ClientSession
 )
 DRAIN_STATE_KEY: web.AppKey[DrainState] = web.AppKey("drain_state", DrainState)
+
+#: Epoch time (per :data:`CLOCK_KEY`) this application instance started,
+#: for the daemon uptime reported on ``GET /cgx/health``.
+STARTED_AT_KEY: web.AppKey[float] = web.AppKey("started_at", float)
+
+#: This checkout's git provenance (``{"commit", "branch", "dirty"}``),
+#: resolved once at daemon start by
+#: :func:`~claude_gateway_extensions.core.provenance.resolve_git_provenance`,
+#: or ``None`` when unavailable (a pip install without a checkout, or git
+#: itself failing) -- see ``core/provenance.py``.
+GIT_PROVENANCE_KEY: web.AppKey[dict[str, Any] | None] = web.AppKey("git_provenance")
 
 #: Session ids that have already logged one capture-parse-failure warning
 #: (see the "decode the private copy, warn once per session" behaviour in

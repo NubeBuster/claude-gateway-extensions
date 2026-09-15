@@ -130,7 +130,10 @@ def test_status_lists_all_sessions() -> None:
     code, out, _ = _run(["status"], client)
     assert code == EXIT_OK
     assert "s1" in out
-    assert client.calls == [("list_sessions", ())]
+    # A trailing health() call is `_echo_git_tree`'s best-effort fetch of the
+    # daemon's git provenance; this fake's health body carries none, so no
+    # tree line follows.
+    assert client.calls == [("list_sessions", ()), ("health", ())]
 
 
 def test_status_single_session_via_flag() -> None:
@@ -138,7 +141,69 @@ def test_status_single_session_via_flag() -> None:
     code, out, _ = _run(["status", "--session", "s1"], client)
     assert code == EXIT_OK
     assert "s1" in out
-    assert client.calls == [("get_session", ("s1",))]
+    assert client.calls == [("get_session", ("s1",)), ("health", ())]
+
+
+def test_status_prints_injected_git_tree_after_session_lines() -> None:
+    """``_cmd_status`` prints whatever ``git_tree_resolver`` returns, verbatim, after sessions.
+
+    Uses an injected fake resolver rather than the real
+    ``_default_git_tree_resolver`` -- this test suite must not depend on
+    (or shell out to) the git checkout it happens to run from.
+    """
+    client = _FakeClient(
+        "http://x",
+        sessions={"s1": {"session_id": "s1", "enabled": True}},
+    )
+    calls: list[tuple[dict[str, Any], bool]] = []
+
+    def fake_resolver(health: dict[str, Any], color: bool) -> str | None:
+        calls.append((health, color))
+        return "TREE-LINE-1\nTREE-LINE-2"
+
+    code, out, _ = _run(["status"], client, git_tree_resolver=fake_resolver)
+    assert code == EXIT_OK
+    assert out.index("s1") < out.index("TREE-LINE-1")
+    assert "TREE-LINE-2" in out
+    assert len(calls) == 1
+    assert calls[0][0]["ok"] is True  # the fake client's health() body
+
+
+def test_status_omits_tree_when_resolver_returns_none() -> None:
+    client = _FakeClient("http://x", sessions={"s1": {"session_id": "s1", "enabled": True}})
+    code, out, _ = _run(["status"], client, git_tree_resolver=lambda health, color: None)
+    assert code == EXIT_OK
+    assert out.count("\n") == 1  # only the one session line
+
+
+def test_status_json_mode_never_calls_the_git_tree_resolver() -> None:
+    client = _FakeClient("http://x", sessions={"s1": {"session_id": "s1", "enabled": True}})
+    calls: list[Any] = []
+    code, _, _ = _run(
+        ["status", "--json"], client, git_tree_resolver=lambda health, color: calls.append(1)
+    )
+    assert code == EXIT_OK
+    assert calls == []
+    assert client.calls == [("list_sessions", ())]
+
+
+def test_status_tree_resolver_skipped_when_health_unreachable() -> None:
+    """A daemon that answers sessions but then vanishes must not crash ``status``."""
+    client = _FakeClient("http://x", sessions={"s1": {"session_id": "s1", "enabled": True}})
+    client.raise_unreachable = False
+
+    original_health = client.health
+
+    def flaky_health() -> dict[str, Any]:
+        client.raise_unreachable = True
+        return original_health()
+
+    client.health = flaky_health  # type: ignore[method-assign]
+    calls: list[Any] = []
+    code, out, _ = _run(["status"], client, git_tree_resolver=lambda health, color: calls.append(1))
+    assert code == EXIT_OK
+    assert "s1" in out
+    assert calls == []
 
 
 def test_status_json_passes_through_cache_expires_at_and_formatted() -> None:

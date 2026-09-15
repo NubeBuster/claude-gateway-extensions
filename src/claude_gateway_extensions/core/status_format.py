@@ -142,14 +142,15 @@ def format_status_times(
     }
 
 
-def _format_remaining(seconds: float) -> str:
+def format_duration(seconds: float) -> str:
     """Format a duration as minute-precision ``Nd Nh Nm``, omitting any zero-valued unit.
 
     Each of ``d``/``h``/``m`` is dropped when it is zero, in either order
     (``3d 12h`` for an exact multiple of days, ``3d 5m`` when only the hour
     is zero); at least one unit is always shown, falling back to ``0m`` for
     an already-elapsed (or exactly zero) duration, which also clamps rather
-    than going negative.
+    than going negative. Shared by :func:`format_deadline`'s "from now" tail
+    and any other minute-precision duration display (e.g. daemon uptime).
     """
     total_minutes = max(0, round(seconds / 60))
     days, remainder = divmod(total_minutes, 1440)
@@ -162,6 +163,18 @@ def _format_remaining(seconds: float) -> str:
     if minutes or not parts:
         parts.append(f"{minutes}m")
     return " ".join(parts)
+
+
+def format_local_datetime(epoch: float, tz: tzinfo | None = None) -> str:
+    """Format an epoch timestamp as a full local ``YYYY-MM-DD HH:MM:SS ZZZ`` string.
+
+    Same conversion as :func:`format_clock` but at second precision with the
+    date and zone name, for contexts that need an unambiguous absolute
+    timestamp rather than a same-day clock reading (e.g. when the daemon
+    started, or when a commit was authored).
+    """
+    local = datetime.fromtimestamp(epoch, tz=UTC).astimezone(tz)
+    return local.strftime("%Y-%m-%d %H:%M:%S %Z")
 
 
 def format_deadline(until: float, now: float, tz: tzinfo | None = None) -> str:
@@ -188,7 +201,7 @@ def format_deadline(until: float, now: float, tz: tzinfo | None = None) -> str:
         head = f"tomorrow at {local_until.strftime('%H:%M')}"
     else:
         head = local_until.isoformat(timespec="minutes")
-    return f"{head} — {_format_remaining(until - now)} from now"
+    return f"{head} — {format_duration(until - now)} from now"
 
 
 __all__ = [
@@ -196,7 +209,9 @@ __all__ = [
     "format_clock",
     "format_countdown",
     "format_deadline",
+    "format_duration",
     "format_fork_summary",
+    "format_local_datetime",
     "format_rewarm_write",
     "format_status_times",
 ]

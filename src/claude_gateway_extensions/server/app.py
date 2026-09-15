@@ -23,6 +23,7 @@ import signal
 import socket
 from collections.abc import AsyncIterator
 from pathlib import Path
+from typing import Any
 
 import aiohttp
 from aiohttp import web
@@ -30,6 +31,7 @@ from aiohttp.typedefs import Handler
 
 from claude_gateway_extensions.config import Config
 from claude_gateway_extensions.core.clock import Clock, SystemClock
+from claude_gateway_extensions.core.provenance import resolve_git_provenance
 from claude_gateway_extensions.core.scheduler import Scheduler
 from claude_gateway_extensions.core.selector import LargestPrefixSelector, TargetSelector
 from claude_gateway_extensions.core.store import FileStore, MemoryStore, SnapshotStore
@@ -41,8 +43,10 @@ from claude_gateway_extensions.server.keys import (
     CLOCK_KEY,
     CONFIG_KEY,
     DRAIN_STATE_KEY,
+    GIT_PROVENANCE_KEY,
     SCHEDULER_KEY,
     SELECTOR_KEY,
+    STARTED_AT_KEY,
     STORE_KEY,
     UPSTREAM_KEY,
     DrainState,
@@ -92,6 +96,7 @@ def make_app(
     selector: TargetSelector | None = None,
     upstream: Upstream | None = None,
     clock: Clock | None = None,
+    git_provenance: dict[str, Any] | None = None,
 ) -> web.Application:
     """Build the proxy's ``web.Application``, defaulting every collaborator.
 
@@ -103,6 +108,13 @@ def make_app(
     (regardless of an ``upstream`` override) because the passthrough route
     streams through it directly, independent of the buffered ``Upstream``
     protocol used for bump replays.
+
+    ``git_provenance`` is this checkout's already-resolved commit/branch/dirty
+    (see :func:`~claude_gateway_extensions.core.provenance.resolve_git_provenance`),
+    or ``None`` when unavailable -- never resolved here, since a test or an
+    installed-without-a-checkout daemon must not pay for (or depend on the
+    result of) a real git subprocess call just by building the app. The
+    caller (:func:`serve`) resolves it once, before this is called.
     """
     resolved_clock: Clock = clock if clock is not None else SystemClock()
     resolved_store: SnapshotStore
@@ -129,6 +141,8 @@ def make_app(
     app[CLOCK_KEY] = resolved_clock
     app[DRAIN_STATE_KEY] = DrainState()
     app[CAPTURE_WARNED_KEY] = set()
+    app[STARTED_AT_KEY] = resolved_clock.now()
+    app[GIT_PROVENANCE_KEY] = git_provenance
 
     async def _lifecycle(app: web.Application) -> AsyncIterator[None]:
         """Open the shared client session and run the scheduler for the app's lifetime."""
@@ -438,7 +452,12 @@ async def serve(config: Config, *, handover: bool = False) -> None:
             "CGX_HOST=%s is reachable from other machines; the control API has no authentication",
             config.host,
         )
-    app = make_app(config)
+    # Resolved once, here, from this package's own __file__: a pip install
+    # without a checkout (or git itself missing) is a normal, silent None --
+    # never resolved per-request, which is why this happens before make_app
+    # rather than inside it.
+    git_provenance = resolve_git_provenance(Path(__file__))
+    app = make_app(config, git_provenance=git_provenance)
     logger.info(
         "cgx serving host=%s port=%d upstream=%s state_dir=%s persist=%s",
         config.host,

@@ -146,6 +146,15 @@ cgx status --session "$CLAUDE_SESSION_ID" --json
 cgx now --session "$CLAUDE_SESSION_ID"
 ```
 
+`cgx status` (without `--json`) also prints a git-log tree view of the
+daemon's running commit -- up to three commits before it, the running commit
+marked `[RUNNING]` with how far behind its branch it is, and up to five
+commits toward the branch tip -- whenever the daemon reports git provenance
+and the `cgx` command itself is running from a checkout with the matching
+history; a plain install, or either side missing git, silently omits it.
+Colours (faint tree lines, a coloured `[RUNNING]` badge, a highlighted
+uptime) appear only when stdout is a terminal.
+
 `cgx status --session "$CLAUDE_SESSION_ID" --json` and `GET
 /cgx/sessions/{id}` both return the same session status object. It always
 carries a short `formatted` block of human-readable strings for display:

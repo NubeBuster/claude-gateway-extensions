@@ -39,12 +39,22 @@ from claude_gateway_extensions.cli.shadow_fork import run_shadow_fork
 from claude_gateway_extensions.cli.statusline import run_statusline
 from claude_gateway_extensions.cli.when import At, WhenError, local_now, parse_when
 from claude_gateway_extensions.config import Config, ConfigError
+from claude_gateway_extensions.core.provenance import find_git_checkout, gather_commit_tree
 from claude_gateway_extensions.core.status_format import format_deadline
 
 EXIT_OK = 0
 EXIT_FAILED = 1
 EXIT_USAGE = 2
 EXIT_UNREACHABLE = 3
+
+#: Resolves the git-log tree view (see ``core/provenance.py``) from a
+#: ``GET /cgx/health`` payload plus whether output should carry ANSI colour.
+#: Returns the rendered tree, or ``None`` to print nothing extra. A
+#: parameter of :func:`main` (defaulting to :func:`_default_git_tree_resolver`)
+#: rather than a direct call from :func:`_cmd_status`, so tests can inject a
+#: fake tree without depending on -- or shelling out to -- the real git
+#: checkout the test process happens to run from.
+GitTreeResolver = Callable[[Mapping[str, Any], bool], "str | None"]
 
 
 class _UsageError(Exception):
@@ -64,6 +74,7 @@ class _Context:
     service_runner: service.Runner | None
     service_query: service.Query | None
     platform: str
+    git_tree_resolver: GitTreeResolver
 
 
 def _require_session(args: argparse.Namespace, ctx: _Context) -> str:
@@ -161,6 +172,60 @@ def _cmd_serve(args: argparse.Namespace, config: Config, ctx: _Context) -> int:
     return EXIT_OK
 
 
+def _default_git_tree_resolver(health: Mapping[str, Any], color: bool) -> str | None:
+    """Resolve the git-log tree view from a ``GET /cgx/health`` payload.
+
+    Real default for :func:`main`'s ``git_tree_resolver`` parameter:
+    locates the checkout the ``cgx`` command itself is running from (via
+    this module's own ``__file__``), then asks
+    :func:`~claude_gateway_extensions.core.provenance.gather_commit_tree` to
+    build the tree around the commit/branch/dirty ``health`` reports for the
+    daemon. Returns ``None`` (silently) whenever any of that is unavailable
+    -- an older daemon with no provenance fields, a pip install without a
+    checkout, or any git failure; see ``gather_commit_tree``'s own
+    docstring.
+    """
+    commit = health.get("commit")
+    branch = health.get("branch")
+    uptime_seconds = health.get("uptime_seconds")
+    if not isinstance(commit, str) or not isinstance(branch, str):
+        return None
+    if not isinstance(uptime_seconds, int | float):
+        return None
+    repo_dir = find_git_checkout(Path(__file__))
+    if repo_dir is None:
+        return None
+    started_local = health.get("started_local")
+    return gather_commit_tree(
+        repo_dir=repo_dir,
+        commit=commit,
+        branch=branch,
+        dirty=bool(health.get("dirty", False)),
+        uptime_seconds=float(uptime_seconds),
+        started_local=started_local if isinstance(started_local, str) else None,
+        color=color,
+    )
+
+
+def _echo_git_tree(config: Config, ctx: _Context) -> None:
+    """Best-effort: fetch the daemon's health payload and print its git tree, if any.
+
+    Never raises: a daemon that cannot be reached, or one too old to report
+    provenance, simply adds nothing after the session lines ``cgx status``
+    already printed.
+    """
+    client = ctx.client_factory(config.url)
+    try:
+        health = client.health()
+    except (DaemonUnreachable, ApiError):
+        return
+    if not isinstance(health, dict):
+        return
+    tree = ctx.git_tree_resolver(health, ctx.stdout.isatty())
+    if tree:
+        ctx.stdout.write(tree + "\n")
+
+
 def _cmd_status(args: argparse.Namespace, config: Config, ctx: _Context) -> int:
     """List every session's status, or one session's if ``--session``/env resolves one."""
     client = ctx.client_factory(config.url)
@@ -184,6 +249,7 @@ def _cmd_status(args: argparse.Namespace, config: Config, ctx: _Context) -> int:
     now = time.time()
     for session in sessions:
         ctx.stdout.write(_format_status_line(session, now) + "\n")
+    _echo_git_tree(config, ctx)
     return EXIT_OK
 
 
@@ -714,15 +780,17 @@ def main(
     service_runner: service.Runner | None = None,
     service_query: service.Query | None = None,
     platform: str = sys.platform,
+    git_tree_resolver: GitTreeResolver = _default_git_tree_resolver,
 ) -> int:
     """Parse ``argv`` and dispatch to the matching subcommand handler.
 
     Every ambient dependency (environment, stdio, working directory, the
-    control API client, the systemd runner, ``sys.platform``) defaults to
-    the real thing and can be overridden, which is how tests exercise this
-    function directly instead of shelling out to a subprocess or actually
-    running on a different OS. ``platform`` gates ``cgx service`` and the
-    systemd check in ``cgx doctor``, both Linux-only.
+    control API client, the systemd runner, ``sys.platform``, the git tree
+    resolver ``cgx status`` uses) defaults to the real thing and can be
+    overridden, which is how tests exercise this function directly instead
+    of shelling out to a subprocess or actually running on a different OS.
+    ``platform`` gates ``cgx service`` and the systemd check in ``cgx
+    doctor``, both Linux-only.
     """
     env = os.environ if environ is None else environ
     out = sys.stdout if stdout is None else stdout
@@ -738,7 +806,16 @@ def main(
         return code if isinstance(code, int) else EXIT_USAGE
 
     ctx = _Context(
-        env, inp, out, err, directory, client_factory, service_runner, service_query, platform
+        env,
+        inp,
+        out,
+        err,
+        directory,
+        client_factory,
+        service_runner,
+        service_query,
+        platform,
+        git_tree_resolver,
     )
 
     try:

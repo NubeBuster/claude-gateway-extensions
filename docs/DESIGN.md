@@ -176,6 +176,22 @@ deliberately absent from this release, not ruled out for the project.
   naming the first line of its response; cgx never shares a port with a
   foreign listener. `cgx doctor` applies the same recognition to the
   configured port so a foreign program there is a `fail`, not a false `ok`.
+- **Status: git tree view is resolved client-side, from the daemon's
+  reported commit.** `serve` resolves its own commit/branch/dirty once, at
+  startup (`core/provenance.py`, never a request-path git call), and
+  reports it on `GET /cgx/health`. Building the surrounding tree -- the
+  handful of commits before and after it, the tip's author and behind-count
+  -- takes several more git calls; doing that daemon-side would mean paying
+  it on every `cgx status`, for a value that changes only when someone
+  advances the branch. `cgx status` instead resolves the tree itself: it
+  locates the checkout it is running from (normally the same one that
+  produced the daemon) and asks git locally, using the daemon's reported
+  commit as the anchor. This is both cheaper (no added daemon work) and
+  simpler (one implementation, reused by both call sites in spirit, though
+  only the CLI actually invokes it). The daemon and the CLI running from
+  different checkouts (a remote `CGX_HOST`, or an upgraded CLI against an
+  old daemon) degrades to no tree rather than a wrong one: an anchor commit
+  git cannot find locally fails the lookup cleanly.
 
 ## Extension points
 

@@ -17,12 +17,17 @@ from aiohttp import web
 
 from claude_gateway_extensions import __version__
 from claude_gateway_extensions.config import SHADOW_FORK_ENV_VARS, Config, ShadowForkSettings
+from claude_gateway_extensions.core.clock import Clock
 from claude_gateway_extensions.core.scheduler import NoSnapshot, Scheduler
+from claude_gateway_extensions.core.status_format import format_local_datetime
 from claude_gateway_extensions.core.store import SESSION_ID_RE, SnapshotStore
 from claude_gateway_extensions.server.keys import (
+    CLOCK_KEY,
     CONFIG_KEY,
     DRAIN_STATE_KEY,
+    GIT_PROVENANCE_KEY,
     SCHEDULER_KEY,
+    STARTED_AT_KEY,
     STORE_KEY,
 )
 
@@ -54,14 +59,24 @@ async def health(request: web.Request) -> web.Response:
         return web.json_response({"status": "draining"}, status=503)
     store: SnapshotStore = request.app[STORE_KEY]
     config: Config = request.app[CONFIG_KEY]
-    return web.json_response(
-        {
-            "ok": True,
-            "version": __version__,
-            "upstream": config.upstream,
-            "sessions": len(store.list_sessions()),
-        }
-    )
+    clock: Clock = request.app[CLOCK_KEY]
+    started_at = request.app[STARTED_AT_KEY]
+    now = clock.now()
+    provenance = request.app[GIT_PROVENANCE_KEY]
+    body: dict[str, Any] = {
+        "ok": True,
+        "version": __version__,
+        "upstream": config.upstream,
+        "sessions": len(store.list_sessions()),
+        "started_at": started_at,
+        "started_local": format_local_datetime(started_at),
+        "uptime_seconds": max(0.0, now - started_at),
+    }
+    if provenance is not None:
+        body["commit"] = provenance["commit"]
+        body["branch"] = provenance["branch"]
+        body["dirty"] = provenance["dirty"]
+    return web.json_response(body)
 
 
 #: Maps each :class:`ShadowForkSettings` field name to the ``Config`` field
