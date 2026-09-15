@@ -64,7 +64,7 @@ deliberately absent from this release, not ruled out for the project.
   `/cache <deadline> rewarm`) tolerates exactly one `cache_write` bump
   result for that session: the daemon records it (`rewarm_write`: the
   write's usage numbers and timestamp, surfaced in `formatted` and `cgx
-  status`), keeps the session enabled, and resumes normal bumping instead
+status`), keeps the session enabled, and resumes normal bumping instead
   of stopping it. The flag is consumed by that one write -- a second
   rewarm needs a new explicit enable -- and is cleared on disable and on
   every auto-stop, exactly like `until`. A bump reply that paid the write
@@ -75,7 +75,7 @@ deliberately absent from this release, not ruled out for the project.
   can carry several `cache_control` breakpoints at different TTLs -- `tools`,
   `system` and each message's content blocks, in that prompt order, and any
   1h breakpoints must precede the 5m ones -- and a bump has to keep the
-  *tail* entry alive, which expires at the shortest TTL present, not the
+  _tail_ entry alive, which expires at the shortest TTL present, not the
   longest. Every breakpoint is parsed (`parse_breakpoints`) and the interval
   and `cache_expires_at` are both derived from the shortest one: bumped at
   50 min if it is 1h, at 4 min otherwise (including when no breakpoint
@@ -303,7 +303,7 @@ review" roadmap line; no part of it ships in 1.0.
   reason. A definition's own `model:` front-matter key (see "Definitions
   are Markdown files" below) slots into this chain as another way to
   populate the request field, never as a daemon-side concept: `cgx
-  shadow-fork` resolves `--model` if given, else the loaded definition's
+shadow-fork` resolves `--model` if given, else the loaded definition's
   `model:`, else omits the field entirely and lets the daemon apply its
   own defaults (a config file, then `CGX_SHADOW_FORK_MODEL`, then the
   snapshot's own model) exactly as it does today. The daemon never learns
@@ -370,11 +370,11 @@ review" roadmap line; no part of it ships in 1.0.
   model to strip. The version table is a record of measurement, not a
   guess; lowering an entry needs a new measurement, not a tidy-up.
 - **The verdict is strict JSON: `{"verdict": "ok" | "intervene",
-  "reason": str, "mutation": object | null}`.** A fixed contract is what
+"reason": str, "mutation": object | null}`.** A fixed contract is what
   lets one hook CLI serve every template without each one inventing its
   own reply format.
 - **The output contract is appended to every rendered prompt by `cgx
-  shadow-fork` itself, never repeated in a definition's body.** One
+shadow-fork` itself, never repeated in a definition's body.** One
   constant string (`cli/shadow_fork.py::_OUTPUT_CONTRACT`) is the reply
   shape every definition shares, so a definition author writes only what
   to review and, when it needs one, its own `verdict`/`intervene`
@@ -412,8 +412,8 @@ review" roadmap line; no part of it ships in 1.0.
   unparseable body is treated as stale, not fresh, so a fork never spends
   money on a snapshot it cannot classify.
 - **`POST /cgx/sessions/{id}/shadow-fork`**, body `{prompt, hook_event, payload,
-  max_tokens?, model?}`, answering `200 {verdict, reason, mutation, usage,
-  paid_write, model, stream_key}` — including for the `ok` degradations
+max_tokens?, model?}`, answering `200 {verdict, reason, mutation, usage,
+paid_write, model, stream_key}` — including for the `ok` degradations
   above, since a non-200 would push fail-open logic into every client.
 - **Fork status is a per-session counter set, kept and exposed the same
   way bump status already is.** `SessionState` gains `fork_attempts`
@@ -432,7 +432,7 @@ review" roadmap line; no part of it ships in 1.0.
   point.** It reads the hook JSON on stdin, renders the named template,
   calls the API and maps the verdict to the output shape of whichever
   event the payload names; it is top-level rather than a `cgx hook
-  <event>` entry point because one implementation serves every event.
+<event>` entry point because one implementation serves every event.
 - **Fail-open, but visible.** Every failure the hook itself hits (a
   missing template, an unreachable daemon, an API error) exits 0 with no
   decision fields, same as the engine's fail-open verdicts, but also
@@ -456,7 +456,7 @@ review" roadmap line; no part of it ships in 1.0.
   `hookSpecificOutput.permissionDecision` (`deny` by default, `ask` or a
   plain `additionalContext` advisory when the template says so);
   `UserPromptSubmit` and `PostToolUse` get `hookSpecificOutput.
-  additionalContext` for `intervene: context` (both events accept it in
+additionalContext` for `intervene: context` (both events accept it in
   their own hook contract) and otherwise the top-level `decision: "block"`
   shape with the reason; `ok` always exits 0 with no output. Neither event
   has an `ask` decision of its own, so `intervene: ask` combined with a
@@ -583,13 +583,13 @@ review" roadmap line; no part of it ships in 1.0.
     format made the old fallback the odd one out, and the file is
     user-authored, so a typo (`event: UserPromtSubmit`) is worth hearing
     about rather than silently never matching. `cgx configure
-    --shadow-fork` still separately turns an absent `event:` into its
+--shadow-fork` still separately turns an absent `event:` into its
     own explicit `InstallError` naming the template, since "not declared
     at all" and "declared wrong" are different failures worth different
     messages.
   - `matcher` (scalar, optional) — unchanged: a free string (e.g.
     `Bash`), never validated here, read only by `cgx configure
-    --shadow-fork` to place the hook entry.
+--shadow-fork` to place the hook entry.
   - `require` (list, optional) — see above; a scalar `require:` value
     is the wrong shape and a parse error, not a single-item list.
   - `intervene` (scalar, optional, defaults to `deny`) — one of `deny`,
@@ -607,6 +607,7 @@ review" roadmap line; no part of it ships in 1.0.
   that the convention has no equivalent for, carried in the same front
   matter block rather than a second block, since the parser has no way
   to tell which section a key belongs to and no reason to care.
+
 - **The body may still contain `{placeholder}` substitutions** —
   unchanged from the `.txt` format: the hook payload's top-level fields
   by name, plus `argument` (the text after a matched `--prefix`), a
@@ -619,7 +620,7 @@ review" roadmap line; no part of it ships in 1.0.
   `.txt` definitions — `cgx shadow-fork` and the packaged templates
   postdate `v1.0.0` — so there is no installed base to carry forward and
   no version of the parser needs to accept both shapes at once. `cgx
-  doctor` gains a check that flags a leftover `<name>.txt` file sitting
+doctor` gains a check that flags a leftover `<name>.txt` file sitting
   in the user's template directory (a stale copy from editing an example
   before this change) as a `warn`, naming the `.md` file it should
   become, since a `--template NAME` that used to resolve there now
@@ -655,13 +656,13 @@ review" roadmap line; no part of it ships in 1.0.
   `intervene:` mode still decides what the parent conversation sees. The
   packaged `rename` template (`intervene: deny`, so the prompt itself is
   always swallowed) pairs with `cgx shadow-fork --template rename --prefix
-  /rename --apply '<user command>'` as a `UserPromptSubmit` hook.
+/rename --apply '<user command>'` as a `UserPromptSubmit` hook.
 - **`cgx configure --shadow-fork NAME[:PREFIX]` wires that pairing into
   `settings.json` itself, repeatable, off unless given.** Each value
   resolves the template the same way `cli/shadow_fork.py::_load_template`
   does (user directory, then the packaged copy), reads its declared
   `event`/`matcher`, and merges one `hooks.<event>` entry running `cgx
-  shadow-fork --template NAME` (plus `--prefix PREFIX` when given) --
+shadow-fork --template NAME` (plus `--prefix PREFIX` when given) --
   `merge_hook`/`remove_hook`/`hook_entry_has_command` take the event (and
   an optional `matcher`, set on the entry for `PreToolUse`/`PostToolUse`)
   instead of hard-coding `UserPromptSubmit`, so the same idempotent
@@ -719,7 +720,7 @@ review" roadmap line; no part of it ships in 1.0.
   as before, never an error. `GET /cgx/config` reports the resolved
   path, whether the file is present, its parse error if any, and each
   effective value with its source (`file`, `env` or `default`); `cgx
-  doctor` parses the same file with the same parser, reports its path and
+doctor` parses the same file with the same parser, reports its path and
   any error, and warns when the daemon resolves a different path than the
   shell running `doctor` does. Templates need none of this: the hook is
   a fresh process per event and reads them from disk each time. Hook
@@ -813,7 +814,7 @@ numbers, deliberately outside `make check`.
   to the subject -- including its hooks and env block -- and neither the
   fake `HOME` nor `--safe-mode` suppresses it.** That file is system-wide
   and not redirectable by environment, so isolating the subject's `HOME`
-  isolates it from the user's *personal* configuration only; it is a
+  isolates it from the user's _personal_ configuration only; it is a
   known limitation, not a gap the harness tries to close.
 - **Haiku is the default subject model; the fork assertions that need a
   thinking-safe model take `--model sonnet`.** A run whose model nobody
@@ -854,4 +855,4 @@ numbers, deliberately outside `make check`.
   fake daemon.** The parts that can be wrong without spending money --
   session-id discovery, transcript parsing, the price table, the budget
   stop, the teardown ordering -- are ordinary `pytest` cases inside `make
-  check`; only the live run needs the API.
+check`; only the live run needs the API.

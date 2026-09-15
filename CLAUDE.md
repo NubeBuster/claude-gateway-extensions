@@ -22,7 +22,7 @@ everything under "Roadmap" is designed into that file before code is written.
   every file they would write and apply it only on consent; `--yes` is the
   sole bypass, and a non-TTY stdin without it writes nothing.
 - One module parses a `/cache` argument, `cli/when.py`; the hook, `cgx on
-  --until` and any new caller go through `parse_when`.
+--until` and any new caller go through `parse_when`.
 - Single runtime dependency: `aiohttp`, plus `tzdata` on Windows (`zoneinfo`
   needs it there). Do not add a second HTTP or web framework; the CLI
   client uses `urllib` deliberately, to stay import-light.

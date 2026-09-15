@@ -26,7 +26,7 @@ a read (see "How it works").
   agent you write). Running without systemd: `cgx serve --port 8787` in any
   process manager or terminal, then `cgx configure --port 8787`. To upgrade
   without dropping a connection, start the new binary with `cgx serve --port
-  8787 --handover`: it binds alongside the running daemon and asks it to
+8787 --handover`: it binds alongside the running daemon and asks it to
   drain and exit once the new one is healthy (Linux/macOS only, needs
   `SO_REUSEPORT`; under systemd, `cgx service restart` already drains in
   place).
@@ -121,15 +121,15 @@ The `/cache` command inside Claude Code is installed as a SKILL.md to provide au
 Bumping is always until a deadline to prevent bankruptcy by forgetfulness.
 The deadline you provide is validated and you are given back the resolved time in local ISO for clarity.
 
-| Format            | Examples                                                        | Meaning                                              |
-| ----------------- | --------------------------------------------------------------- | ---------------------------------------------------- |
-| Relative duration | `2h`, `90m`, `2d 4h`                                            | duration from now (joined `2d4h` also accepted)      |
-| Clock time        | `9PM`, `21:00`, `04:20`                                         | today at that time, or tomorrow if already past      |
+| Format            | Examples                                                        | Meaning                                                                   |
+| ----------------- | --------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| Relative duration | `2h`, `90m`, `2d 4h`                                            | duration from now (joined `2d4h` also accepted)                           |
+| Clock time        | `9PM`, `21:00`, `04:20`                                         | today at that time, or tomorrow if already past                           |
 | Ambiguous time    | `4:20` - is that 4:20PM or AM?                                  | the next 4:20, morning or afternoon; write `04:20`/`16:20` to be explicit |
-| Named time        | `morning`, `noon`, `teatime`, `dinner`, `nighttime`, `midnight` | `09:00`, `12:00`, `16:00`, `18:00`, `22:00`, `00:00` |
-| Relative day      | `tomorrow 10AM`, `today 6PM`                                    | at that time (`tomorrow` alone = 24 hours from now)  |
-| Weekday           | `wed noon`, `fri 9AM`, `mo`, `tues`, `sunday`                   | the weekday's next occurrence, at that time if given |
-| Absolute date     | `2026-12-31 08:00`                                              | local ISO 8601 date and time                         |
+| Named time        | `morning`, `noon`, `teatime`, `dinner`, `nighttime`, `midnight` | `09:00`, `12:00`, `16:00`, `18:00`, `22:00`, `00:00`                      |
+| Relative day      | `tomorrow 10AM`, `today 6PM`                                    | at that time (`tomorrow` alone = 24 hours from now)                       |
+| Weekday           | `wed noon`, `fri 9AM`, `mo`, `tues`, `sunday`                   | the weekday's next occurrence, at that time if given                      |
+| Absolute date     | `2026-12-31 08:00`                                              | local ISO 8601 date and time                                              |
 
 A deadline already in the past, or an unsupported date format such as `4/20/2027`,
 is rejected with an error message.
@@ -286,11 +286,11 @@ deadline you type at `/cache <duration|clock|date>` — or pass to `cgx on
 --until` — is the actual per-session policy; it is sent straight to the
 daemon and does not go through a settings.json variable.
 
-| Variable   | Default                 | What it does                                               |
-| ---------- | ----------------------- | ---------------------------------------------------------- |
-| `CGX_URL` | `http://127.0.0.1:8787` | where the hook, the CLI and the statusline find the daemon; falls back to a loopback `ANTHROPIC_BASE_URL` (which `cgx configure` sets) when unset |
-| `CGX_SHADOW_FORK_QUIET` | unset (false) | suppress `cgx shadow-fork`'s fail-open `systemMessage` when a review is skipped |
-| `CGX_TEMPLATE_DIR` | `${XDG_CONFIG_HOME:-~/.config}/cgx/templates` (POSIX); `%APPDATA%\cgx\templates` (Windows) | where `cgx shadow-fork` looks up a named `.md` definition |
+| Variable                | Default                                                                                    | What it does                                                                                                                                      |
+| ----------------------- | ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `CGX_URL`               | `http://127.0.0.1:8787`                                                                    | where the hook, the CLI and the statusline find the daemon; falls back to a loopback `ANTHROPIC_BASE_URL` (which `cgx configure` sets) when unset |
+| `CGX_SHADOW_FORK_QUIET` | unset (false)                                                                              | suppress `cgx shadow-fork`'s fail-open `systemMessage` when a review is skipped                                                                   |
+| `CGX_TEMPLATE_DIR`      | `${XDG_CONFIG_HOME:-~/.config}/cgx/templates` (POSIX); `%APPDATA%\cgx\templates` (Windows) | where `cgx shadow-fork` looks up a named `.md` definition                                                                                         |
 
 #### Claude Code Hook
 
@@ -330,26 +330,26 @@ unit file, and otherwise you export them yourself before running `cgx
 serve`. To change one later without reinstalling, run `systemctl --user
 edit claude-gateway-extensions.service`.
 
-| Variable                       | Default                                                       | What it does                                                                               |
-| ------------------------------ | ------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| `CGX_HOST`                    | `127.0.0.1`                                                   | local only (`127.0.0.1`) by default; who can reach the daemon                              |
-| `CGX_PORT`                    | `8787`                                                        | which port the daemon listens on                                                           |
-| `CGX_UPSTREAM`                | `https://api.anthropic.com`                                   | where requests are actually forwarded to                                                   |
-| `CGX_STATE_DIR`               | `${XDG_STATE_HOME:-~/.local/state}/claude-gateway-extensions` (POSIX); `%LOCALAPPDATA%\claude-gateway-extensions` (Windows) | where session state and captured requests are saved |
-| `CGX_PERSIST`                 | `true`                                                        | save state to disk so it survives a daemon restart                                         |
-| `CGX_DEFAULT_ENABLED`         | `false`                                                       | turn bumping on automatically for every new session                                        |
-| `CGX_INTERVAL_1H_S`           | `3000`                                                        | how often to refresh the cache when the model gives it a longer lifetime                   |
-| `CGX_INTERVAL_5M_S`           | `240`                                                         | how often to refresh the cache otherwise                                                   |
-| `CGX_MAX_DURATION_S`          | `86400`                                                       | stop refreshing this long after the last real message, when no `/cache` deadline was given |
-| `CGX_ON_CACHE_WRITE`          | `stop`                                                        | `stop` bumping or `continue` when a refresh finds the cache already expired                |
-| `CGX_MAX_STREAMS_PER_SESSION` | `8`                                                           | how many separate conversation branches to remember per session                            |
-| `CGX_LOG_LEVEL`               | `INFO`                                                        | how much detail the daemon logs                                                            |
-| `CGX_DRAIN_TIMEOUT_S`         | `600`                                                         | on shutdown, how long to wait for in-flight requests (incl. SSE streams) before exiting     |
-| `CGX_SHADOW_FORK_MAX_TOKENS`         | `512`                                                         | `max_tokens` cap for a review-fork reply, on top of any thinking budget                    |
-| `CGX_SHADOW_FORK_MAX_PER_MIN`        | `6`                                                            | how many shadow forks a single session may fire in a trailing 60s window                   |
-| `CGX_SHADOW_FORK_THINKING_GUARD`     | `true`                                                         | refuse a fork against a thinking snapshot on a model below its measured thinking-preservation minimum, instead of paying a full cold write |
-| `CGX_SHADOW_FORK_MODEL`              | unset                                                          | send shadow forks to this model instead of the snapshot's own; forfeits the cached prefix, since Anthropic namespaces the cache per model |
-| `CGX_CONFIG_FILE`             | `${XDG_CONFIG_HOME:-~/.config}/cgx/config.toml` (POSIX); `%APPDATA%\cgx\config.toml` (Windows) | the hot-reloaded Shadow Fork tuning file, see below |
+| Variable                         | Default                                                                                                                     | What it does                                                                                                                               |
+| -------------------------------- | --------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `CGX_HOST`                       | `127.0.0.1`                                                                                                                 | local only (`127.0.0.1`) by default; who can reach the daemon                                                                              |
+| `CGX_PORT`                       | `8787`                                                                                                                      | which port the daemon listens on                                                                                                           |
+| `CGX_UPSTREAM`                   | `https://api.anthropic.com`                                                                                                 | where requests are actually forwarded to                                                                                                   |
+| `CGX_STATE_DIR`                  | `${XDG_STATE_HOME:-~/.local/state}/claude-gateway-extensions` (POSIX); `%LOCALAPPDATA%\claude-gateway-extensions` (Windows) | where session state and captured requests are saved                                                                                        |
+| `CGX_PERSIST`                    | `true`                                                                                                                      | save state to disk so it survives a daemon restart                                                                                         |
+| `CGX_DEFAULT_ENABLED`            | `false`                                                                                                                     | turn bumping on automatically for every new session                                                                                        |
+| `CGX_INTERVAL_1H_S`              | `3000`                                                                                                                      | how often to refresh the cache when the model gives it a longer lifetime                                                                   |
+| `CGX_INTERVAL_5M_S`              | `240`                                                                                                                       | how often to refresh the cache otherwise                                                                                                   |
+| `CGX_MAX_DURATION_S`             | `86400`                                                                                                                     | stop refreshing this long after the last real message, when no `/cache` deadline was given                                                 |
+| `CGX_ON_CACHE_WRITE`             | `stop`                                                                                                                      | `stop` bumping or `continue` when a refresh finds the cache already expired                                                                |
+| `CGX_MAX_STREAMS_PER_SESSION`    | `8`                                                                                                                         | how many separate conversation branches to remember per session                                                                            |
+| `CGX_LOG_LEVEL`                  | `INFO`                                                                                                                      | how much detail the daemon logs                                                                                                            |
+| `CGX_DRAIN_TIMEOUT_S`            | `600`                                                                                                                       | on shutdown, how long to wait for in-flight requests (incl. SSE streams) before exiting                                                    |
+| `CGX_SHADOW_FORK_MAX_TOKENS`     | `512`                                                                                                                       | `max_tokens` cap for a review-fork reply, on top of any thinking budget                                                                    |
+| `CGX_SHADOW_FORK_MAX_PER_MIN`    | `6`                                                                                                                         | how many shadow forks a single session may fire in a trailing 60s window                                                                   |
+| `CGX_SHADOW_FORK_THINKING_GUARD` | `true`                                                                                                                      | refuse a fork against a thinking snapshot on a model below its measured thinking-preservation minimum, instead of paying a full cold write |
+| `CGX_SHADOW_FORK_MODEL`          | unset                                                                                                                       | send shadow forks to this model instead of the snapshot's own; forfeits the cached prefix, since Anthropic namespaces the cache per model  |
+| `CGX_CONFIG_FILE`                | `${XDG_CONFIG_HOME:-~/.config}/cgx/config.toml` (POSIX); `%APPDATA%\cgx\config.toml` (Windows)                              | the hot-reloaded Shadow Fork tuning file, see below                                                                                        |
 
 Every variable in this table is read once when `cgx serve` starts and
 frozen for that run; changing one needs a daemon restart. The hook-side
@@ -450,11 +450,12 @@ curl -s -X POST "http://127.0.0.1:8787/cgx/sessions/$SESSION_ID/bump"
 
 Shadow Fork reviews a hook event with a one-shot fork of the session's own
 cached context, then maps the verdict to that event's hook output:
-  - `OK` - the session proceeds and the main session is unaffected entirely.
-  - `reject, +reason injected into additionalContext` - **only** if an intervention is decided for does this provide compounding overhead (context growth, disruption)
-  - `mutate tooluse input arguments` & `optional info injected into additionalContext` - auto correct itself with its own model, context, and an entire one-shot prompt that has no persistent overhead. **This can replace many rejecting guardrail hooks with steering and auto correction by a classifier step**
-  - `run some script conditioned on the agent's own decision` - the decision is forgotten and the main session/agent is none the wiser
-    This allows for [agent-based-hooks](https://code.claude.com/docs/en/hooks#agent-based-hooks) but with the parent context, parent cache hit, and thus low overhead single-shot micro-fork type of agent based hook implementations. Making agent based hooks possibly viable, in contrast to the native implementation.
+
+- `OK` - the session proceeds and the main session is unaffected entirely.
+- `reject, +reason injected into additionalContext` - **only** if an intervention is decided for does this provide compounding overhead (context growth, disruption)
+- `mutate tooluse input arguments` & `optional info injected into additionalContext` - auto correct itself with its own model, context, and an entire one-shot prompt that has no persistent overhead. **This can replace many rejecting guardrail hooks with steering and auto correction by a classifier step**
+- `run some script conditioned on the agent's own decision` - the decision is forgotten and the main session/agent is none the wiser
+  This allows for [agent-based-hooks](https://code.claude.com/docs/en/hooks#agent-based-hooks) but with the parent context, parent cache hit, and thus low overhead single-shot micro-fork type of agent based hook implementations. Making agent based hooks possibly viable, in contrast to the native implementation.
 
 ## Development
 

@@ -18,14 +18,19 @@ Liveness and a quick summary.
 Response `200`:
 
 ```json
-{"ok": true, "version": "1.0.0", "upstream": "https://api.anthropic.com", "sessions": 2}
+{
+  "ok": true,
+  "version": "1.0.0",
+  "upstream": "https://api.anthropic.com",
+  "sessions": 2
+}
 ```
 
 Response `503`, once a shutdown signal has put the daemon into its drain
 window (see "Graceful shutdown" below):
 
 ```json
-{"status": "draining"}
+{ "status": "draining" }
 ```
 
 A brand-new connection is refused outright once draining starts (the
@@ -40,18 +45,22 @@ four Shadow Fork settings' effective value and source. See `docs/DESIGN.md`'s
 "Shadow Fork tuning is hot reloaded..." decision for the full design; this
 section documents only the response shape. The file is re-read here exactly
 as it is before a fork (its `stat` is checked and, if changed, it is
-re-parsed), so this always reports what the *next* fork would use.
+re-parsed), so this always reports what the _next_ fork would use.
 
 Response `200`:
 
 ```json
-{"path": "/home/user/.config/cgx/config.toml", "present": true,
+{
+  "path": "/home/user/.config/cgx/config.toml",
+  "present": true,
   "parse_error": null,
   "shadow_fork": {
-    "max_tokens": {"value": 768, "source": "file"},
-    "max_per_min": {"value": 6, "source": "default"},
-    "thinking_guard": {"value": true, "source": "env"},
-    "model": {"value": null, "source": "default"}}}
+    "max_tokens": { "value": 768, "source": "file" },
+    "max_per_min": { "value": 6, "source": "default" },
+    "thinking_guard": { "value": true, "source": "env" },
+    "model": { "value": null, "source": "default" }
+  }
+}
 ```
 
 `path` is this daemon's resolved `CGX_CONFIG_FILE` (see the README's
@@ -60,7 +69,7 @@ on disk as of this check. `parse_error` is a human-readable message naming
 what was wrong with the file the last time it was loaded (syntax error,
 unknown key, or a value of the wrong type), or `null` when the file is
 absent or the last load succeeded -- a present-but-invalid file still
-reports its *previous* good values below (or the environment's, if none
+reports its _previous_ good values below (or the environment's, if none
 were ever loaded), per the "applies atomically or not at all" rule.
 
 Each of the four `shadow_fork` entries has `value` (the effective value that
@@ -78,20 +87,47 @@ Status for every session the daemon currently knows about.
 Response `200`:
 
 ```json
-{"sessions": [{"session_id": "abc123", "enabled": true, "interval_s": null,
-  "max_duration_s": null, "until": null, "last_request_at": 1700000000.0,
-  "last_bump_at": 1700003000.0, "bump_count": 3, "replays_seen": 0,
-  "stopped_reason": null,
-  "next_bump_at": 1700006000.0, "cache_expires_at": 1700003300.0,
-  "streams": 2, "last_result": null, "rewarm": false, "rewarm_write": null,
-  "breakpoints": [{"at": "system[0]", "ttl": "1h"},
-  {"at": "system[1]", "ttl": "1h"}, {"at": "system[2]", "ttl": "1h"}],
-  "effective_ttl": "1h",
-  "fork_attempts": 4, "forks_sent": 3, "last_fork_at": 1700003100.0,
-  "last_fork_reason": "ok",
-  "formatted": {"ttl_countdown": "04:37", "expires_at": "20:18",
-  "next_bump_countdown": "49:37", "next_bump_at": "21:06",
-  "rewarm_write": null, "cache": "1h x3", "fork": "3/4 last=ok"}}]}
+{
+  "sessions": [
+    {
+      "session_id": "abc123",
+      "enabled": true,
+      "interval_s": null,
+      "max_duration_s": null,
+      "until": null,
+      "last_request_at": 1700000000.0,
+      "last_bump_at": 1700003000.0,
+      "bump_count": 3,
+      "replays_seen": 0,
+      "stopped_reason": null,
+      "next_bump_at": 1700006000.0,
+      "cache_expires_at": 1700003300.0,
+      "streams": 2,
+      "last_result": null,
+      "rewarm": false,
+      "rewarm_write": null,
+      "breakpoints": [
+        { "at": "system[0]", "ttl": "1h" },
+        { "at": "system[1]", "ttl": "1h" },
+        { "at": "system[2]", "ttl": "1h" }
+      ],
+      "effective_ttl": "1h",
+      "fork_attempts": 4,
+      "forks_sent": 3,
+      "last_fork_at": 1700003100.0,
+      "last_fork_reason": "ok",
+      "formatted": {
+        "ttl_countdown": "04:37",
+        "expires_at": "20:18",
+        "next_bump_countdown": "49:37",
+        "next_bump_at": "21:06",
+        "rewarm_write": null,
+        "cache": "1h x3",
+        "fork": "3/4 last=ok"
+      }
+    }
+  ]
+}
 ```
 
 ## GET /cgx/sessions/{id}
@@ -105,7 +141,7 @@ Status codes: `200` on success, `400` on an invalid id, `404` with
 selected snapshot, in prompt order (`tools`, then `system`, then
 `messages`), as `{"at": "<position>", "ttl": "1h"|"5m"}`; `<position>` is
 `tools[i]`, `system[i]` or `messages[i].content[j]`. `effective_ttl` is the
-*shortest* TTL among them (`"5m"` if `breakpoints` is empty, Anthropic's
+_shortest_ TTL among them (`"5m"` if `breakpoints` is empty, Anthropic's
 default ephemeral cache) — see the "Interval derived from the snapshot's
 shortest breakpoint TTL" decision in `docs/DESIGN.md`: a body mixing `1h`
 and `5m` breakpoints expires its shortest-lived entry well before an
@@ -157,8 +193,15 @@ write's usage and timestamp permanently, even after the flag that let it
 through is spent:
 
 ```json
-{"at": 1700003000.0, "usage": {"input_tokens": 1, "output_tokens": 0,
-  "cache_read_input_tokens": 0, "cache_creation_input_tokens": 4096}}
+{
+  "at": 1700003000.0,
+  "usage": {
+    "input_tokens": 1,
+    "output_tokens": 0,
+    "cache_read_input_tokens": 0,
+    "cache_creation_input_tokens": 4096
+  }
+}
 ```
 
 ## PUT /cgx/sessions/{id}
@@ -169,8 +212,13 @@ or max duration. Creates the session's state if it did not already exist.
 Request body:
 
 ```json
-{"enabled": true, "interval_s": 300, "max_duration_s": 86400, "until": 1700006000,
-  "rewarm": false}
+{
+  "enabled": true,
+  "interval_s": 300,
+  "max_duration_s": 86400,
+  "until": 1700006000,
+  "rewarm": false
+}
 ```
 
 `enabled` is required and must be a boolean. `interval_s` and
@@ -237,10 +285,19 @@ retried and does not stop the session.
 Response body is a `BumpResult`:
 
 ```json
-{"outcome": "ok", "status": 200, "usage": {"input_tokens": 10,
-  "output_tokens": 0, "cache_read_input_tokens": 4096,
-  "cache_creation_input_tokens": 0}, "detail": "", "stream_key": "ab12...",
-  "model": "claude-opus-4"}
+{
+  "outcome": "ok",
+  "status": 200,
+  "usage": {
+    "input_tokens": 10,
+    "output_tokens": 0,
+    "cache_read_input_tokens": 4096,
+    "cache_creation_input_tokens": 0
+  },
+  "detail": "",
+  "stream_key": "ab12...",
+  "model": "claude-opus-4"
+}
 ```
 
 `outcome` is one of `ok`, `cache_write`, `unauthorized`, `rejected`,
@@ -275,9 +332,13 @@ for the design; this section documents only the contract a client sees.
 Request body:
 
 ```json
-{"prompt": "Classify the command below...", "hook_event": "PreToolUse",
-  "payload": {"tool_name": "Bash", "tool_input": {"command": "rm -rf /"}},
-  "max_tokens": 512, "model": "claude-opus-4-5-20251101"}
+{
+  "prompt": "Classify the command below...",
+  "hook_event": "PreToolUse",
+  "payload": { "tool_name": "Bash", "tool_input": { "command": "rm -rf /" } },
+  "max_tokens": 512,
+  "model": "claude-opus-4-5-20251101"
+}
 ```
 
 `prompt` is required and must be a string: it becomes the fork's one
@@ -305,11 +366,21 @@ the cache read and pays a full `cache_creation` write.
 Response `200`:
 
 ```json
-{"verdict": "ok", "reason": "fine", "mutation": null,
-  "usage": {"input_tokens": 3, "output_tokens": 12,
-  "cache_read_input_tokens": 4096, "cache_creation_input_tokens": 0},
-  "paid_write": false, "model": "claude-opus-4-5-20251101",
-  "stream_key": "a1b2c3...", "subagent_snapshot": false}
+{
+  "verdict": "ok",
+  "reason": "fine",
+  "mutation": null,
+  "usage": {
+    "input_tokens": 3,
+    "output_tokens": 12,
+    "cache_read_input_tokens": 4096,
+    "cache_creation_input_tokens": 0
+  },
+  "paid_write": false,
+  "model": "claude-opus-4-5-20251101",
+  "stream_key": "a1b2c3...",
+  "subagent_snapshot": false
+}
 ```
 
 `verdict` is `"ok"` or `"intervene"`. `reason` is always a string.
@@ -326,7 +397,7 @@ the model the fork was actually sent to (the snapshot's own by default,
 or the effective override) and `stream_key` is the selected snapshot's
 stream key; both are `null` for `no_snapshot`, the only outcome reached
 before a snapshot is selected. `subagent_snapshot` is `true` when no
-snapshot known *not* to be subagent traffic existed for the session, so
+snapshot known _not_ to be subagent traffic existed for the session, so
 the fork fell back to selecting over every snapshot including subagent
 ones -- flagged, never refused, since a fork is one-shot spend; `false`
 otherwise, including for `no_snapshot`.

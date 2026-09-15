@@ -3,10 +3,10 @@
 ## Unreleased
 
 - Refactor: the Shadow Fork JSON output contract (`{"verdict":
-  "ok"|"intervene", "reason", "mutation"}` plus the "answer with JSON
+"ok"|"intervene", "reason", "mutation"}` plus the "answer with JSON
   only, never call a tool" instruction) is now appended to every rendered
   prompt by `cgx shadow-fork` itself (`cli/shadow_fork.py::
-  _OUTPUT_CONTRACT`), instead of being duplicated verbatim in each of the
+_OUTPUT_CONTRACT`), instead of being duplicated verbatim in each of the
   four packaged `.md` definitions. A definition's body now states only
   what to review and, when it needs one, its own `verdict`/`intervene`
   constraint.
@@ -14,9 +14,9 @@
   `PostToolUse`, not just `PreToolUse` -- it emits
   `hookSpecificOutput.additionalContext` (both events accept it in their
   own hook contract) instead of always forcing the top-level `decision:
-  "block"` shape regardless of the template's `intervene:` mode.
+"block"` shape regardless of the template's `intervene:` mode.
   `intervene: ask` combined with a definition's own declared `event:
-  UserPromptSubmit`/`PostToolUse` is now a parse error (`DefinitionError`)
+UserPromptSubmit`/`PostToolUse` is now a parse error (`DefinitionError`)
   instead of silently degrading to `deny` at hook time, since neither
   event has an `ask` decision of its own; a definition with no declared
   `event:` still accepts `ask` and behaves as `deny` at runtime for those
@@ -25,14 +25,14 @@
   `rate_limited`, `snapshot_stale`, `unparseable_verdict`, `fork_failed`,
   `tool_use_reply`, `thinking_unsafe_model`, `thinking_model_unknown`)
   now emit the same visible `{"systemMessage": "cgx shadow-fork skipped:
-  <reason>"}` every other fail-open path already used, instead of exiting
+<reason>"}` every other fail-open path already used, instead of exiting
   silently indistinguishable from a genuine `ok` verdict from the
   reviewer model. `CGX_SHADOW_FORK_QUIET=1` still suppresses it.
 - Feat: the scheduler now keeps per-session Shadow Fork counters
   (`fork_attempts`, `forks_sent`, `last_fork_at`, `last_fork_reason` --
   the last one always a fixed reason code or bare verdict, never the
   model's free-text reason). Exposed as new fields on `GET
-  /cgx/sessions[/{id}]` and as a compact `formatted.fork` summary,
+/cgx/sessions[/{id}]` and as a compact `formatted.fork` summary,
   rendered by `cgx status` the same way `breakpoints`/`effective_ttl`
   already are.
 
@@ -54,7 +54,7 @@
   edit takes effect without a `cgx serve` restart -- the file wins over the
   environment per key, an invalid file keeps the last good values and logs
   one WARNING, and a missing file is the environment as before. New `GET
-  /cgx/config` reports the resolved path, load state and each value's
+/cgx/config` reports the resolved path, load state and each value's
   source; `cgx doctor` parses the same file with the same parser and warns
   if the daemon resolves a different path than the shell running it does.
   See the "Shadow Fork tuning is hot reloaded..." decision in
@@ -82,13 +82,13 @@
   described a behavior the code never implemented.
 - Docs: documented that `CGX_SHADOW_FORK_MAX_TOKENS`, `CGX_SHADOW_FORK_MAX_PER_MIN`,
   `CGX_SHADOW_FORK_THINKING_GUARD` and `CGX_SHADOW_FORK_MODEL` are read once at `cgx
-  serve` startup and frozen into that run's scheduler, so changing one
+serve` startup and frozen into that run's scheduler, so changing one
   needs a daemon restart -- unlike the hook-side `CGX_SHADOW_FORK_QUIET`
   and `CGX_TEMPLATE_DIR`, which `cgx shadow-fork` re-reads on every
   invocation. README's Claude Code Settings table now also lists those
   two hook-side variables with their real defaults.
 - Fix: the bump interval and `cache_expires_at` are now derived from a
-  snapshot's *shortest* `cache_control` breakpoint TTL, not "any 1h
+  snapshot's _shortest_ `cache_control` breakpoint TTL, not "any 1h
   breakpoint present". A body can mix `1h` and `5m` breakpoints (`1h` ones
   must precede `5m` ones), and the tail entry a bump has to keep alive
   expires at the shortest one -- scheduling from the longest paid a
@@ -129,7 +129,7 @@
   `/cache <deadline> rewarm`) tolerates exactly one `cache_write` bump
   result for that session instead of stopping it: the write is recorded as
   `rewarm_write` (usage and timestamp, surfaced in `formatted` and `cgx
-  status`), the flag is consumed, and bumping resumes normally. Every
+status`), the flag is consumed, and bumping resumes normally. Every
   session enabled without the flag keeps today's fail-closed default. See
   the "Rewarm" decision in `docs/DESIGN.md`.
 - Fix: `cgx service install`'s systemd unit no longer bakes in
@@ -148,7 +148,7 @@
 - Live regression harness: `make live` drives one real interactive Claude
   Code session in a detached tmux session through a real `cgx serve` to
   the real API, and asserts what the offline suite structurally cannot --
-  that a bump and a shadow fork are cache *reads* with
+  that a bump and a shadow fork are cache _reads_ with
   `cache_creation_input_tokens: 0`, that a fork on a Haiku model is
   refused unsent as `thinking_unsafe_model`, that the reviewed session's
   next turn is unaffected, and that the daemon exits cleanly through its
@@ -190,10 +190,10 @@
   prompt prefix on the machine, with `CGX_SHADOW_FORK_MAX_PER_MIN` dropping
   whichever reviews landed after the noise rather than the noise itself.
   The packaged `task-assignment` template now declares `require:
-  tool_input.owner`.
+tool_input.owner`.
 - `cgx configure`/`cgx unconfigure` gained a repeatable `--shadow-fork
-  NAME[:PREFIX]` flag (off unless given), wiring a `cgx shadow-fork
-  --template NAME` hook into `settings.json` using the named template's
+NAME[:PREFIX]` flag (off unless given), wiring a `cgx shadow-fork
+--template NAME` hook into `settings.json` using the named template's
   own `event`/`matcher` front matter to place it, plus `--prefix PREFIX`
   on a `UserPromptSubmit` template. `merge_hook`/`remove_hook`/
   `hook_entry_has_command` now take the event (and an optional `matcher`)
@@ -227,7 +227,7 @@
 - Shadow Fork: a fork's snapshot selection now excludes known
   subagent traffic before applying the usual largest-prefix rule, falling
   back to selecting over every snapshot (flagged `subagent_snapshot:
-  true` on the response) only when no snapshot is known not to be a
+true` on the response) only when no snapshot is known not to be a
   subagent's. Subagent-ness is read from the `cc_is_subagent=true` marker
   in the `system[0]` attribution block Claude Code prepends (new
   `core/snapshot.py::body_is_subagent`, three-valued so an unparseable or
@@ -297,14 +297,14 @@
   stale.
 - Shadow Fork: a new side channel that asks one question about a
   live session without that session learning it was asked. `POST
-  /cgx/sessions/{id}/shadow-fork` replays the session's captured snapshot with a
+/cgx/sessions/{id}/shadow-fork` replays the session's captured snapshot with a
   single review turn appended, parses a strict-JSON verdict
   (`{"verdict": "ok"|"intervene", "reason", "mutation"}`) out of the
   reply and discards the twin, so the parent pays a cache read plus the
   twin's output tokens and never sees the exchange. Fail-open
   throughout: every degradation (`no_snapshot`, `rate_limited`,
   `unparseable_verdict`, `fork_failed`) answers `200` with `verdict:
-  "ok"`. New `CGX_SHADOW_FORK_MAX_TOKENS` (default 512) and
+"ok"`. New `CGX_SHADOW_FORK_MAX_TOKENS` (default 512) and
   `CGX_SHADOW_FORK_MAX_PER_MIN` (default 6). A fork never touches the session's
   bump state.
 - Shadow Fork: new `cgx shadow-fork --template NAME`, the
@@ -340,9 +340,9 @@
   durations (`2h`, `2d 4h`), clock times (`9PM`, `21:00`, `noon`),
   `today`/`tomorrow`, and ISO dates, all parsed timezone-aware in the
   user's local zone (`cli/when.py`). The control API's `PUT
-  /cgx/sessions/{id}` gained `until` (absolute epoch seconds), which
+/cgx/sessions/{id}` gained `until` (absolute epoch seconds), which
   replaces the max-duration stop for that session (`stopped_reason:
-  "deadline"`); `cgx on --until` and the statusline/`cgx status` deadline
+"deadline"`); `cgx on --until` and the statusline/`cgx status` deadline
   display reuse the same parser and field. A bare number other than `0` is
   rejected rather than guessed at, and disabling a session clears its
   deadline, so re-enabling without one falls back to the max duration.
@@ -378,8 +378,7 @@
   continues, with a final summary of applied/skipped paths (exit 0 if
   anything applied, 1 if everything was rejected). `--yes`/`-y` applies
   every change without prompting; `--dry-run` still only prints diffs.
-  Non-interactive stdin without `--yes` prints the diffs and aborts (exit
-  2) rather than silently doing nothing or silently writing. Gained
+  Non-interactive stdin without `--yes` prints the diffs and aborts (exit 2) rather than silently doing nothing or silently writing. Gained
   `--scope local` (`.claude/settings.local.json`, sharing `project`'s
   skill directory); `--scope managed` is deliberately unsupported.
   `cgx service install`/`uninstall` go through the same diff-and-confirm
@@ -398,8 +397,8 @@
   resolution now honours `USERPROFILE` when `HOME` is unset. Snapshot
   file/directory permissions (0600/0700) are best-effort off POSIX,
   inheriting the user profile's ACLs on Windows instead. `cgx service
-  <install|uninstall|status>` now exits 1 with a pointer to `cgx serve
-  --port <N>` plus `cgx configure --port <N>` on any non-Linux platform,
+<install|uninstall|status>` now exits 1 with a pointer to `cgx serve
+--port <N>` plus `cgx configure --port <N>` on any non-Linux platform,
   since it manages a systemd user unit; `cgx doctor` skips the systemd
   check there with a one-line note instead of a permanent warning. CI
   gained a `windows-latest` job running `ruff check`, `pyright` and
