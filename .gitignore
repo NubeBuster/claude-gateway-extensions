@@ -20,4 +20,6 @@ build/
 .ruff_cache/
 .mypy_cache/
 .pyright/
-CLAUDE.local.md
+
+*.local.md
+*.local
