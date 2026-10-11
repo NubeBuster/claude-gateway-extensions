@@ -4,12 +4,17 @@ This file records the decisions behind claude-gateway-extensions and why they
 were made. It is not a description of the code; the code, `README.md` and
 `docs/API.md` own that.
 
-## Scope of 1.0
+## Scope of 1.x
 
-1.0 does cache bumping only: capture the last `/v1/messages` request per
+1.0 did cache bumping only: capture the last `/v1/messages` request per
 Claude Code session, replay it with `max_tokens: 0` before the prompt cache
-TTL lapses, stop on the documented conditions. Everything under "Roadmap" is
-deliberately absent from this release, not ruled out for the project.
+TTL lapses, stop on the documented conditions.
+
+1.1 adds Shadow Fork (see its own section below), because it reuses the
+same captured snapshot and the same cache-read economics as bumping. It does
+not need any capability outside the gateway and a hook. Everything under
+"Roadmap" is deliberately absent from these releases, not ruled out for the
+project.
 
 ## Decisions
 
@@ -224,6 +229,8 @@ Candidate features for later releases, in no particular order:
 - PTY input interception: drive the gateway from the terminal instead of the
   control API.
 - Control-API authentication: a credential in addition to the loopback bind.
+- Windows as a supported platform: path defaults and `%APPDATA%` lookups
+  exist, but nothing beyond the test suite exercises Windows yet.
 
 Each of these enters through an addition to this document before any code,
 and must preserve the invariants that make the daemon safe to leave in the

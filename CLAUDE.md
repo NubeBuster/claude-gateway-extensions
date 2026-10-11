@@ -2,7 +2,7 @@
 
 ## Scope
 
-The shipped scope is whatever `docs/DESIGN.md` "Scope of 1.0" says it is;
+The shipped scope is whatever `docs/DESIGN.md` "Scope of 1.x" says it is;
 everything under "Roadmap" is designed into that file before code is written.
 
 ## Invariants

@@ -13,8 +13,9 @@ normal cache-read pricing per bump (often free on a subscription); it stops
 bumping a session the moment a bump would pay a full cache write instead of
 a read (see "How it works").
 
-0.1 ships cache bumping only; other features are on the roadmap in
-`docs/DESIGN.md`.
+It also ships Shadow Fork (see below), which reviews a hook event with a
+one-shot fork of the session's cached context. Other features are on the
+roadmap in `docs/DESIGN.md`.
 
 ## Requirements
 
@@ -440,22 +441,27 @@ curl -s -X POST "http://127.0.0.1:8787/cgx/sessions/$SESSION_ID/bump"
   `SKILL.md`; `cgx service uninstall` disables and removes the systemd
   unit.
 
-## Current planned `TODOs`
-
-- Hot reload: pick up a definition's changes without a `cgx serve` restart
-  -- currently frozen at daemon start.
-- Ensure support for Windows.
-- Prune the test bloat that Opus 5 creates. Add preventative instructions
-- Add memory md files maintenance instructions to ensure quality
+## Shadow Fork
 
 Shadow Fork reviews a hook event with a one-shot fork of the session's own
 cached context, then maps the verdict to that event's hook output:
 
-- `OK` - the session proceeds and the main session is unaffected entirely.
-- `reject, +reason injected into additionalContext` - **only** if an intervention is decided for does this provide compounding overhead (context growth, disruption)
-- `mutate tooluse input arguments` & `optional info injected into additionalContext` - auto correct itself with its own model, context, and an entire one-shot prompt that has no persistent overhead. **This can replace many rejecting guardrail hooks with steering and auto correction by a classifier step**
-- `run some script conditioned on the agent's own decision` - the decision is forgotten and the main session/agent is none the wiser
-  This allows for [agent-based-hooks](https://code.claude.com/docs/en/hooks#agent-based-hooks) but with the parent context, parent cache hit, and thus low overhead single-shot micro-fork type of agent based hook implementations. Making agent based hooks possibly viable, in contrast to the native implementation.
+- `ok`: the session proceeds, unaffected.
+- `intervene` with a reason: the reason is injected as `additionalContext`
+  or as a block. This is the only outcome that costs the main session
+  anything (context growth, an interruption).
+- `intervene` with a mutation: the tool call's input arguments are
+  corrected in place, optionally with a note in `additionalContext`. The
+  session corrects itself with its own model and context in a one-shot
+  prompt that leaves nothing behind, so a classifier step can replace many
+  blocking guardrail hooks with steering.
+- A script conditioned on the verdict: the decision is acted on and then
+  forgotten, and the main session never learns of it.
+
+This works like
+[agent-based hooks](https://code.claude.com/docs/en/hooks#agent-based-hooks),
+but the fork carries the parent's context and reads the parent's cache. A
+single-shot review is therefore cheap enough to run on every matching event.
 
 ## Development
 

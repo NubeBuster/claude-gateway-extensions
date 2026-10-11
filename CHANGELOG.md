@@ -1,7 +1,21 @@
 # Changelog
 
-## Unreleased
+## 1.1.0 - 2026-10-11
 
+- Feat: `cgx status` (without `--json`) prints a git-log tree view of the
+  daemon's running commit: up to three commits before it, the running
+  commit marked `[RUNNING]` with its behind-count and uptime, and up to
+  five commits toward the branch tip. It is omitted silently when either
+  the daemon or the `cgx` client has no git history to resolve.
+  `GET /cgx/health` now reports `started_at`, `started_local`,
+  `uptime_seconds`, and `commit`/`branch`/`dirty` when available.
+- Feat: the packaged Shadow Fork definitions (`task-assignment`,
+  `permission-classifier`, `btw`, `rename`) are rewritten around one
+  prompt skeleton: frame the event, present the facts, state the
+  criteria in both directions, name what to ignore, approve on doubt,
+  and cap the displayed reason. A fifth definition, `task-followup`
+  (`PreToolUse` on `SendMessage`), reviews a follow-up message to a
+  running teammate.
 - Refactor: the Shadow Fork JSON output contract (`{"verdict":
 "ok"|"intervene", "reason", "mutation"}` plus the "answer with JSON
   only, never call a tool" instruction) is now appended to every rendered
