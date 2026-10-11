@@ -14,6 +14,7 @@ started and no socket is opened.
 from __future__ import annotations
 
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -35,6 +36,10 @@ from live.transcript import (
     existing_transcripts,
     project_dir,
     project_slug,
+)
+
+pytestmark = pytest.mark.skipif(
+    sys.platform == "win32", reason="the live harness drives tmux and is POSIX-only"
 )
 
 
