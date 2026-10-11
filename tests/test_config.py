@@ -289,8 +289,11 @@ def test_config_file_watcher_reloads_after_mtime_change(tmp_path: Path) -> None:
     # Same content re-read without a stat change must not re-parse -- but
     # since a passing test can't observe "did not re-parse" directly, the
     # meaningful assertion is the one below: a real edit *does* take effect.
-    os.utime(path, (os.stat(path).st_mtime + 5, os.stat(path).st_mtime + 5))
+    # Push the mtime forward after the write: a same-size rewrite within one
+    # coarse filesystem clock tick (Windows) would otherwise keep its stat key.
+    mtime = os.stat(path).st_mtime + 5
     path.write_text("[shadow_fork]\nmax_tokens = 200\n")
+    os.utime(path, (mtime, mtime))
     assert watcher.current().settings.max_tokens == 200
 
 

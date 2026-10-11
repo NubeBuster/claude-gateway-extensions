@@ -997,9 +997,11 @@ async def test_fork_now_picks_up_a_config_file_edit_without_a_new_scheduler(
     await scheduler.fork_now("sess-1", "review", {}, None)
     assert json.loads(upstream.calls[0][3])["max_tokens"] == 100
 
+    # Push the mtime forward after the write: a same-size rewrite within one
+    # coarse filesystem clock tick (Windows) would otherwise keep its stat key.
     mtime = os.stat(config_file).st_mtime + 5
-    os.utime(config_file, (mtime, mtime))
     config_file.write_text("[shadow_fork]\nmax_tokens = 200\n")
+    os.utime(config_file, (mtime, mtime))
 
     await scheduler.fork_now("sess-1", "review", {}, None)
     assert json.loads(upstream.calls[1][3])["max_tokens"] == 200
